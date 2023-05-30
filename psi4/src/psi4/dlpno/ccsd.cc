@@ -1608,12 +1608,14 @@ double DLPNOCCSD::compute_energy() {
     timer_on("CC Integrals");
     estimate_memory();
     compute_cc_integrals();
+    /*
     qij_.clear();
     qia_.clear();
     if (virtual_storage_ != DIRECT) {
         qab_.clear();
         qab_svd_.clear();
     }
+    */
     timer_off("CC Integrals");
 
     timer_on("LCCSD");
