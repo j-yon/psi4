@@ -363,9 +363,14 @@ class DLPNOCCSD : public DLPNOBase {
 class DLPNOCCSD_T : public DLPNOCCSD {
    private:
     // Sparsity information
+    SparseMap lmotriplet_to_ribfs_; ///< which ribfs are on an LMO triplet (i, j, k)
+    SparseMap lmotriplet_to_lmos_; ///< which LMOs l form a significant pair with (i, j, or k)
     SparseMap lmotriplet_to_paos_; ///< which PAOs span the virtual space of a triplet of LMOs?
     std::unordered_map<int, int> i_j_k_to_ijk_; ///< LMO indices (i, j, k) to significant LMO triplet index (ijk), -1 if not found
     std::vector<std::tuple<int, int, int>> ijk_to_i_j_k_; ///< LMO triplet index (ijk) to LMO index tuple (i, j, k)
+
+    std::vector<std::vector<std::vector<int>>> lmotriplet_lmo_to_riatom_lmo_;
+    std::vector<std::vector<std::vector<int>>> lmotriplet_pao_to_riatom_pao_;
 
     /// triplet natural orbitals (TNOs)
     std::vector<SharedMatrix> W_iajbkc_; ///< W3 intermediate for each lmo triplet
