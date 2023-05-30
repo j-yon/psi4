@@ -374,11 +374,14 @@ class DLPNOCCSD_T : public DLPNOCCSD {
 
     /// triplet natural orbitals (TNOs)
     std::vector<SharedMatrix> W_iajbkc_; ///< W3 intermediate for each lmo triplet
+    std::vector<SharedMatrix> V_iajbkc_; ///< V3 intermeidate for each lmo triplet
     std::vector<SharedMatrix> T_iajbkc_; ///< Triples amplitude for each lmo triplet
     std::vector<SharedMatrix> X_tno_; ///< global PAO -> canonical TNO transforms
     std::vector<SharedVector> e_tno_; ///< TNO orbital energies
     std::vector<SharedMatrix> denom_ijk_; /// (eps[a_ijk] + eps[b_ijk] + eps[c_ijk] - F[i,i] - F[j,j] - F[k,k])
     std::vector<int> n_tno_; ///<number of tnos per triplet domain
+
+    /// => TNO overlap matrices <= ///
     std::vector<SharedMatrix> S_ijk_ii_; ///< tno/diagonal pno overlaps
     std::vector<SharedMatrix> S_ijk_ij_; ///< tno/pno overlaps
     std::vector<std::vector<SharedMatrix>> S_ijk_il_; ///< tno/pno overlaps
@@ -397,6 +400,8 @@ class DLPNOCCSD_T : public DLPNOCCSD {
 
     /// compute W3 intermediate (for DLPNO-(T))
     void compute_W_iajbkc();
+    /// compute V3 intermediate (for DLPNO-(T))
+    void compute_V_iajbkc();
     /// compute (T) energy
     double compute_t_energy();
     /// L_CCSD(T0) energy

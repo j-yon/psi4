@@ -2540,7 +2540,7 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         /*- Occupation number threshold for removing TNOs !expert -*/
         options.add_double("T_CUT_TNO", 1e-9);
         /*- The tolerance to decide between "Weak" and "Strong" Triplets in iterative DLPNO-(T) -*/
-        options.add_double("T_CUT_TRIPLETS", 1e-5);
+        options.add_double("T_CUT_TRIPLETS", 1e-6);
 
         /*- Number of spherical points in DOI grid !expert -*/
         options.add_int("DOI_SPHERICAL_POINTS", 50);
