@@ -648,4 +648,7 @@ void export_wavefunction(py::module& m) {
     py::class_<dlpno::DLPNOCCSD, std::shared_ptr<dlpno::DLPNOCCSD>, Wavefunction>(
         m, "DLPNOCCSD", "Wavefunction that runs the DLPNO-CCSD algorithm")
         .def(py::init<std::shared_ptr<Wavefunction>, Options&>());
+    py::class_<dlpno::DLPNOCCSD_T, std::shared_ptr<dlpno::DLPNOCCSD_T>, Wavefunction>(
+        m, "DLPNOCCSD_T", "Wavefunction that runs the DLPNO-CCSD(T) algorithm")
+        .def(py::init<std::shared_ptr<Wavefunction>, Options&>());
 }

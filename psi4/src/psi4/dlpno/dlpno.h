@@ -46,7 +46,7 @@ namespace dlpno {
 
 enum VirtualStorage { CORE, DIRECT };
 
-enum AlgorithmType { MP2, CCSD };
+enum AlgorithmType { MP2, CCSD, CCSD_T };
 
 // Equations refer to Pinski et al. (JCP 143, 034108, 2015; DOI: 10.1063/1.4926879)
 
@@ -70,6 +70,10 @@ class DLPNOBase : public Wavefunction {
       double T_CUT_SVD_;
       /// T_CUT_PNO scaling factor for diagonal PNOs
       double T_CUT_PNO_DIAG_SCALE_;
+      /// Tolerance for TNO truncation (by occupation number)
+      double T_CUT_TNO_;
+      /// Tolerance for determining "strong" and "weak" triplets
+      double T_CUT_TRIPLETS_;
 
       /// auxiliary basis
       std::shared_ptr<BasisSet> ribasis_;
@@ -352,6 +356,54 @@ class DLPNOCCSD : public DLPNOBase {
    public:
     DLPNOCCSD(SharedWavefunction ref_wfn, Options& options);
     ~DLPNOCCSD() override;
+
+    double compute_energy() override;
+};
+
+class DLPNOCCSD_T : public DLPNOCCSD {
+   private:
+    // Sparsity information
+    SparseMap lmotriplet_to_paos_; ///< which PAOs span the virtual space of a triplet of LMOs?
+    std::unordered_map<int, int> i_j_k_to_ijk_; ///< LMO indices (i, j, k) to significant LMO triplet index (ijk), -1 if not found
+    std::vector<std::tuple<int, int, int>> ijk_to_i_j_k_; ///< LMO triplet index (ijk) to LMO index tuple (i, j, k)
+
+    /// triplet natural orbitals (TNOs)
+    std::vector<SharedMatrix> W_iajbkc_; ///< W3 intermediate for each lmo triplet
+    std::vector<SharedMatrix> T_iajbkc_; ///< Triples amplitude for each lmo triplet
+    std::vector<SharedMatrix> X_tno_; ///< global PAO -> canonical TNO transforms
+    std::vector<SharedVector> e_tno_; ///< TNO orbital energies
+    std::vector<SharedMatrix> denom_ijk_; /// (eps[a_ijk] + eps[b_ijk] + eps[c_ijk] - F[i,i] - F[j,j] - F[k,k])
+    std::vector<int> n_tno_; ///<number of tnos per triplet domain
+    std::vector<SharedMatrix> S_ijk_ii_; ///< tno/diagonal pno overlaps
+    std::vector<SharedMatrix> S_ijk_ij_; ///< tno/pno overlaps
+    std::vector<std::vector<SharedMatrix>> S_ijk_il_; ///< tno/pno overlaps
+    std::vector<std::vector<SharedMatrix>> S_ijk_ljk_; ///< tno overlaps
+
+    /// final energies
+    double e_lccsd_t_; ///< local (T) correlation energy
+
+    /// Create TNOs (Triplet Natural Orbitals) for DLPNO-(T)
+    void tno_transform();
+    /// Compute TNO/TNO overlap matrices
+    void compute_tno_overlaps();
+
+    /// Helper method for symmetrizing matrices in DLPNO-CCSD(T)
+    inline void t_symmetrizer(std::vector<SharedMatrix>& X, int ijk);
+
+    /// compute W3 intermediate (for DLPNO-(T))
+    void compute_W_iajbkc();
+    /// compute (T) energy
+    double compute_t_energy();
+    /// L_CCSD(T0) energy
+    void compute_lccsd_t0();
+    /// L_CCSD(T) iterations
+    void lccsd_t_iterations();
+
+    void print_results();
+
+   public:
+    DLPNOCCSD_T(SharedWavefunction ref_wfn, Options& options);
+    ~DLPNOCCSD_T() override;
 
     double compute_energy() override;
 };

@@ -2,6 +2,7 @@ list(APPEND sources
   dlpnobase.cc
   mp2.cc
   ccsd.cc
+  triples.cc
   wrapper.cc
   sparse.cc
   )

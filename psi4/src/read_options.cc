@@ -2502,8 +2502,10 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_str("DLPNO_LOCAL_ORBITALS", "BOYS", "BOYS PIPEK_MEZEY");
         /*- Maximum number of iterations to determine the MP2 amplitudes. -*/
         options.add_int("DLPNO_MAXITER", 50);
-        /*- Perform DLPNO-CCSD? !expert*/
-        options.add_str("DLPNO_ALGORITHM", "CCSD", "MP2 CCSD");
+        /*- Which DLPNO Algorithm to run !expert*/
+        options.add_str("DLPNO_ALGORITHM", "CCSD", "MP2 CCSD CCSD(T)");
+        /*- Use T0 approximation for DLPNO-CCSD(T)? !expert*/
+        options.add_bool("T0_APPROXIMATION", false);
 
         /*- SUBSECTION Expert Options -*/
 
@@ -2535,6 +2537,10 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_double("S_CUT", 1e-8);
         /*- Fock matrix threshold for treating ampltudes as coupled during local MP2 iterations !expert -*/
         options.add_double("F_CUT", 1e-5);
+        /*- Occupation number threshold for removing TNOs !expert -*/
+        options.add_double("T_CUT_TNO", 1e-9);
+        /*- The tolerance to decide between "Weak" and "Strong" Triplets in iterative DLPNO-(T) -*/
+        options.add_double("T_CUT_TRIPLETS", 1e-5);
 
         /*- Number of spherical points in DOI grid !expert -*/
         options.add_int("DOI_SPHERICAL_POINTS", 50);

@@ -73,11 +73,15 @@ void DLPNOBase::common_init() {
     T_CUT_MKN_ = options_.get_double("T_CUT_MKN");
     T_CUT_EIG_ = options_.get_double("T_CUT_EIG");
     T_CUT_SVD_ = options_.get_double("T_CUT_SVD");
+    T_CUT_TNO_ = options_.get_double("T_CUT_TNO");
+    T_CUT_TRIPLETS_ = options_.get_double("T_CUT_TRIPLETS");
 
     if (options_.get_str("DLPNO_ALGORITHM") == "MP2") {
         algorithm_ = MP2;
     } else if (options_.get_str("DLPNO_ALGORITHM") == "CCSD") {
         algorithm_ = CCSD;
+    } else if (options_.get_str("DLPNO_ALGORITHM") == "CCSD(T)") {
+        algorithm_ = CCSD_T;
     }
 
     // did the user manually change expert level options?
@@ -1239,7 +1243,7 @@ void DLPNOBase::pno_transform() {
         auto Tt_pao_ij = T_pao_ij->clone();
         Tt_pao_ij->scale(2.0);
         Tt_pao_ij->subtract(T_pao_ij->transpose());
-
+        
         // mp2 energy of this LMO pair before transformation to PNOs
         double e_ij_initial = K_pao_ij->vector_dot(Tt_pao_ij);
         double e_ij_os_initial = K_pao_ij->vector_dot(T_pao_ij);

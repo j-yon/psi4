@@ -4413,13 +4413,24 @@ def run_dlpnoccsd(name, **kwargs):
                                     core.get_option("DLPNO", "DF_BASIS_MP2"),
                                     "RIFIT", core.get_global_option('BASIS'))
     ref_wfn.set_basisset("DF_BASIS_MP2", aux_basis)
+    if name == "dlpno-ccsd":
+        core.set_local_option("DLPNO", "DLPNO_ALGORITHM", "CCSD")
+    elif name == "dlpno-ccsd(t0)":
+        core.set_local_option("DLPNO", "DLPNO_ALGORITHM", "CCSD(T)")
+        core.set_local_option("DLPNO", "T0_APPROXIMATION", True)
+    elif name == "dlpno-ccsd(t)":
+        core.set_local_option("DLPNO", "DLPNO_ALGORITHM", "CCSD(T)")
+        core.set_local_option("DLPNO", "T0_APPROXIMATION", False)
 
-    core.set_local_option("DLPNO", "DLPNO_ALGORITHM", "CCSD")
     dlpnoccsd_wfn = core.dlpno(ref_wfn)
     dlpnoccsd_wfn.compute_energy()
     
-    dlpnoccsd_wfn.set_variable('CURRENT ENERGY', dlpnoccsd_wfn.variable('CCSD TOTAL ENERGY'))
-    dlpnoccsd_wfn.set_variable('CURRENT CORRELATION ENERGY', dlpnoccsd_wfn.variable('CCSD CORRELATION ENERGY'))
+    if name == "dlpno-ccsd":
+        dlpnoccsd_wfn.set_variable('CURRENT ENERGY', dlpnoccsd_wfn.variable('CCSD TOTAL ENERGY'))
+        dlpnoccsd_wfn.set_variable('CURRENT CORRELATION ENERGY', dlpnoccsd_wfn.variable('CCSD CORRELATION ENERGY'))
+    else:
+        dlpnoccsd_wfn.set_variable('CURRENT ENERGY', dlpnoccsd_wfn.variable('CCSD(T) TOTAL ENERGY'))
+        dlpnoccsd_wfn.set_variable('CURRENT CORRELATION ENERGY', dlpnoccsd_wfn.variable('CCSD(T) CORRELATION ENERGY'))
 
     # Shove variables into global space
     for k, v in dlpnoccsd_wfn.variables().items():
