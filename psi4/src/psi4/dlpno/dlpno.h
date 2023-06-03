@@ -124,7 +124,10 @@ class DLPNOBase : public Wavefunction {
 
       /// pre-screening energies
       double de_dipole_; ///< energy correction for distant (LMO, LMO) pairs
-      double de_lmp2_; ///< SC-LMP2 correction for weak pairs (only for CC)
+      double e_lmp2_non_trunc_; ///< LMP2 energy in a pure PAO basis (used in tight PNO convergence settings)
+      double e_lmp2_trunc_; ///< LMP2 energy computed with (truncated) PNOs
+      double de_lmp2_; ///< LMP2 correction for weak pairs (only for CC)
+      double de_lmp2_non_crude_; ///< LMP2 correction for weak pairs (non-crude contribution only)
       double de_pno_total_; ///< energy correction for PNO truncation
       double de_pno_total_os_; ///< energy correction for PNO truncation
       double de_pno_total_ss_; ///< energy correction for PNO truncation
@@ -311,7 +314,7 @@ class DLPNOCCSD : public DLPNOBase {
 
     /// Determine which pairs are strong and weak pairs
     void ccsd_pair_prescreening(); // Encapsulates strong and weak pair screening
-    std::vector<double> compute_pair_energies();
+    std::vector<double> compute_pair_energies(bool iterate);
     double filter_pairs(const std::vector<double>& e_ijs, const std::vector<std::vector<int>>& strong_pairs,
                         double tolerance);
     
@@ -330,6 +333,8 @@ class DLPNOCCSD : public DLPNOBase {
     void estimate_memory();
     /// Compute four-center integrals for CC computations
     void compute_cc_integrals();
+    /// Compute LMP2 iterations (to better estimate PNO errors)
+    void lmp2_iterations();
 
     // => CCSD intermediates <= //
 

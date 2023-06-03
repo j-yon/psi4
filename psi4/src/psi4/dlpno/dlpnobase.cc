@@ -1345,7 +1345,18 @@ void DLPNOBase::pno_transform() {
         Tt_iajb_[ij]->scale(2.0);
         Tt_iajb_[ij]->subtract(T_iajb_[ij]->transpose());
     }
-    
+
+    // Orthogonalize PNO transformation coefficients, such that S[ij][ij] \approx I
+    /*
+#pragma omp parallel for schedule(dynamic, 1)
+    for (int ij = 0; ij < n_lmo_pairs; ++ij) {
+        if (n_pno_[ij] == 0) continue;
+        auto S_ij_ij = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[ij]);
+        S_ij_ij = linalg::triplet(X_pno_[ij], S_ij_ij, X_pno_[ij], true, false, false);
+        S_ij_ij->power(-0.5, 1.0e-12);
+        X_pno_[ij] = linalg::doublet(X_pno_[ij], S_ij_ij, false, false);
+    }
+    */
 }
 
 void DLPNOBase::print_aux_domains() {
