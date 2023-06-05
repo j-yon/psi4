@@ -368,6 +368,7 @@ class DLPNOCCSD : public DLPNOBase {
 class DLPNOCCSD_T : public DLPNOCCSD {
    private:
     // Sparsity information
+    // WARNING: Only unique triplets are used
     SparseMap lmotriplet_to_ribfs_; ///< which ribfs are on an LMO triplet (i, j, k)
     SparseMap lmotriplet_to_lmos_; ///< which LMOs l form a significant pair with (i, j, or k)
     SparseMap lmotriplet_to_paos_; ///< which PAOs span the virtual space of a triplet of LMOs?
@@ -395,10 +396,10 @@ class DLPNOCCSD_T : public DLPNOCCSD {
     /// Create TNOs (Triplet Natural Orbitals) for DLPNO-(T)
     void tno_transform();
     /// Compute TNO/TNO overlap matrices
-    void compute_tno_overlaps();
+    /// void compute_tno_overlaps();
 
-    /// Helper method for symmetrizing matrices in DLPNO-CCSD(T)
-    inline void t_symmetrizer(std::vector<SharedMatrix>& X, int ijk);
+    /// Returns a symmetrized version of that matrix (in i <= j <= k ordering)
+    inline SharedMatrix triples_permuter(const SharedMatrix& X, int i, int j, int k, bool reverse=false);
 
     /// compute W3 intermediate (for DLPNO-(T))
     void compute_W_iajbkc();
