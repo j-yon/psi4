@@ -745,7 +745,7 @@ void DLPNOCCSD_T::lccsd_t_iterations() {
     double e_curr = 0.0, e_prev = 0.0, r_curr = 0.0;
     bool e_converged = false, r_converged = false;
 
-    double F_CUT = options_.get_double("F_CUT");
+    double F_CUT = options_.get_double("F_CUT_T");
 
     DIISManager diis(options_.get_int("DIIS_MAX_VECS"), "LCCSD(T) DIIS", DIISManager::RemovalPolicy::LargestError, DIISManager::StoragePolicy::InCore);
 

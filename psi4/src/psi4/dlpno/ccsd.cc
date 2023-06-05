@@ -762,7 +762,7 @@ void DLPNOCCSD::ccsd_pair_prescreening() {
 
     outfile->Printf("\n  ==> Determining Strong and Weak Pairs (Refined Prescreening Step) <==\n\n");
 
-    bool iterate = (options_.get_str("PNO_CONVERGENCE") == "TIGHT") ? true : false;
+    bool iterate = (options_.get_str("PRESCREENING_ALGORITHM") == "FULL_LMP2") ? true : false;
     const std::vector<double>& e_ijs = compute_pair_energies(iterate);
     const auto i_j_to_ij_strong_copy = i_j_to_ij_strong_;
     de_lmp2_non_crude_ = filter_pairs(e_ijs, i_j_to_ij_strong_copy, T_CUT_PAIRS_);
@@ -1926,7 +1926,7 @@ double DLPNOCCSD::compute_energy() {
     pno_transform();
     timer_off("PNO Transform");
 
-    if (options_.get_str("PNO_CONVERGENCE") == "TIGHT") {
+    if (options_.get_str("PRESCREENING_ALGORITHM") == "FULL_LMP2") {
         timer_on("LMP2 PNO Error Correction");
         lmp2_iterations();
         timer_off("LMP2 PNO Error Correction");
@@ -2053,6 +2053,7 @@ void DLPNOCCSD::print_header() {
     outfile->Printf("    T_CUT_CPAO   = %6.3e \n", options_.get_double("T_CUT_CPAO"));
     outfile->Printf("    S_CUT        = %6.3e \n", options_.get_double("S_CUT"));
     outfile->Printf("    F_CUT        = %6.3e \n", options_.get_double("F_CUT"));
+    outfile->Printf("    PRESCREENING = %6s   \n", options_.get_str("PRESCREENING_ALGORITHM").c_str());
     outfile->Printf("\n");
 }
 

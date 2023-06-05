@@ -2537,10 +2537,14 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_double("S_CUT", 1e-8);
         /*- Fock matrix threshold for treating ampltudes as coupled during local MP2 iterations !expert -*/
         options.add_double("F_CUT", 1e-5);
+        /*- Use full LMP2 pre-screening for determining weak pairs and strong pairs, as well as PNO truncation error !expert -*/
+        options.add_str("PRESCREENING_ALGORITHM", "SC_LMP2", "SC_LMP2 FULL_LMP2");
         /*- Occupation number threshold for removing TNOs !expert -*/
         options.add_double("T_CUT_TNO", 1e-9);
         /*- The tolerance to decide between "Weak" and "Strong" Triplets in iterative DLPNO-(T) -*/
         options.add_double("T_CUT_TRIPLETS", 1e-6);
+        /*- Fock matrix threshold for treating ampltudes as coupled during local (T) iterations !expert -*/
+        options.add_double("F_CUT_T", 1e-3);
 
         /*- Number of spherical points in DOI grid !expert -*/
         options.add_int("DOI_SPHERICAL_POINTS", 50);
