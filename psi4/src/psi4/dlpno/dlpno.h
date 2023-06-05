@@ -401,6 +401,8 @@ class DLPNOCCSD_T : public DLPNOCCSD {
     /// Returns a symmetrized version of that matrix (in i <= j <= k ordering)
     inline SharedMatrix triples_permuter(const SharedMatrix& X, int i, int j, int k, bool reverse=false);
 
+    /// A function to estimate (T) memory costs
+    void estimate_memory();
     /// compute W3 intermediate (for DLPNO-(T))
     void compute_W_iajbkc();
     /// compute V3 intermediate (for DLPNO-(T))

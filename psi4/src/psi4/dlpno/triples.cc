@@ -267,6 +267,29 @@ void DLPNOCCSD_T::tno_transform() {
     timer_off("TNO transform");
 }
 
+void DLPNOCCSD_T::estimate_memory() {
+    outfile->Printf("  ==> DLPNO-(T) Memory Estimate <== \n\n");
+
+    int n_lmo_triplets = ijk_to_i_j_k_.size();
+
+    size_t X_tno_memory = 0;
+    size_t tno_total_memory = 0;
+#pragma omp parallel for reduction(+ : X_tno_memory, tno_total_memory)
+    for (int ijk = 0; ijk < n_lmo_triplets; ++ijk) {
+        X_tno_memory += X_tno_[ijk]->size();
+        tno_total_memory += 4 * n_tno_[ijk] * n_tno_[ijk] * n_tno_[ijk];
+    }
+    size_t total_memory = qij_memory_ + qia_memory_ + qab_memory_ + X_tno_memory + tno_total_memory;
+
+    outfile->Printf("    (q | i j) integrals    : %.3f [GiB]\n", qij_memory_ * pow(2.0, -30) * sizeof(double));
+    outfile->Printf("    (q | i a) integrals    : %.3f [GiB]\n", qia_memory_ * pow(2.0, -30) * sizeof(double));
+    outfile->Printf("    (q | a b) integrals    : %.3f [GiB]\n", qab_memory_ * pow(2.0, -30) * sizeof(double));
+    outfile->Printf("    X[u, a_ijk] (PAO->PNO) : %.3f [GiB]\n", X_tno_memory * pow(2.0, -30) * sizeof(double));
+    outfile->Printf("    (a_ijk, b_ijk, c_ijk)  : %.3f [GiB]\n\n", tno_total_memory * pow(2.0, -30) * sizeof(double));
+    outfile->Printf("    Total Memory Given     : %.3f [GiB]\n", memory_ * pow(2.0, -30));
+    outfile->Printf("    Total Memory Required  : %.3f [GiB]\n\n", total_memory * pow(2.0, -30) * sizeof(double));
+}
+
 /*
 void DLPNOCCSD_T::compute_tno_overlaps() {
 
@@ -846,12 +869,27 @@ void DLPNOCCSD_T::lccsd_t_iterations() {
 }
 
 double DLPNOCCSD_T::compute_energy() {
+    
     timer_on("DLPNO-CCSD(T)");
+
     // Run DLPNO-CCSD
     double e_dlpno_ccsd = DLPNOCCSD::compute_energy();
 
+    // Clear CCSD integrals
+    K_mnij_.clear();
+    K_bar_.clear();
+    L_bar_.clear();
+    J_ijab_.clear();
+    L_iajb_.clear();
+    M_iajb_.clear();
+    K_tilde_chem_.clear();
+    K_tilde_phys_.clear();
+    L_tilde_.clear();
+    Qab_ij_.clear();
+    S_pno_ij_mn_.clear();
+
     tno_transform();
-    // compute_tno_overlaps();
+    estimate_memory();
     compute_W_iajbkc();
     compute_V_iajbkc();
     compute_lccsd_t0();
