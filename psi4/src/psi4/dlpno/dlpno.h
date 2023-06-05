@@ -384,33 +384,30 @@ class DLPNOCCSD_T : public DLPNOCCSD {
     std::vector<SharedMatrix> T_iajbkc_; ///< Triples amplitude for each lmo triplet
     std::vector<SharedMatrix> X_tno_; ///< global PAO -> canonical TNO transforms
     std::vector<SharedVector> e_tno_; ///< TNO orbital energies
-    std::vector<SharedMatrix> denom_ijk_; /// (eps[a_ijk] + eps[b_ijk] + eps[c_ijk] - F[i,i] - F[j,j] - F[k,k])
     std::vector<int> n_tno_; ///<number of tnos per triplet domain
 
     /// => TNO overlap matrices <= ///
     std::vector<std::vector<SharedMatrix>> S_ijk_ljk_; ///< tno overlaps
+    std::vector<std::vector<SharedMatrix>> S_ijk_ilk_; ///< tno overlaps
+    std::vector<std::vector<SharedMatrix>> S_ijk_ijl_; ///< tno overlaps
 
     /// final energies
     double e_lccsd_t_; ///< local (T) correlation energy
 
     /// Create TNOs (Triplet Natural Orbitals) for DLPNO-(T)
     void tno_transform();
-    /// Compute TNO/TNO overlap matrices
-    /// void compute_tno_overlaps();
 
     /// Returns a symmetrized version of that matrix (in i <= j <= k ordering)
     inline SharedMatrix triples_permuter(const SharedMatrix& X, int i, int j, int k, bool reverse=false);
+    /// compute (T) iteration energy
+    double compute_t_iteration_energy();
 
-    /// A function to estimate (T) memory costs
-    void estimate_memory();
-    /// compute W3 intermediate (for DLPNO-(T))
-    void compute_W_iajbkc();
-    /// compute V3 intermediate (for DLPNO-(T))
-    void compute_V_iajbkc();
-    /// compute (T) energy
-    double compute_t_energy();
     /// L_CCSD(T0) energy
     void compute_lccsd_t0();
+    /// A function to estimate Full-(T) memory costs
+    void estimate_memory();
+    /// Compute TNO/TNO overlap matrices
+    // void compute_tno_overlaps();
     /// L_CCSD(T) iterations
     void lccsd_t_iterations();
 
