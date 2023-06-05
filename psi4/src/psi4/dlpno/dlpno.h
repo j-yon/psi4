@@ -387,9 +387,6 @@ class DLPNOCCSD_T : public DLPNOCCSD {
     std::vector<int> n_tno_; ///<number of tnos per triplet domain
 
     /// => TNO overlap matrices <= ///
-    std::vector<SharedMatrix> S_ijk_ii_; ///< tno/diagonal pno overlaps
-    std::vector<SharedMatrix> S_ijk_ij_; ///< tno/pno overlaps
-    std::vector<std::vector<SharedMatrix>> S_ijk_il_; ///< tno/pno overlaps
     std::vector<std::vector<SharedMatrix>> S_ijk_ljk_; ///< tno overlaps
 
     /// final energies

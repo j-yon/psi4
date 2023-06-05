@@ -285,9 +285,6 @@ void DLPNOCCSD_T::compute_tno_overlaps() {
     int n_lmo_triplets = ijk_to_i_j_k_.size();
     int naocc = nalpha_ - nfrzc();
 
-    S_ijk_ii_.resize(n_lmo_triplets);
-    S_ijk_ij_.resize(n_lmo_triplets);
-    S_ijk_il_.resize(n_lmo_triplets);
     S_ijk_ljk_.resize(n_lmo_triplets);
 
 #pragma omp parallel for schedule(dynamic, 1)
@@ -297,30 +294,6 @@ void DLPNOCCSD_T::compute_tno_overlaps() {
 
         int ntno_ijk = n_tno_[ijk];
         if (ntno_ijk == 0) continue;
-
-        // Compute overlap between TNOs of triplet ijk and PNOs of pair ii
-        int ii = i_j_to_ij_[i][i];
-        auto S_pao_ijk_ii = submatrix_rows_and_cols(*S_pao_, lmotriplet_to_paos_[ijk], lmopair_to_paos_[ii]);
-        S_ijk_ii_[ijk] = linalg::triplet(X_tno_[ijk], S_pao_ijk_ii, X_pno_[ii], true, false, false);
-
-        // Compute overlap between TNOs of triplet ijk and PNOs of pair ij
-        int ij = i_j_to_ij_[i][j];
-        if (n_pno_[ij] > 0) {
-            auto S_pao_ijk_ij = submatrix_rows_and_cols(*S_pao_, lmotriplet_to_paos_[ijk], lmopair_to_paos_[ij]);
-            S_ijk_ij_[ijk] = linalg::triplet(X_tno_[ijk], S_pao_ijk_ij, X_pno_[ij], true, false, false);
-        }
-
-        // Compute overlap between TNOs of triplet ijk and PNOs of pair ij
-        S_ijk_il_[ijk].resize(naocc);
-        for (int l = 0; l < naocc; l++) {
-
-            int il = i_j_to_ij_[i][l];
-
-            if (il != -1 && n_pno_[il] != 0) {
-                auto S_pao_ijk_il = submatrix_rows_and_cols(*S_pao_, lmotriplet_to_paos_[ijk], lmopair_to_paos_[il]);
-                S_ijk_il_[ijk][l] = linalg::triplet(X_tno_[ijk], S_pao_ijk_il, X_pno_[il], true, false, false);
-            }
-        }
 
         // Compute TNO overlaps between triplet spaces ijk and ljk
         S_ijk_ljk_[ijk].resize(naocc);
@@ -430,8 +403,11 @@ void DLPNOCCSD_T::compute_W_iajbkc() {
         W_temp[ijk]->zero();
 
         if (n_pno_[kj] > 0) {
-            int kji = i_j_k_to_ijk_[k * naocc * naocc + j * naocc + i];
-            auto T_kj = linalg::triplet(S_ijk_ij_[kji], T_iajb_[kj], S_ijk_ij_[kji], false, false, true);
+            // Compute overlap between TNOs of triplet ijk and PNOs of pair kj
+            auto S_ijk_kj = submatrix_rows_and_cols(*S_pao_, lmotriplet_to_paos_[ijk], lmopair_to_paos_[kj]);
+            S_ijk_kj = linalg::triplet(X_tno_[ijk], S_ijk_kj, X_pno_[kj], true, false, false);
+
+            auto T_kj = linalg::triplet(S_ijk_kj, T_iajb_[kj], S_ijk_kj, false, false, true);
 
             K_ivvv->reshape(ntno_ijk * ntno_ijk, ntno_ijk);
             W_temp[ijk]->add(linalg::doublet(K_ivvv, T_kj, false, true));
@@ -443,16 +419,11 @@ void DLPNOCCSD_T::compute_W_iajbkc() {
 
             if (il == -1 || n_pno_[il] == 0) continue;
 
-            auto T_il = linalg::triplet(S_ijk_il_[ijk][l], T_iajb_[il], S_ijk_il_[ijk][l], false, false, true);
+            auto S_ijk_il = submatrix_rows_and_cols(*S_pao_, lmotriplet_to_paos_[ijk], lmopair_to_paos_[il]);
+            S_ijk_il = linalg::triplet(X_tno_[ijk], S_ijk_il, X_pno_[il], true, false, false);
 
-            /*
-            std::vector<int> l_slice(1, l_ijk);
-            auto K_temp = submatrix_rows(*K_jokv, l_slice);
+            auto T_il = linalg::triplet(S_ijk_il, T_iajb_[il], S_ijk_il, false, false, true);
 
-            W_temp[ijk]->reshape(ntno_ijk * ntno_ijk, ntno_ijk);
-            C_DGER(ntno_ijk * ntno_ijk, ntno_ijk, -1.0, &(*T_il)(0,0), 1, &(*K_temp)(0, 0), 1, &(*W_temp[ijk])(0,0), ntno_ijk * ntno_ijk);
-            W_temp[ijk]->reshape(ntno_ijk, ntno_ijk * ntno_ijk);
-            */
             for (int a_ijk = 0; a_ijk < ntno_ijk; a_ijk++) {
                 for (int b_ijk = 0; b_ijk < ntno_ijk; b_ijk++) {
                     for (int c_ijk = 0; c_ijk < ntno_ijk; c_ijk++) {
@@ -581,9 +552,22 @@ void DLPNOCCSD_T::compute_V_iajbkc() {
             int ikj = i_j_k_to_ijk_[i * naocc * naocc + k * naocc + j];
             int kij = i_j_k_to_ijk_[k * naocc * naocc + i * naocc + j];
 
-            auto T_i = linalg::doublet(S_ijk_ii_[ijk], T_ia_[i], false, false);
-            auto T_j = linalg::doublet(S_ijk_ii_[jki], T_ia_[j], false, false);
-            auto T_k = linalg::doublet(S_ijk_ii_[kij], T_ia_[k], false, false);
+            // Compute overlap between TNOs of triplet ijk and PNOs of pair ii, jj, and kk
+            int ii = i_j_to_ij_[i][i];
+            auto S_ijk_ii = submatrix_rows_and_cols(*S_pao_, lmotriplet_to_paos_[ijk], lmopair_to_paos_[ii]);
+            S_ijk_ii = linalg::triplet(X_tno_[ijk], S_ijk_ii, X_pno_[ii], true, false, false);
+
+            int jj = i_j_to_ij_[j][j];
+            auto S_ijk_jj = submatrix_rows_and_cols(*S_pao_, lmotriplet_to_paos_[ijk], lmopair_to_paos_[jj]);
+            S_ijk_jj = linalg::triplet(X_tno_[ijk], S_ijk_jj, X_pno_[jj], true, false, false);
+
+            int kk = i_j_to_ij_[k][k];
+            auto S_ijk_kk = submatrix_rows_and_cols(*S_pao_, lmotriplet_to_paos_[ijk], lmopair_to_paos_[kk]);
+            S_ijk_kk = linalg::triplet(X_tno_[ijk], S_ijk_kk, X_pno_[kk], true, false, false);
+
+            auto T_i = linalg::doublet(S_ijk_ii, T_ia_[i], false, false);
+            auto T_j = linalg::doublet(S_ijk_jj, T_ia_[j], false, false);
+            auto T_k = linalg::doublet(S_ijk_kk, T_ia_[k], false, false);
 
             for (int a_ijk = 0; a_ijk < ntno_ijk; a_ijk++) {
                 for (int b_ijk = 0; b_ijk < ntno_ijk; b_ijk++) {
