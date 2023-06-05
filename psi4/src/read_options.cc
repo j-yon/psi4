@@ -2489,7 +2489,7 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         :ref:`Defaults <apdx:basisFamily>` to a RI basis. -*/
         options.add_str("DF_BASIS_MP2", "");
         /*- General convergence criteria for DLPNO methods -*/
-        options.add_str("PNO_CONVERGENCE", "NORMAL", "LOOSE NORMAL TIGHT");
+        options.add_str("PNO_CONVERGENCE", "NORMAL", "LOOSE NORMAL TIGHT VERY_TIGHT");
         /*- Convergence criteria for the Foster-Boys orbital localization -*/
         options.add_double("LOCAL_CONVERGENCE", 1.0E-12);
         /*- Maximum iterations in Foster-Boys localization -*/
