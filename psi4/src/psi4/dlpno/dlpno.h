@@ -394,6 +394,8 @@ class DLPNOCCSD_T : public DLPNOCCSD {
     /// final energies
     double e_lccsd_t_; ///< local (T) correlation energy
 
+    /// Recompute PNOs (Pair Natural Orbitals) using CCSD densities
+    void recompute_pnos();
     /// Create TNOs (Triplet Natural Orbitals) for DLPNO-(T)
     void tno_transform();
 

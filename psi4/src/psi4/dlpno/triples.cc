@@ -58,6 +58,122 @@ namespace dlpno {
 DLPNOCCSD_T::DLPNOCCSD_T(SharedWavefunction ref_wfn, Options& options) : DLPNOCCSD(ref_wfn, options) {}
 DLPNOCCSD_T::~DLPNOCCSD_T() {}
 
+void DLPNOCCSD_T::recompute_pnos() {
+    timer_on("Recompute PNOs");
+
+    int naocc = nalpha_ - nfrzc();
+    int n_lmo_pairs = ij_to_i_j_.size();
+    int npao = C_pao_->colspi(0);
+
+#pragma omp parallel for schedule(guided, 1)
+    for (int ij = 0; ij < n_lmo_pairs; ++ij) {
+        int i, j;
+        std::tie(i, j) = ij_to_i_j_[ij];
+        int ji = ij_to_ji_[ij];
+
+        if (i > j || n_pno_[ij] == 0) continue;
+
+        // number of PAOs in the pair domain (before removing linear dependencies)
+        int npao_ij = lmopair_to_paos_[ij].size();
+
+        //                                      //
+        // ==> Canonicalize PAOs of pair ij <== //
+        //                                      //
+
+        auto S_pao_ij = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[ij]);
+        auto F_pao_ij = submatrix_rows_and_cols(*F_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[ij]);
+
+        SharedMatrix X_pao_ij;  // canonical transformation of this domain's PAOs to
+        SharedVector e_pao_ij;  // energies of the canonical PAOs
+        std::tie(X_pao_ij, e_pao_ij) = orthocanonicalizer(S_pao_ij, F_pao_ij);
+
+        F_pao_ij = linalg::triplet(X_pao_ij, F_pao_ij, X_pao_ij, true, false, false);
+
+        int npao_can_ij = X_pao_ij->colspi(0);
+
+        auto T_pao_ij = T_iajb_[ij]->clone();
+        for (int a = 0; a < n_pno_[ij]; ++a) {
+            for (int b = 0; b < n_pno_[ij]; ++b) {
+                (*T_pao_ij)(a, b) = (*T_pao_ij)(a, b) * 
+                        (-(*e_pno_[ij])(a) - (*e_pno_[ij])(b) + (*F_lmo_)(i, i) + (*F_lmo_)(j, j));
+            }
+        }
+        auto S_ij = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[ij]);
+        S_ij = linalg::triplet(X_pno_[ij], S_ij, X_pao_ij, true, false, false);
+        T_pao_ij = linalg::triplet(S_ij, T_pao_ij, S_ij, true, false, false);
+        for (int a = 0; a < npao_can_ij; ++a) {
+            for (int b = 0; b < npao_can_ij; ++b) {
+                (*T_pao_ij)(a, b) = (*T_pao_ij)(a, b) /
+                            (-(*e_pao_ij)(a) - (*e_pao_ij)(b) + (*F_lmo_)(i, i) + (*F_lmo_)(j, j));
+            }
+        }
+
+        size_t nvir_ij = X_pao_ij->colspi(0);
+
+        auto Tt_pao_ij = T_pao_ij->clone();
+        Tt_pao_ij->scale(2.0);
+        Tt_pao_ij->subtract(T_pao_ij->transpose());
+
+        auto D_ij = linalg::doublet(Tt_pao_ij, T_pao_ij, false, true);
+        D_ij->add(linalg::doublet(Tt_pao_ij, T_pao_ij, true, false));
+
+        auto X_pno_ij = std::make_shared<Matrix>("eigenvectors", nvir_ij, nvir_ij);
+        Vector pno_occ("eigenvalues", nvir_ij);
+        D_ij->diagonalize(*X_pno_ij, pno_occ, descending);
+
+        double t_cut_scale = (i == j) ? T_CUT_PNO_DIAG_SCALE_ : 1.0;
+
+        int nvir_ij_final = 0;
+        for (size_t a = 0; a < nvir_ij; ++a) {
+            if (fabs(pno_occ.get(a)) >= t_cut_scale * T_CUT_TNO_) {
+                nvir_ij_final++;
+            }
+        }
+
+        Dimension zero(1);
+        Dimension dim_final(1);
+        dim_final.fill(nvir_ij_final);
+
+        // This transformation gives orbitals that are orthonormal but not canonical
+        X_pno_ij = X_pno_ij->get_block({zero, X_pno_ij->rowspi()}, {zero, dim_final});
+        pno_occ = pno_occ.get_block({zero, dim_final});
+
+        SharedMatrix pno_canon;
+        SharedVector e_pno_ij;
+        std::tie(pno_canon, e_pno_ij) = canonicalizer(X_pno_ij, F_pao_ij);
+
+        X_pno_ij = linalg::doublet(X_pno_ij, pno_canon, false, false);
+
+        auto T_pno_ij = linalg::triplet(X_pno_ij, T_pao_ij, X_pno_ij, true, false, false);
+        auto Tt_pno_ij = linalg::triplet(X_pno_ij, Tt_pao_ij, X_pno_ij, true, false, false);
+
+        X_pno_ij = linalg::doublet(X_pao_ij, X_pno_ij, false, false);
+
+        // Recompute singles amplitudes
+        if (i == j) {
+            auto S_ii = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[ij]);
+            S_ii = linalg::triplet(X_pno_ij, S_ii, X_pno_[ij], true, false, false);
+            T_ia_[i] = linalg::doublet(S_ii, T_ia_[i], false, false);
+        }
+
+        T_iajb_[ij] = T_pno_ij;
+        Tt_iajb_[ij] = Tt_pno_ij;
+        X_pno_[ij] = X_pno_ij;
+        e_pno_[ij] = e_pno_ij;
+        n_pno_[ij] = X_pno_ij->colspi(0);
+
+        if (i < j) {
+            T_iajb_[ji] = T_pno_ij->transpose();
+            Tt_iajb_[ji] = Tt_pno_ij->transpose();
+            X_pno_[ji] = X_pno_ij;
+            e_pno_[ji] = e_pno_ij;
+            n_pno_[ji] = X_pno_ij->colspi(0);
+        }
+    }
+
+    timer_off("Recompute PNOs");
+}
+
 void DLPNOCCSD_T::tno_transform() {
     timer_on("TNO transform");
 
@@ -65,12 +181,17 @@ void DLPNOCCSD_T::tno_transform() {
     int n_lmo_pairs = ij_to_i_j_.size();
     int npao = C_pao_->colspi(0);
 
+    // Include list of all triplets (2 strong pairs + 1 weak pair)
     int ijk = 0;
     for (int ij = 0; ij < n_lmo_pairs; ij++) {
         int i, j;
         std::tie(i, j) = ij_to_i_j_[ij];
+        if (i > j) continue;
         for (int k : lmopair_to_lmos_[ij]) {
-            if (i > j || i > k || j > k) continue;
+            int ik = i_j_to_ij_[i][k], kj = i_j_to_ij_[k][j];
+            if (ik == -1 || kj == -1) continue;
+            if (i > k || j > k) continue;
+            if (i_j_k_to_ijk_.count(i * naocc * naocc + j * naocc + k)) continue;
             ijk_to_i_j_k_.push_back(std::make_tuple(i, j, k));
             i_j_k_to_ijk_[i * naocc * naocc + j * naocc + k] = ijk;
             i_j_k_to_ijk_[i * naocc * naocc + k * naocc + j] = ijk;
@@ -91,122 +212,23 @@ void DLPNOCCSD_T::tno_transform() {
     e_tno_.resize(n_lmo_triplets);
     n_tno_.resize(n_lmo_triplets);
 
-    std::vector<SharedMatrix> D_ij(n_lmo_pairs);
+    lmotriplet_lmo_to_riatom_lmo_.resize(n_lmo_triplets);
+    lmotriplet_pao_to_riatom_pao_.resize(n_lmo_triplets);
 
-#pragma omp parallel for schedule(dynamic, 1)
-    for (int ij = 0; ij < n_lmo_pairs; ++ij) {
-        int i, j;
-        std::tie(i, j) = ij_to_i_j_[ij];
-
-        if (i > j || n_pno_[ij] == 0) continue;
-
-        D_ij[ij] = linalg::doublet(Tt_iajb_[ij], T_iajb_[ij], false, true);
-        D_ij[ij]->add(linalg::doublet(Tt_iajb_[ij], T_iajb_[ij], true, false));
-
-        D_ij[ij] = linalg::triplet(X_pno_[ij], D_ij[ij], X_pno_[ij], false, false, true);
-
-        if (i < j) {
-            int ji = ij_to_ji_[ij];
-            D_ij[ji] = D_ij[ij]->clone();
-        }
-    }
-
-    std::vector<std::vector<int>> global_pao_to_pao_ij(n_lmo_pairs);
-
-#pragma omp parallel for schedule(dynamic, 1)
-    for (int ij = 0; ij < n_lmo_pairs; ++ij) {
-        global_pao_to_pao_ij[ij] = std::vector<int>(npao, -1);
-
-        for (int u_ij = 0; u_ij < lmopair_to_paos_[ij].size(); u_ij++) {
-            int u = lmopair_to_paos_[ij][u_ij];
-            global_pao_to_pao_ij[ij][u] = u_ij;
-        }
-    }
-
-#pragma omp parallel for schedule(static, 1)
+#pragma omp parallel for
     for (int ijk = 0; ijk < n_lmo_triplets; ++ijk) {
         int i, j, k;
         std::tie(i, j, k) = ijk_to_i_j_k_[ijk];
         int ij = i_j_to_ij_[i][j], jk = i_j_to_ij_[j][k], ik = i_j_to_ij_[i][k];
 
         lmotriplet_to_ribfs_[ijk] = merge_lists(lmopair_to_ribfs_[ij], lmo_to_ribfs_[k]);
-        lmotriplet_to_lmos_[ijk] = merge_lists(lmopair_to_lmos_[ij], lmopair_to_lmos_[jk]);
+        lmotriplet_to_lmos_[ijk]; // merge_lists(merge_lists(lmopair_to_lmos_[ij], lmopair_to_lmos_[jk]), lmopair_to_lmos_[ik]);
+        for (int l = 0; l < naocc; ++l) {
+            int ij = i_j_to_ij_[i][l], jl = i_j_to_ij_[j][l], kl = i_j_to_ij_[k][l];
+            if (ij != -1 || jl != -1 || kl != -1) lmotriplet_to_lmos_[ijk].push_back(l); 
+        }
         lmotriplet_to_paos_[ijk] = merge_lists(lmopair_to_paos_[ij], lmo_to_paos_[k]);
 
-        // number of PAOs in the triplet domain (before removing linear dependencies)
-        int npao_ijk = lmotriplet_to_paos_[ijk].size();
-
-        // Form the triplet density (from pair densities in redundant basis)
-        auto D_ijk = std::make_shared<Matrix>("D_ijk", npao_ijk, npao_ijk);
-        D_ijk->zero();
-
-        for (int u_ijk = 0; u_ijk < lmotriplet_to_paos_[ijk].size(); u_ijk++) {
-            int u = lmotriplet_to_paos_[ijk][u_ijk];
-            int u_ij = global_pao_to_pao_ij[ij][u], u_jk = global_pao_to_pao_ij[jk][u], u_ik = global_pao_to_pao_ij[ik][u];
-            
-            for (int v_ijk = 0; v_ijk < lmotriplet_to_paos_[ijk].size(); v_ijk++) {
-                int v = lmotriplet_to_paos_[ijk][v_ijk];
-                int v_ij = global_pao_to_pao_ij[ij][v], v_jk = global_pao_to_pao_ij[jk][v], v_ik = global_pao_to_pao_ij[ik][v];
-
-                if (n_pno_[ij] > 0 && u_ij != -1 && v_ij != -1) (*D_ijk)(u_ijk, v_ijk) += (*D_ij[ij])(u_ij, v_ij);
-                if (n_pno_[jk] > 0 && u_jk != -1 && v_jk != -1) (*D_ijk)(u_ijk, v_ijk) += (*D_ij[jk])(u_jk, v_jk);
-                if (n_pno_[ik] > 0 && u_ik != -1 && v_ik != -1) (*D_ijk)(u_ijk, v_ijk) += (*D_ij[ik])(u_ik, v_ik);
-            }
-        }
-        D_ijk->scale(1.0 / 3.0);
-
-        // Canonicalize PAOs of triplet ijk
-        auto S_pao_ijk = submatrix_rows_and_cols(*S_pao_, lmotriplet_to_paos_[ijk], lmotriplet_to_paos_[ijk]);
-        auto F_pao_ijk = submatrix_rows_and_cols(*F_pao_, lmotriplet_to_paos_[ijk], lmotriplet_to_paos_[ijk]);
-
-        SharedMatrix X_pao_ijk;
-        SharedVector e_pao_ijk;
-        std::tie(X_pao_ijk, e_pao_ijk) = orthocanonicalizer(S_pao_ijk, F_pao_ijk);
-
-        F_pao_ijk = linalg::triplet(X_pao_ijk, F_pao_ijk, X_pao_ijk, true, false, false);
-        D_ijk = linalg::triplet(X_pao_ijk, D_ijk, X_pao_ijk, true, false, false);
-
-        size_t nvir_ijk = F_pao_ijk->rowspi(0);
-
-        // Diagonalization of triplet density gives TNOs (in basis of LMO's virtual domain)
-        // as well as TNO occ numbers
-        auto X_tno_ijk = std::make_shared<Matrix>("eigenvectors", nvir_ijk, nvir_ijk);
-        Vector tno_occ("eigenvalues", nvir_ijk);
-        D_ijk->diagonalize(*X_tno_ijk, tno_occ, descending);
-
-        int nvir_ijk_final = 0;
-        for (size_t a = 0; a < nvir_ijk; ++a) {
-            if (fabs(tno_occ.get(a)) >= T_CUT_TNO_) {
-                nvir_ijk_final++;
-            }
-        }
-
-        Dimension zero(1);
-        Dimension dim_final(1);
-        dim_final.fill(nvir_ijk_final);
-
-        // This transformation gives orbitals that are orthonormal but not canonical
-        X_tno_ijk = X_tno_ijk->get_block({zero, X_tno_ijk->rowspi()}, {zero, dim_final});
-        tno_occ = tno_occ.get_block({zero, dim_final});
-
-        SharedMatrix tno_canon;
-        SharedVector e_tno_ijk;
-        std::tie(tno_canon, e_tno_ijk) = canonicalizer(X_tno_ijk, F_pao_ijk);
-
-        X_tno_ijk = linalg::doublet(X_tno_ijk, tno_canon, false, false);
-        X_tno_ijk = linalg::doublet(X_pao_ijk, X_tno_ijk, false, false);
-
-        X_tno_[ijk] = X_tno_ijk;
-        e_tno_[ijk] = e_tno_ijk;
-        n_tno_[ijk] = X_tno_ijk->colspi(0);
-
-    }
-
-    lmotriplet_lmo_to_riatom_lmo_.resize(n_lmo_triplets);
-    lmotriplet_pao_to_riatom_pao_.resize(n_lmo_triplets);
-
-#pragma omp parallel for
-    for (int ijk = 0; ijk < n_lmo_triplets; ++ijk) {
         int naux_ijk = lmotriplet_to_ribfs_[ijk].size();
         int nlmo_ijk = lmotriplet_to_lmos_[ijk].size();
         int npao_ijk = lmotriplet_to_paos_[ijk].size();
@@ -233,6 +255,203 @@ void DLPNOCCSD_T::tno_transform() {
                 lmotriplet_pao_to_riatom_pao_[ijk][q_ijk][a_ijk] = a_sparse;
             }
         }
+    }
+
+#pragma omp parallel for schedule(static, 1)
+    for (int ijk = 0; ijk < n_lmo_triplets; ++ijk) {
+        int i, j, k;
+        std::tie(i, j, k) = ijk_to_i_j_k_[ijk];
+        int ij = i_j_to_ij_[i][j], jk = i_j_to_ij_[j][k], ik = i_j_to_ij_[i][k];
+
+        // number of PAOs in the triplet domain (before removing linear dependencies)
+        int npao_ijk = lmotriplet_to_paos_[ijk].size();
+
+        // number of auxiliary basis in the domain
+        int naux_ijk = lmotriplet_to_ribfs_[ijk].size();
+
+        auto i_qa = std::make_shared<Matrix>("Three-index Integrals", naux_ijk, npao_ijk);
+        auto j_qa = std::make_shared<Matrix>("Three-index Integrals", naux_ijk, npao_ijk);
+        auto k_qa = std::make_shared<Matrix>("Three-index Integrals", naux_ijk, npao_ijk);
+
+        for (int q_ijk = 0; q_ijk < naux_ijk; q_ijk++) {
+            int q = lmotriplet_to_ribfs_[ijk][q_ijk];
+            int centerq = ribasis_->function_to_center(q);
+            for (int a_ijk = 0; a_ijk < npao_ijk; a_ijk++) {
+                int a = lmotriplet_to_paos_[ijk][a_ijk];
+                i_qa->set(q_ijk, a_ijk, qia_[q]->get(riatom_to_lmos_ext_dense_[centerq][i], riatom_to_paos_ext_dense_[centerq][a]));
+                j_qa->set(q_ijk, a_ijk, qia_[q]->get(riatom_to_lmos_ext_dense_[centerq][j], riatom_to_paos_ext_dense_[centerq][a]));
+                k_qa->set(q_ijk, a_ijk, qia_[q]->get(riatom_to_lmos_ext_dense_[centerq][k], riatom_to_paos_ext_dense_[centerq][a]));
+            }
+        }
+
+        auto A_solve = submatrix_rows_and_cols(*full_metric_, lmotriplet_to_ribfs_[ijk], lmotriplet_to_ribfs_[ijk]);
+        A_solve->power(0.5, 1.0e-14);
+        C_DGESV_wrapper(A_solve->clone(), i_qa);
+        C_DGESV_wrapper(A_solve->clone(), j_qa);
+        C_DGESV_wrapper(A_solve->clone(), k_qa);
+
+        auto K_pao_ij = linalg::doublet(i_qa, j_qa, true, false);
+        auto K_pao_jk = linalg::doublet(j_qa, k_qa, true, false);
+        auto K_pao_ik = linalg::doublet(i_qa, k_qa, true, false);
+
+        //                                          //
+        // ==> Canonicalize PAOs of triplet ijk <== //
+        //                                          //
+
+        auto S_pao_ijk = submatrix_rows_and_cols(*S_pao_, lmotriplet_to_paos_[ijk], lmotriplet_to_paos_[ijk]);
+        auto F_pao_ijk = submatrix_rows_and_cols(*F_pao_, lmotriplet_to_paos_[ijk], lmotriplet_to_paos_[ijk]);
+
+        SharedMatrix X_pao_ijk;
+        SharedVector e_pao_ijk;
+        std::tie(X_pao_ijk, e_pao_ijk) = orthocanonicalizer(S_pao_ijk, F_pao_ijk);
+
+        F_pao_ijk = linalg::triplet(X_pao_ijk, F_pao_ijk, X_pao_ijk, true, false, false);
+        K_pao_ij = linalg::triplet(X_pao_ijk, K_pao_ij, X_pao_ijk, true, false, false);
+        K_pao_jk = linalg::triplet(X_pao_ijk, K_pao_jk, X_pao_ijk, true, false, false);
+        K_pao_ik = linalg::triplet(X_pao_ijk, K_pao_ik, X_pao_ijk, true, false, false);
+
+        // number of PAOs in the domain after removing linear dependencies
+        int npao_can_ijk = X_pao_ijk->colspi(0);
+        auto T_pao_ij = K_pao_ij->clone();
+        auto T_pao_jk = K_pao_jk->clone();
+        auto T_pao_ik = K_pao_ik->clone();
+        for (int a = 0; a < npao_can_ijk; ++a) {
+            for (int b = 0; b < npao_can_ijk; ++b) {
+                T_pao_ij->set(a, b, T_pao_ij->get(a, b) /
+                                        (-e_pao_ijk->get(b) + -e_pao_ijk->get(a) + F_lmo_->get(i, i) + F_lmo_->get(j, j)));
+                T_pao_jk->set(a, b, T_pao_ij->get(a, b) /
+                                        (-e_pao_ijk->get(b) + -e_pao_ijk->get(a) + F_lmo_->get(j, j) + F_lmo_->get(k, k)));
+                T_pao_ik->set(a, b, T_pao_ij->get(a, b) /
+                                        (-e_pao_ijk->get(b) + -e_pao_ijk->get(a) + F_lmo_->get(i, i) + F_lmo_->get(k, k)));
+            }
+        }
+
+        if (n_pno_[ij] > 0) {
+            T_pao_ij = T_iajb_[ij]->clone();
+            for (int a = 0; a < n_pno_[ij]; ++a) {
+                for (int b = 0; b < n_pno_[ij]; ++b) {
+                    (*T_pao_ij)(a, b) = (*T_pao_ij)(a, b) * 
+                                (-(*e_pno_[ij])(a) - (*e_pno_[ij])(b) + (*F_lmo_)(i, i) + (*F_lmo_)(j, j));
+                }
+            }
+            auto S_ij = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_[ij], lmotriplet_to_paos_[ijk]);
+            S_ij = linalg::triplet(X_pno_[ij], S_ij, X_pao_ijk, true, false, false);
+            T_pao_ij = linalg::triplet(S_ij, T_pao_ij, S_ij, true, false, false);
+            for (int a = 0; a < npao_can_ijk; ++a) {
+                for (int b = 0; b < npao_can_ijk; ++b) {
+                    (*T_pao_ij)(a, b) = (*T_pao_ij)(a, b) /
+                                (-(*e_pao_ijk)(a) - (*e_pao_ijk)(b) + (*F_lmo_)(i, i) + (*F_lmo_)(j, j));
+                }
+            }
+        }
+
+        if (n_pno_[jk] > 0) {
+            T_pao_jk = T_iajb_[jk]->clone();
+            for (int a = 0; a < n_pno_[jk]; ++a) {
+                for (int b = 0; b < n_pno_[jk]; ++b) {
+                    (*T_pao_jk)(a, b) = (*T_pao_jk)(a, b) * 
+                                (-(*e_pno_[jk])(a) - (*e_pno_[jk])(b) + (*F_lmo_)(j, j) + (*F_lmo_)(k, k));
+                }
+            }
+            auto S_jk = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_[jk], lmotriplet_to_paos_[ijk]);
+            S_jk = linalg::triplet(X_pno_[jk], S_jk, X_pao_ijk, true, false, false);
+            T_pao_jk = linalg::triplet(S_jk, T_pao_jk, S_jk, true, false, false);
+            for (int a = 0; a < npao_can_ijk; ++a) {
+                for (int b = 0; b < npao_can_ijk; ++b) {
+                    (*T_pao_jk)(a, b) = (*T_pao_jk)(a, b) /
+                                (-(*e_pao_ijk)(a) - (*e_pao_ijk)(b) + (*F_lmo_)(j, j) + (*F_lmo_)(k, k));
+                }
+            }
+        }
+
+        if (n_pno_[ik] > 0) {
+            T_pao_ik = T_iajb_[ik]->clone();
+            for (int a = 0; a < n_pno_[ik]; ++a) {
+                for (int b = 0; b < n_pno_[ik]; ++b) {
+                    (*T_pao_ik)(a, b) = (*T_pao_ik)(a, b) * 
+                                (-(*e_pno_[ik])(a) - (*e_pno_[ik])(b) + (*F_lmo_)(i, i) + (*F_lmo_)(k, k));
+                }
+            }
+            auto S_ik = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_[ik], lmotriplet_to_paos_[ijk]);
+            S_ik = linalg::triplet(X_pno_[ik], S_ik, X_pao_ijk, true, false, false);
+            T_pao_ik = linalg::triplet(S_ik, T_pao_ik, S_ik, true, false, false);
+            for (int a = 0; a < npao_can_ijk; ++a) {
+                for (int b = 0; b < npao_can_ijk; ++b) {
+                    (*T_pao_ik)(a, b) = (*T_pao_ik)(a, b) /
+                                (-(*e_pao_ijk)(a) - (*e_pao_ijk)(b) + (*F_lmo_)(i, i) + (*F_lmo_)(k, k));
+                }
+            }
+        }
+
+        //                                           //
+        // ==> Canonical PAOs  to Canonical TNOs <== //
+        //                                           //
+
+        size_t nvir_ijk = F_pao_ijk->rowspi(0);
+
+        auto Tt_pao_ij = T_pao_ij->clone();
+        Tt_pao_ij->scale(2.0);
+        Tt_pao_ij->subtract(T_pao_ij->transpose());
+
+        auto Tt_pao_jk = T_pao_jk->clone();
+        Tt_pao_jk->scale(2.0);
+        Tt_pao_jk->subtract(T_pao_jk->transpose());
+
+        auto Tt_pao_ik = T_pao_ik->clone();
+        Tt_pao_ik->scale(2.0);
+        Tt_pao_ik->subtract(T_pao_ik->transpose());
+
+        // Construct pair density from amplitudes
+
+        auto D_ij = linalg::doublet(Tt_pao_ij, T_pao_ij, false, true);
+        D_ij->add(linalg::doublet(Tt_pao_ij, T_pao_ij, true, false));
+
+        auto D_jk = linalg::doublet(Tt_pao_jk, T_pao_jk, false, true);
+        D_jk->add(linalg::doublet(Tt_pao_jk, T_pao_jk, true, false));
+
+        auto D_ik = linalg::doublet(Tt_pao_ik, T_pao_ik, false, true);
+        D_ik->add(linalg::doublet(Tt_pao_ik, T_pao_ik, true, false));
+
+        // Construct triplet density from pair densities
+        auto D_ijk = D_ij->clone();
+        D_ijk->add(D_jk);
+        D_ijk->add(D_ik);
+        D_ijk->scale(1.0 / 3.0);
+        
+        // Diagonalization of triplet density gives TNOs (in basis of LMO's virtual domain)
+        // as well as TNO occ numbers
+        auto X_tno_ijk = std::make_shared<Matrix>("eigenvectors", nvir_ijk, nvir_ijk);
+        Vector tno_occ("eigenvalues", nvir_ijk);
+        D_ijk->diagonalize(*X_tno_ijk, tno_occ, descending);
+
+        double t_cut_scale = 1.0;
+
+        int nvir_ijk_final = 0;
+        for (size_t a = 0; a < nvir_ijk; ++a) {
+            if (fabs(tno_occ.get(a)) >= t_cut_scale * T_CUT_TNO_) {
+                nvir_ijk_final++;
+            }
+        }
+
+        Dimension zero(1);
+        Dimension dim_final(1);
+        dim_final.fill(nvir_ijk_final);
+
+        // This transformation gives orbitals that are orthonormal but not canonical
+        X_tno_ijk = X_tno_ijk->get_block({zero, X_tno_ijk->rowspi()}, {zero, dim_final});
+        tno_occ = tno_occ.get_block({zero, dim_final});
+
+        SharedMatrix tno_canon;
+        SharedVector e_tno_ijk;
+        std::tie(tno_canon, e_tno_ijk) = canonicalizer(X_tno_ijk, F_pao_ijk);
+
+        X_tno_ijk = linalg::doublet(X_tno_ijk, tno_canon, false, false);
+        X_tno_ijk = linalg::doublet(X_pao_ijk, X_tno_ijk, false, false);
+
+        X_tno_[ijk] = X_tno_ijk;
+        e_tno_[ijk] = e_tno_ijk;
+        n_tno_[ijk] = X_tno_ijk->colspi(0);
+
     }
 
     int tno_count_total = 0, tno_count_min = C_pao_->colspi(0), tno_count_max = 0;
@@ -435,9 +654,10 @@ void DLPNOCCSD_T::compute_lccsd_t0() {
                 auto S_ijk_kj = submatrix_rows_and_cols(*S_pao_, lmotriplet_to_paos_[ijk], lmopair_to_paos_[kj]);
                 S_ijk_kj = linalg::triplet(X_tno_[ijk], S_ijk_kj, X_pno_[kj], true, false, false);
 
-                auto T_kj = linalg::triplet(S_ijk_kj, T_iajb_[kj], S_ijk_kj, false, false, true);
+                auto T_kj = linalg::doublet(S_ijk_kj, T_iajb_[kj], false, false);
 
                 K_ivvv->reshape(ntno_ijk * ntno_ijk, ntno_ijk);
+                K_ivvv = linalg::doublet(K_ivvv, S_ijk_kj, false, false);
                 Wperms[idx]->add(linalg::doublet(K_ivvv, T_kj, false, true));
             }
 
@@ -887,6 +1107,7 @@ double DLPNOCCSD_T::compute_energy() {
     Qab_ij_.clear();
     S_pno_ij_mn_.clear();
 
+    recompute_pnos();
     tno_transform();
     compute_lccsd_t0();
 
