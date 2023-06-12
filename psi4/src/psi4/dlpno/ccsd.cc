@@ -628,7 +628,7 @@ void DLPNOCCSD::recompute_pair_domains() {
             int im = i_j_to_ij_[i][m];
             int jm = i_j_to_ij_[j][m];
 
-            if (im != -1 && jm != -1) {
+            if (im != -1 || jm != -1) {
                 lmopair_to_lmos_[ij].push_back(m);
                 lmopair_to_lmos_dense_[ij][m] = m_ij;
                 m_ij++;
@@ -1724,9 +1724,11 @@ void DLPNOCCSD::lccsd_iterations() {
                     auto S_ij_mn = S_PNO(ij, mn);
 
                     int i_mn = lmopair_to_lmos_dense_[mn][i], j_mn = lmopair_to_lmos_dense_[mn][j];
-                    r2_temp = linalg::triplet(S_ij_mn, tau[mn], S_ij_mn, false, false, true);
-                    r2_temp->scale(0.5 * Wmnij[mn]->get(i_mn, j_mn));
-                    Rn_iajb[ij]->add(r2_temp);
+                    if (i_mn != -1 && j_mn != -1) {
+                        r2_temp = linalg::triplet(S_ij_mn, tau[mn], S_ij_mn, false, false, true);
+                        r2_temp->scale(0.5 * Wmnij[mn]->get(i_mn, j_mn));
+                        Rn_iajb[ij]->add(r2_temp);
+                    }
 
                     // Wmbej and Wmbje terms taken out to avoid inaccurate integral projections
                     int jn = i_j_to_ij_[j][n], nj = i_j_to_ij_[n][j];
