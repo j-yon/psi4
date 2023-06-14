@@ -405,13 +405,13 @@ class DLPNOCCSD_T : public DLPNOCCSD {
     double compute_t_iteration_energy();
 
     /// L_CCSD(T0) energy
-    void compute_lccsd_t0();
+    double compute_lccsd_t0(bool store_amplitudes=false);
     /// A function to estimate Full-(T) memory costs
     void estimate_memory();
     /// Compute TNO/TNO overlap matrices
     // void compute_tno_overlaps();
     /// L_CCSD(T) iterations
-    void lccsd_t_iterations();
+    double lccsd_t_iterations();
 
     void print_results();
 
