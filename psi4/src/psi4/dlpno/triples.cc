@@ -72,7 +72,7 @@ void DLPNOCCSD_T::print_header() {
     outfile->Printf("    T_CUT_TNO    = %6.3e \n", options_.get_double("T_CUT_TNO"));
     outfile->Printf("    T_CUT_TNO_T  = %6.3e \n", options_.get_double("T_CUT_TNO_T"));
     outfile->Printf("    F_CUT_T      = %6.3e \n", options_.get_double("F_CUT_T"));
-    outfile->Printf("    T0_SCALING?  = %6s   \n\n", scale_t0);
+    outfile->Printf("    T0_SCALING?  = %6s   \n\n", scale_t0.c_str());
     outfile->Printf("\n");
 }
 
