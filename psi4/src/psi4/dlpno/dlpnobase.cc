@@ -148,6 +148,7 @@ void DLPNOBase::common_init() {
     variables_["SCF TOTAL ENERGY"] = reference_wavefunction_->energy();
 
     ribasis_ = get_basisset("DF_BASIS_MP2");
+    psio_ = _default_psio_lib_;
 }
 
 /* Utility function for making C_DGESV calls
@@ -1067,18 +1068,22 @@ void DLPNOBase::compute_qab() {
 
     outfile->Printf("\n  ==> Transforming 3-Index Integrals to PAO/PAO basis <==\n");
 
-    if (T_CUT_EIG_ > 0.0) {
-        outfile->Printf("\n    Using eigendecomposition to optimize storage of Qab, with T_CUT_EIG: %6.3e\n", T_CUT_EIG_);
+    if (qab_memory_ * sizeof(double) > 0.5 * memory_) {
+        write_qab_pao_ = true;
+        outfile->Printf("\n    Writing (aux | pao * pao) integrals to disk...\n");
+    } else {
+        write_qab_pao_ = false;
+        outfile->Printf("\n    Keeping (aux | pno * pno) integrals in core...\n");
+    }
+
+    if (write_qab_pao_) {
+        psio_->open(PSIF_DLPNO_QAB_PAO, PSIO_OPEN_NEW);
     }
 
     qab_.resize(naux);
-    qab_svd_.resize(naux);
-
-    size_t svd_mem = 0;
-    size_t non_svd_mem = 0;
 
     // PAO-PAO DF ints
-#pragma omp parallel for schedule(dynamic, 1) reduction(+ : svd_mem, non_svd_mem)
+#pragma omp parallel for schedule(dynamic, 1)
     for (int Q = 0; Q < ribasis_->nshell(); Q++) {
         int nq = ribasis_->shell(Q).nfunction();
         int qstart = ribasis_->shell(Q).function_index();
@@ -1134,40 +1139,21 @@ void DLPNOBase::compute_qab() {
 
         // (mn|Q) C_mi C_nj ->(ij|Q)
         for (size_t q = 0; q < nq; q++) {
-            auto qab_pao = linalg::triplet(C_pao_slice, qab_[qstart + q], C_pao_slice, true, false, false);
-            non_svd_mem += qab_pao->size();
-            if (T_CUT_EIG_ > 0.0) {
-                
-                SharedMatrix P = std::make_shared<Matrix>("eigenvectors", qab_pao->nrow(), qab_pao->ncol());
-                SharedVector D = std::make_shared<Vector>("eigenvalues", qab_pao->nrow());
-                qab_pao->diagonalize(P, D, ascending);
+            qab_[qstart + q] = linalg::triplet(C_pao_slice, qab_[qstart + q], C_pao_slice, true, false, false);
 
-                std::vector<int> keep_indices;
-                for (int idx = 0; idx < D->dim(); idx++) {
-                    if (std::fabs(D->get(idx)) > T_CUT_EIG_) keep_indices.push_back(idx); 
-                }
-                P = submatrix_cols(*P, keep_indices);
-
-                SharedVector Dnew = std::make_shared<Vector>("new_eigvals", keep_indices.size());
-                for (int idx = 0; idx < keep_indices.size(); idx++) {
-                    Dnew->set(idx, D->get(keep_indices[idx]));
-                }
-
-                qab_svd_[qstart + q] = std::make_tuple(P, Dnew);
-                svd_mem += P->size() + Dnew->dim();
-                
+            if (write_qab_pao_) { // Write to disk
+                std::stringstream toc_entry;
+                toc_entry << "QAB (PAO) " << (qstart + q);
+                qab_[qstart + q]->set_name(toc_entry.str());
+#pragma omp critical
+                qab_[qstart + q]->save(psio_, PSIF_DLPNO_QAB_PAO, psi::Matrix::LowerTriangle);
                 qab_[qstart + q] = nullptr;
-            } else {
-                qab_[qstart + q] = qab_pao;
             }
         }
     }
 
-    // qab_memory_ gets updated if SVD/eigen decomp is done
-    if (T_CUT_EIG_ > 0.0) {
-        qab_memory_ = svd_mem;
-        double memory_savings = 1.0 - static_cast<double>(svd_mem) / non_svd_mem;
-        outfile->Printf("\n    Memory Savings from eigendecomposition of Qab: %6.2f %% \n\n", 100.0 * memory_savings);
+    if (write_qab_pao_) {
+        psio_->close(PSIF_DLPNO_QAB_PAO, 1);
     }
 
     timer_off("(mn|K)->(ab|K)");

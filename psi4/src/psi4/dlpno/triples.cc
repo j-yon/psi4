@@ -577,6 +577,13 @@ void DLPNOCCSD_T::estimate_memory() {
     outfile->Printf("    (a_ijk, b_ijk, c_ijk)  : %.3f [GiB]\n\n", tno_total_memory * pow(2.0, -30) * sizeof(double));
     outfile->Printf("    Total Memory Given     : %.3f [GiB]\n", memory_ * pow(2.0, -30));
     outfile->Printf("    Total Memory Required  : %.3f [GiB]\n\n", total_memory * pow(2.0, -30) * sizeof(double));
+
+    if (tno_total_memory * sizeof(double) > 0.8 * memory_) {
+        write_amplitudes_ = true;
+    } else {
+        write_amplitudes_ = false;
+    }
+
 }
 
 /*
@@ -628,6 +635,10 @@ double DLPNOCCSD_T::compute_lccsd_t0(bool store_amplitudes) {
     int n_lmo_triplets = ijk_to_i_j_k_.size();
 
     double E_T0 = 0.0;
+
+    if (write_qab_pao_) {
+        psio_->open(PSIF_DLPNO_QAB_PAO, PSIO_OPEN_OLD);
+    }
 
     if (store_amplitudes) {
         W_iajbkc_.resize(n_lmo_triplets);
@@ -699,23 +710,21 @@ double DLPNOCCSD_T::compute_lccsd_t0(bool store_amplitudes) {
                 C_DCOPY(ntno_ijk, &(*q_kv_tmp)(0, 0), 1, &(*q_kv)(q_ijk, 0), 1);
 
                 SharedMatrix q_vv_tmp;
-                if (T_CUT_EIG_ > 0.0) {
-                    SharedMatrix P;
-                    SharedVector D;
-                    std::tie(P, D) = qab_svd_[q];
-                    auto qab_temp1 = linalg::doublet(
-                        X_tno_[ijk], submatrix_rows(*P, lmotriplet_pao_to_riatom_pao_[ijk][q_ijk]), true, false);
-                    auto qab_temp2 = qab_temp1->clone();
-                    // auto Dtemp = std::make_shared<Matrix>(D->dim(), D->dim());
-                    // Dtemp->set_diagonal(D);
-                    for (int i = 0; i < D->dim(); ++i) qab_temp1->scale_column(0, i, D->get(i));
-
-                    q_vv_tmp = linalg::doublet(qab_temp1, qab_temp2, false, true);
+                if (write_qab_pao_) {
+                    std::stringstream toc_entry;
+                    toc_entry << "QAB (PAO) " << q;
+                    int npao_q = riatom_to_paos_ext_[centerq].size();
+                    q_vv_tmp = std::make_shared<Matrix>(toc_entry.str(), npao_q, npao_q);
+#pragma omp critical
+                    q_vv_tmp->load(psio_, PSIF_DLPNO_QAB_PAO, psi::Matrix::LowerTriangle);
                 } else {
-                    q_vv_tmp = submatrix_rows_and_cols(*qab_[q], lmotriplet_pao_to_riatom_pao_[ijk][q_ijk],
-                                                       lmotriplet_pao_to_riatom_pao_[ijk][q_ijk]);
-                    q_vv_tmp = linalg::triplet(X_tno_[ijk], q_vv_tmp, X_tno_[ijk], true, false, false);
+                    q_vv_tmp = qab_[q]->clone();
                 }
+                
+                q_vv_tmp = submatrix_rows_and_cols(*q_vv_tmp, lmotriplet_pao_to_riatom_pao_[ijk][q_ijk],
+                                                    lmotriplet_pao_to_riatom_pao_[ijk][q_ijk]);
+                q_vv_tmp = linalg::triplet(X_tno_[ijk], q_vv_tmp, X_tno_[ijk], true, false, false);
+                
                 C_DCOPY(ntno_ijk * ntno_ijk, &(*q_vv_tmp)(0, 0), 1, &(*q_vv)(q_ijk, 0), 1);
             }
 
@@ -1233,6 +1242,11 @@ double DLPNOCCSD_T::compute_energy() {
     set_scalar_variable("CURRENT ENERGY", e_ccsd_t_total);
 
     print_results();
+
+    if (write_qab_pao_) {
+        // Bye bye, you won't be missed
+        psio_->close(PSIF_DLPNO_QAB_PAO, 0);
+    }
 
     timer_off("DLPNO-CCSD(T)");
 

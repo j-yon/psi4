@@ -101,6 +101,8 @@ class DLPNOBase : public Wavefunction {
       size_t qij_memory_;
       size_t qia_memory_;
       size_t qab_memory_;
+      /// Write (Q | u v) integrals to disk?
+      bool write_qab_pao_;
 
       /// LMO/LMO three-index integrals
       std::vector<SharedMatrix> qij_;
@@ -108,8 +110,6 @@ class DLPNOBase : public Wavefunction {
       std::vector<SharedMatrix> qia_;
       /// PAO/PAO three-index integrals
       std::vector<SharedMatrix> qab_;
-      /// Cheaper storage of qab_through SVD
-      std::vector<std::tuple<SharedMatrix, SharedVector>> qab_svd_;
 
       /// pair natural orbitals (PNOs)
       std::vector<SharedMatrix> K_iajb_;  ///< exchange operators (i.e. (ia|jb) integrals)
@@ -392,6 +392,8 @@ class DLPNOCCSD_T : public DLPNOCCSD {
     std::vector<SharedVector> e_tno_; ///< TNO orbital energies
     std::vector<int> n_tno_; ///<number of tnos per triplet domain
     std::vector<double> tno_scale_; ///< scaling factor to apply to each triplet to account for TNO truncation error
+    /// Write amplitudes to disk?
+    bool write_amplitudes_ = false;
 
     /// => TNO overlap matrices <= ///
     std::vector<std::vector<SharedMatrix>> S_ijk_ljk_; ///< tno overlaps

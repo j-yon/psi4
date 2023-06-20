@@ -165,6 +165,18 @@ void DLPNOCCSD::estimate_memory() {
         if (i >= j) qvv += naux_ij * npno_ij * npno_ij;
     }
 
+    if (write_qab_pao_) qab_memory_ = 0;
+
+    if (qvv * sizeof(double) > 0.5 * (memory_ - qab_memory_ * sizeof(double))) {
+        write_qab_pno_ = true;
+        outfile->Printf("    Storing (aux | pno * pno) integrals to disk...\n\n");
+    } else {
+        write_qab_pno_ = false;
+        outfile->Printf("    Keeping (aux | pno * pno) integrals in core...\n\n");
+    }
+    
+    if (write_qab_pno_) qvv  = 0;
+
     const size_t total_df_memory = qij_memory_ + qia_memory_ + qab_memory_;
     const size_t total_pno_int_memory = oooo + ooov + oovv + ovvv + qvv;
     const size_t total_memory = total_df_memory + pno_overlap_memory + total_pno_int_memory;
@@ -182,18 +194,6 @@ void DLPNOCCSD::estimate_memory() {
     outfile->Printf("    Total Memory Given     : %.3f [GiB]\n", memory_ * pow(2.0, -30));
     outfile->Printf("    Total Memory Required  : %.3f [GiB]\n\n", total_memory * pow(2.0, -30) * sizeof(double));
 
-    if (qvv * sizeof(double) > 0.5 * memory_) {
-        write_qab_pno_ = true;
-        outfile->Printf("    Storing 4-virtual integrals to disk...\n\n");
-    } else {
-        write_qab_pno_ = false;
-        outfile->Printf("    Keeping 4-virtual integrals in core...\n\n");
-    }
-
-    if (write_qab_pno_) {
-        psio_ = _default_psio_lib_;
-        psio_->open(PSIF_DLPNO_QAB_PNO, PSIO_OPEN_NEW);
-    }
 }
 
 std::vector<double> DLPNOCCSD::compute_pair_energies(bool iterate) {
@@ -943,6 +943,14 @@ void DLPNOCCSD::compute_cc_integrals() {
     size_t qvv_memory = 0;
     size_t qvv_svd_memory = 0;
 
+    if (write_qab_pao_) {
+        psio_->open(PSIF_DLPNO_QAB_PAO, PSIO_OPEN_OLD);
+    }
+
+    if (write_qab_pno_) {
+        psio_->open(PSIF_DLPNO_QAB_PNO, PSIO_OPEN_NEW);
+    }
+
 #pragma omp parallel for schedule(dynamic, 1) reduction(+ : qvv_memory) reduction(+ : qvv_svd_memory)
     for (int ij = 0; ij < n_lmo_pairs; ++ij) {
         int i, j;
@@ -993,22 +1001,21 @@ void DLPNOCCSD::compute_cc_integrals() {
             C_DCOPY(npno_ij, &(*q_jv_tmp)(0,0), 1, &(*q_jv)(q_ij, 0), 1);
 
             SharedMatrix q_vv_tmp;
-            if (T_CUT_EIG_ > 0.0) {
-                SharedMatrix P;
-                SharedVector D;
-                std::tie(P, D) = qab_svd_[q];
-                auto qab_temp1 = linalg::doublet(X_pno_[ij], submatrix_rows(*P, lmopair_pao_to_riatom_pao_[ij][q_ij]), true, false);
-                auto qab_temp2 = qab_temp1->clone();
-                // auto Dtemp = std::make_shared<Matrix>(D->dim(), D->dim());
-                // Dtemp->set_diagonal(D);
-                for (int i = 0; i < D->dim(); ++i) qab_temp1->scale_column(0, i, D->get(i));
-
-                q_vv_tmp = linalg::doublet(qab_temp1, qab_temp2, false, true);
+            if (write_qab_pao_) {
+                std::stringstream toc_entry;
+                toc_entry << "QAB (PAO) " << q;
+                int npao_q = riatom_to_paos_ext_[centerq].size();
+                q_vv_tmp = std::make_shared<Matrix>(toc_entry.str(), npao_q, npao_q);
+#pragma omp critical
+                q_vv_tmp->load(psio_, PSIF_DLPNO_QAB_PAO, psi::Matrix::LowerTriangle);
             } else {
-                q_vv_tmp = submatrix_rows_and_cols(*qab_[q], lmopair_pao_to_riatom_pao_[ij][q_ij],
-                                lmopair_pao_to_riatom_pao_[ij][q_ij]);
-                q_vv_tmp = linalg::triplet(X_pno_[ij], q_vv_tmp, X_pno_[ij], true, false, false);
+                q_vv_tmp = qab_[q]->clone();
             }
+            
+            q_vv_tmp = submatrix_rows_and_cols(*q_vv_tmp, lmopair_pao_to_riatom_pao_[ij][q_ij],
+                                lmopair_pao_to_riatom_pao_[ij][q_ij]);
+            q_vv_tmp = linalg::triplet(X_pno_[ij], q_vv_tmp, X_pno_[ij], true, false, false);
+            
             C_DCOPY(npno_ij * npno_ij, &(*q_vv_tmp)(0,0), 1, &(*q_vv)(q_ij, 0), 1);
         }
 
@@ -1963,6 +1970,16 @@ double DLPNOCCSD::compute_energy() {
     lccsd_iterations();
     timer_off("LCCSD");
 
+    if (write_qab_pao_) {
+        if (algorithm_ == CCSD) {
+            // Integrals no longer needed
+            psio_->close(PSIF_DLPNO_QAB_PAO, 0);
+        } else {
+            // Integrals may still be needed for post-CCSD calculations
+            psio_->close(PSIF_DLPNO_QAB_PAO, 1);
+        }
+    }
+
     if (write_qab_pno_) {
         // Bye bye (Q_ij | a_ij b_ij) integrals. You won't be missed
         psio_->close(PSIF_DLPNO_QAB_PNO, 0);
@@ -2058,7 +2075,6 @@ void DLPNOCCSD::print_header() {
     outfile->Printf("    T_CUT_PNO    = %6.3e \n", T_CUT_PNO_);
     outfile->Printf("    T_CUT_PAIRS  = %6.3e \n", T_CUT_PAIRS_);
     outfile->Printf("    T_CUT_MKN    = %6.3e \n", T_CUT_MKN_);
-    outfile->Printf("    T_CUT_EIG    = %6.3e \n", T_CUT_EIG_);
     outfile->Printf("    T_CUT_SVD    = %6.3e \n", T_CUT_SVD_);
     outfile->Printf("    DIAG_SCALE   = %6.3e \n", T_CUT_PNO_DIAG_SCALE_);
     outfile->Printf("    T_CUT_DO_ij  = %6.3e \n", options_.get_double("T_CUT_DO_ij"));
