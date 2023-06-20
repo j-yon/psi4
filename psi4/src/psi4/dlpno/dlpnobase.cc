@@ -74,7 +74,6 @@ void DLPNOBase::common_init() {
     T_CUT_EIG_ = options_.get_double("T_CUT_EIG");
     T_CUT_SVD_ = options_.get_double("T_CUT_SVD");
     T_CUT_TNO_ = options_.get_double("T_CUT_TNO");
-    T_CUT_TRIPLETS_ = options_.get_double("T_CUT_TRIPLETS");
 
     if (options_.get_str("DLPNO_ALGORITHM") == "MP2") {
         algorithm_ = MP2;

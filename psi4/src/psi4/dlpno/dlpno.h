@@ -72,8 +72,6 @@ class DLPNOBase : public Wavefunction {
       double T_CUT_PNO_DIAG_SCALE_;
       /// Tolerance for TNO truncation (by occupation number)
       double T_CUT_TNO_;
-      /// Tolerance for determining "strong" and "weak" triplets
-      double T_CUT_TRIPLETS_;
 
       /// auxiliary basis
       std::shared_ptr<BasisSet> ribasis_;
@@ -415,7 +413,7 @@ class DLPNOCCSD_T : public DLPNOCCSD {
     double lccsd_t_iterations();
 
     void print_header();
-    
+
     void print_results();
 
    public:
