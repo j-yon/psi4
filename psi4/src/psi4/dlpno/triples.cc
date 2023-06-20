@@ -58,6 +58,25 @@ namespace dlpno {
 DLPNOCCSD_T::DLPNOCCSD_T(SharedWavefunction ref_wfn, Options &options) : DLPNOCCSD(ref_wfn, options) {}
 DLPNOCCSD_T::~DLPNOCCSD_T() {}
 
+void DLPNOCCSD_T::print_header() {
+    std::string triples_algorithm = (options_.get_bool("T0_APPROXIMATION")) ? "SEMICANONICAL (T0)" : "ITERATIVE (T)";
+    std::string scale_triples = (options_.get_bool("SCALE_TRIPLES") ? "TRUE" : "FALSE");
+
+    outfile->Printf("   --------------------------------------------\n");
+    outfile->Printf("                    DLPNO-CCSD(T)              \n");
+    outfile->Printf("                    by Andy Jiang              \n");
+    outfile->Printf("   --------------------------------------------\n\n");
+    outfile->Printf("  DLPNO convergence set to %s.\n\n", options_.get_str("PNO_CONVERGENCE").c_str());
+    outfile->Printf("  Detailed DLPNO thresholds and cutoffs:\n");
+    outfile->Printf("    ALGORITHM    = %6s   \n", triples_algorithm.c_str());
+    outfile->Printf("    T_CUT_TNO    = %6.3e \n", options_.get_double("T_CUT_TNO"));
+    outfile->Printf("    T_CUT_TNO_T  = %6.3e \n", options_.get_double("T_CUT_TNO_T"));
+    outfile->Printf("    F_CUT_T      = %6.3e \n", options_.get_double("F_CUT_T"));
+    outfile->Printf("    T0_SCALING?  = %6s   \n\n", options_.get_str("SCALE_TRIPLES"));
+    outfile->Printf("\n");
+}
+}
+
 void DLPNOCCSD_T::recompute_pnos() {
     timer_on("Recompute PNOs");
 
@@ -174,7 +193,7 @@ void DLPNOCCSD_T::recompute_pnos() {
     timer_off("Recompute PNOs");
 }
 
-void DLPNOCCSD_T::tno_transform() {
+void DLPNOCCSD_T::tno_transform(bool scale_triples) {
     timer_on("TNO transform");
 
     int naocc = nalpha_ - nfrzc();
@@ -273,6 +292,9 @@ void DLPNOCCSD_T::tno_transform() {
         }
     }
 
+    tno_scale_.clear();
+    tno_scale_.resize(n_lmo_triplets, 1.0);
+
 #pragma omp parallel for schedule(static, 1)
     for (int ijk = 0; ijk < n_lmo_triplets; ++ijk) {
         int i, j, k;
@@ -347,6 +369,29 @@ void DLPNOCCSD_T::tno_transform() {
                                   (-e_pao_ijk->get(b) + -e_pao_ijk->get(a) + F_lmo_->get(i, i) + F_lmo_->get(k, k)));
             }
         }
+
+        // Save amplitudes as MP2 versions for TNO truncation scaling
+        auto T_pao_ij_mp2 = T_pao_ij->clone();
+        auto T_pao_jk_mp2 = T_pao_jk->clone();
+        auto T_pao_ik_mp2 = T_pao_ik->clone();
+
+        // Create antisymmetrized ERIs
+        auto L_pao_ij = K_pao_ij->clone();
+        L_pao_ij->scale(2.0);
+        L_pao_ij->subtract(K_pao_ij->transpose());
+
+        auto L_pao_jk = K_pao_jk->clone();
+        L_pao_jk->scale(2.0);
+        L_pao_jk->subtract(K_pao_jk->transpose());
+
+        auto L_pao_ik = K_pao_ik->clone();
+        L_pao_ik->scale(2.0);
+        L_pao_ik->subtract(K_pao_ik->transpose());
+
+        // Compute non-truncated energies
+        double e_ij_non_trunc = T_pao_ij_mp2->vector_dot(L_pao_ij);
+        double e_jk_non_trunc = T_pao_jk_mp2->vector_dot(L_pao_jk);
+        double e_ik_non_trunc = T_pao_ik_mp2->vector_dot(L_pao_ik);
 
         if (n_pno_[ij] > 0) {
             T_pao_ij = T_iajb_[ij]->clone();
@@ -423,8 +468,7 @@ void DLPNOCCSD_T::tno_transform() {
         Tt_pao_ik->scale(2.0);
         Tt_pao_ik->subtract(T_pao_ik->transpose());
 
-        // Construct pair density from amplitudes
-
+        // Construct pair densities from amplitudes
         auto D_ij = linalg::doublet(Tt_pao_ij, T_pao_ij, false, true);
         D_ij->add(linalg::doublet(Tt_pao_ij, T_pao_ij, true, false));
 
@@ -468,6 +512,25 @@ void DLPNOCCSD_T::tno_transform() {
         std::tie(tno_canon, e_tno_ijk) = canonicalizer(X_tno_ijk, F_pao_ijk);
 
         X_tno_ijk = linalg::doublet(X_tno_ijk, tno_canon, false, false);
+
+        if (scale_triples) {
+            // Compute truncated energies and scaling factors
+            auto T_pno_ij_mp2 = linalg::triplet(X_tno_ijk, T_pao_ij_mp2, X_tno_ijk, true, false, false);
+            auto T_pno_jk_mp2 = linalg::triplet(X_tno_ijk, T_pao_jk_mp2, X_tno_ijk, true, false, false);
+            auto T_pno_ik_mp2 = linalg::triplet(X_tno_ijk, T_pao_ik_mp2, X_tno_ijk, true, false, false);
+
+            auto L_pno_ij = linalg::triplet(X_tno_ijk, L_pao_ij, X_tno_ijk, true, false, false);
+            auto L_pno_jk = linalg::triplet(X_tno_ijk, L_pao_jk, X_tno_ijk, true, false, false);
+            auto L_pno_ik = linalg::triplet(X_tno_ijk, L_pao_ik, X_tno_ijk, true, false, false);
+        
+            double e_ij_trunc = T_pno_ij_mp2->vector_dot(L_pno_ij);
+            double e_jk_trunc = T_pno_jk_mp2->vector_dot(L_pno_jk);
+            double e_ik_trunc = T_pno_ik_mp2->vector_dot(L_pno_ik);
+        
+            tno_scale_[ijk] = (e_ij_non_trunc / e_ij_trunc + e_jk_non_trunc / e_jk_trunc
+                                + e_ik_non_trunc / e_ik_trunc) / 3.0;
+        }
+
         X_tno_ijk = linalg::doublet(X_pao_ijk, X_tno_ijk, false, false);
 
         X_tno_[ijk] = X_tno_ijk;
@@ -802,7 +865,7 @@ double DLPNOCCSD_T::compute_lccsd_t0(bool store_amplitudes) {
             }
         }
 
-        double prefactor = 1.0;
+        double prefactor = tno_scale_[ijk];
         if (i == j && j == k) {
             prefactor /= 6.0;
         } else if (i == j || j == k || i == k) {
@@ -852,7 +915,7 @@ double DLPNOCCSD_T::compute_t_iteration_energy() {
         int jki = i_j_k_to_ijk_[j * naocc * naocc + k * naocc + i];
         int kij = i_j_k_to_ijk_[k * naocc * naocc + i * naocc + j];
 
-        double prefactor = 1.0;
+        double prefactor = tno_scale_[ijk];
         if (i == j && j == k) {
             prefactor /= 6.0;
         } else if (i == j || j == k || i == k) {
@@ -1134,8 +1197,12 @@ double DLPNOCCSD_T::compute_energy() {
     Qab_ij_.clear();
     S_pno_ij_mn_.clear();
 
+    bool scale_triples = options_.get_bool("SCALE_TRIPLES");
+
+    print_header();
+    
     recompute_pnos();
-    tno_transform();
+    tno_transform(scale_triples);
     double E_T0 = compute_lccsd_t0();
     e_lccsd_t_ = e_lccsd_ + E_T0;
 
@@ -1143,8 +1210,9 @@ double DLPNOCCSD_T::compute_energy() {
 
         outfile->Printf("\n\n  ==> Computing Full Iterative (T) <==\n\n");
 
+        // Reset T_CUT_TNO for the iterative (T) iterations
         T_CUT_TNO_ = options_.get_double("T_CUT_TNO_T");
-        tno_transform();
+        tno_transform(false);
         estimate_memory();
 
         double E_T0_crude = compute_lccsd_t0(true);

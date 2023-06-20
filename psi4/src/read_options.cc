@@ -2526,9 +2526,9 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         /*- Mulliken charge threshold for including aux BFs on atom (a) in domain of LMO (i) !expert -*/
         options.add_double("T_CUT_MKN", 1e-3);
         /*- Eigenvalue Tolerance for factoring (Q|u_t v_t) two electron integrals */
-        options.add_double("T_CUT_EIG", 1e-4);
+        options.add_double("T_CUT_EIG", 0.0);
         /*- SVD Tolerance for factoring (Q_ij|a_ij b_ij) two electron integrals */
-        options.add_double("T_CUT_SVD", 1e-3);
+        options.add_double("T_CUT_SVD", 0.0);
         /*- Basis set coefficient threshold for including basis function (m) in domain of LMO (i) !expert -*/
         options.add_double("T_CUT_CLMO", 1e-3);
         /*- Basis set coefficient threshold for including basis function (n) in domain of PAO (u) !expert -*/
@@ -2543,8 +2543,8 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_double("T_CUT_TNO", 1e-9);
         /*- Occupation number threshold for iterative (T) algorithm !expert */
         options.add_double("T_CUT_TNO_T", 1e-7);
-        /*- The tolerance to decide between "Weak" and "Strong" Triplets in iterative DLPNO-(T) -*/
-        options.add_double("T_CUT_TRIPLETS", 1e-6);
+        /*- Scale (T) energy using MP2 truncation error estimate? !expert */
+        options.add_bool("SCALE_TRIPLES", true);
         /*- Fock matrix threshold for treating ampltudes as coupled during local (T) iterations !expert -*/
         options.add_double("F_CUT_T", 1e-3);
 

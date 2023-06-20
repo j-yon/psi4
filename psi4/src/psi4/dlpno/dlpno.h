@@ -385,6 +385,7 @@ class DLPNOCCSD_T : public DLPNOCCSD {
     std::vector<SharedMatrix> X_tno_; ///< global PAO -> canonical TNO transforms
     std::vector<SharedVector> e_tno_; ///< TNO orbital energies
     std::vector<int> n_tno_; ///<number of tnos per triplet domain
+    std::vector<double> tno_scale_; ///< scaling factor to apply to each triplet to account for TNO truncation error
 
     /// => TNO overlap matrices <= ///
     std::vector<std::vector<SharedMatrix>> S_ijk_ljk_; ///< tno overlaps
@@ -397,7 +398,7 @@ class DLPNOCCSD_T : public DLPNOCCSD {
     /// Recompute PNOs (Pair Natural Orbitals) using CCSD densities
     void recompute_pnos();
     /// Create TNOs (Triplet Natural Orbitals) for DLPNO-(T)
-    void tno_transform();
+    void tno_transform(bool scale_triples);
 
     /// Returns a symmetrized version of that matrix (in i <= j <= k ordering)
     inline SharedMatrix triples_permuter(const SharedMatrix& X, int i, int j, int k, bool reverse=false);
@@ -413,6 +414,8 @@ class DLPNOCCSD_T : public DLPNOCCSD {
     /// L_CCSD(T) iterations
     double lccsd_t_iterations();
 
+    void print_header();
+    
     void print_results();
 
    public:
