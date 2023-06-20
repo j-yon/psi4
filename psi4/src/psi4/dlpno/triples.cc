@@ -60,7 +60,7 @@ DLPNOCCSD_T::~DLPNOCCSD_T() {}
 
 void DLPNOCCSD_T::print_header() {
     std::string triples_algorithm = (options_.get_bool("T0_APPROXIMATION")) ? "SEMICANONICAL (T0)" : "ITERATIVE (T)";
-    std::string scale_triples = (options_.get_bool("SCALE_TRIPLES") ? "TRUE" : "FALSE");
+    std::string scale_t0 = (options_.get_bool("SCALE_T0") ? "TRUE" : "FALSE");
 
     outfile->Printf("   --------------------------------------------\n");
     outfile->Printf("                    DLPNO-CCSD(T)              \n");
@@ -72,9 +72,8 @@ void DLPNOCCSD_T::print_header() {
     outfile->Printf("    T_CUT_TNO    = %6.3e \n", options_.get_double("T_CUT_TNO"));
     outfile->Printf("    T_CUT_TNO_T  = %6.3e \n", options_.get_double("T_CUT_TNO_T"));
     outfile->Printf("    F_CUT_T      = %6.3e \n", options_.get_double("F_CUT_T"));
-    outfile->Printf("    T0_SCALING?  = %6s   \n\n", options_.get_str("SCALE_TRIPLES"));
+    outfile->Printf("    T0_SCALING?  = %6s   \n\n", scale_t0);
     outfile->Printf("\n");
-}
 }
 
 void DLPNOCCSD_T::recompute_pnos() {
@@ -1197,10 +1196,10 @@ double DLPNOCCSD_T::compute_energy() {
     Qab_ij_.clear();
     S_pno_ij_mn_.clear();
 
-    bool scale_triples = options_.get_bool("SCALE_TRIPLES");
+    bool scale_triples = options_.get_bool("SCALE_T0");
 
     print_header();
-    
+
     recompute_pnos();
     tno_transform(scale_triples);
     double E_T0 = compute_lccsd_t0();

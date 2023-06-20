@@ -2543,8 +2543,8 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_double("T_CUT_TNO", 1e-9);
         /*- Occupation number threshold for iterative (T) algorithm !expert */
         options.add_double("T_CUT_TNO_T", 1e-7);
-        /*- Scale (T) energy using MP2 truncation error estimate? !expert */
-        options.add_bool("SCALE_TRIPLES", true);
+        /*- Scale (T0) energy using MP2 truncation error estimate? !expert */
+        options.add_bool("SCALE_T0", true);
         /*- Fock matrix threshold for treating ampltudes as coupled during local (T) iterations !expert -*/
         options.add_double("F_CUT_T", 1e-3);
 
