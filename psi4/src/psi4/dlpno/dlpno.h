@@ -35,6 +35,8 @@
 #include "psi4/libmints/matrix.h"
 #include "psi4/libmints/vector.h"
 #include "psi4/libqt/qt.h"
+#include "psi4/libpsio/psio.h"
+#include "psi4/psifiles.h"
 
 #include <map>
 #include <tuple>
@@ -182,6 +184,9 @@ class DLPNOBase : public Wavefunction {
       std::vector<std::vector<std::vector<int>>> lmopair_lmo_to_riatom_lmo_;
       std::vector<std::vector<std::vector<int>>> lmopair_pao_to_riatom_pao_;
 
+      /// PSIO object (to help with reading/writing large tensors)
+      std::shared_ptr<PSIO> psio_;
+
       void common_init();
 
       // Helper functions
@@ -268,8 +273,11 @@ class DLPNOMP2 : public DLPNOBase {
 
 class DLPNOCCSD : public DLPNOBase {
    protected:
-    /// How to compute CC integrals
-    VirtualStorage virtual_storage_;
+    /// Write (Q_ij | a_ij b_ij) integrals to disk?
+    bool write_qab_pno_;
+
+    /// Number of svd functions for PNO pair ij in rank-reduced (Q_ij |a_ij b_ij)
+    std::vector<int> n_svd_;
 
     /// PNO overlap integrals
     std::vector<std::vector<SharedMatrix>> S_pno_ij_mn_; ///< pno overlaps

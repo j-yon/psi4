@@ -181,13 +181,18 @@ void DLPNOCCSD::estimate_memory() {
     outfile->Printf("    PNO/PNO overlaps       : %.3f [GiB]\n\n", pno_overlap_memory * pow(2.0, -30) * sizeof(double));
     outfile->Printf("    Total Memory Given     : %.3f [GiB]\n", memory_ * pow(2.0, -30));
     outfile->Printf("    Total Memory Required  : %.3f [GiB]\n\n", total_memory * pow(2.0, -30) * sizeof(double));
-    
-    if (total_memory * sizeof(double) < memory_) {
-        outfile->Printf("    Storing virtual/virtual integrals...\n\n");
-        virtual_storage_ = CORE;
+
+    if (qvv * sizeof(double) > 0.5 * memory_) {
+        write_qab_pno_ = true;
+        outfile->Printf("    Storing 4-virtual integrals to disk...\n\n");
     } else {
-        outfile->Printf("    Computing virtual/virtual integrals as needed...\n\n");
-        virtual_storage_ = DIRECT;
+        write_qab_pno_ = false;
+        outfile->Printf("    Keeping 4-virtual integrals in core...\n\n");
+    }
+
+    if (write_qab_pno_) {
+        psio_ = _default_psio_lib_;
+        psio_->open(PSIF_DLPNO_QAB_PNO, PSIO_OPEN_NEW);
     }
 }
 
@@ -931,7 +936,9 @@ void DLPNOCCSD::compute_cc_integrals() {
     K_tilde_phys_.resize(n_lmo_pairs);
     L_tilde_.resize(n_lmo_pairs);
     // 4 virtual
-    if (virtual_storage_ == CORE) Qab_ij_.resize(n_lmo_pairs);
+    Qab_ij_.resize(n_lmo_pairs);
+
+    n_svd_.resize(n_lmo_pairs);
 
     size_t qvv_memory = 0;
     size_t qvv_svd_memory = 0;
@@ -1037,7 +1044,7 @@ void DLPNOCCSD::compute_cc_integrals() {
         L_tilde_[ji]->scale(2.0);
         L_tilde_[ji]->subtract(K_tilde_temp);
 
-        if (virtual_storage_ == CORE && i <= j) {
+        if (i <= j) {
             // SVD Decomposition of DF-ERIs
             // DOI: 10.1063/1.4905005
             if (T_CUT_SVD_ > 0.0) {
@@ -1058,22 +1065,29 @@ void DLPNOCCSD::compute_cc_integrals() {
                 auto B_rs = linalg::doublet(U, U, true, false);
                 B_rs->power(0.5, 1.0e-14);
             
-                V = linalg::doublet(B_rs, submatrix_rows(*V, slice_indices));
-
-                Qab_ij_[ij].resize(nsvd_ij);
-                for (int q_ij = 0; q_ij < nsvd_ij; q_ij++) {
-                    Qab_ij_[ij][q_ij] = std::make_shared<Matrix>(npno_ij, npno_ij);
-                    C_DCOPY(npno_ij * npno_ij, &(*V)(q_ij, 0), 1, &(*Qab_ij_[ij][q_ij])(0, 0), 1);
-                }
+                q_vv = linalg::doublet(B_rs, submatrix_rows(*V, slice_indices));
 
                 qvv_memory += naux_ij * npno_ij * npno_ij;
                 qvv_svd_memory += nsvd_ij * npno_ij * npno_ij;
+
+                n_svd_[ij] = nsvd_ij;
             } else {
-                Qab_ij_[ij].resize(naux_ij);
-                for (int q_ij = 0; q_ij < naux_ij; q_ij++) {
+                n_svd_[ij] = naux_ij;
+            }
+
+            Qab_ij_[ij].resize(q_vv->nrow());
+
+            if (!write_qab_pno_) {
+                for (int q_ij = 0; q_ij < q_vv->nrow(); q_ij++) {
                     Qab_ij_[ij][q_ij] = std::make_shared<Matrix>(npno_ij, npno_ij);
                     C_DCOPY(npno_ij * npno_ij, &(*q_vv)(q_ij, 0), 1, &(*Qab_ij_[ij][q_ij])(0, 0), 1);
                 }
+            } else {
+                std::stringstream toc_entry;
+                toc_entry << "QAB (PNO) " << ij;
+                q_vv->set_name(toc_entry.str());
+#pragma omp critical
+                q_vv->save(psio_, PSIF_DLPNO_QAB_PNO, psi::Matrix::ThreeIndexLowerTriangle);
             }
         }
 
@@ -1588,7 +1602,7 @@ void DLPNOCCSD::lccsd_iterations() {
             */
 
             // Madriaga Eq. 35, Term 5
-            if (virtual_storage_ == CORE) { // High Memory Algorithm
+            if (!write_qab_pno_) { // High Memory Algorithm
                 int nsvd_ij = (i > j) ? Qab_ij_[ji].size() : Qab_ij_[ij].size();
                 for (int q_ij = 0; q_ij < nsvd_ij; q_ij++) {
                     if (i > j) r2_temp = linalg::triplet(Qab_ij_[ji][q_ij], tau[ij], Qab_ij_[ji][q_ij]);
@@ -1597,30 +1611,24 @@ void DLPNOCCSD::lccsd_iterations() {
                     Rn_iajb[ij]->add(r2_temp);
                 }
             } else { // Low Memory Algorithm
-                int naux_ij = lmopair_to_ribfs_[ij].size();
-                auto q_ab = std::make_shared<Matrix>(naux_ij, npno_ij * npno_ij);
-                for (int q_ij = 0; q_ij < naux_ij; q_ij++) {
-                    int q = lmopair_to_ribfs_[ij][q_ij];
-                    int centerq = ribasis_->function_to_center(q);
+                int nsvd_ij = (i > j) ? n_svd_[ji] : n_svd_[ij];
+                int pair_no = (i > j) ? ji : ij;
 
-                    auto ab_temp = submatrix_rows_and_cols(*qab_[q], lmopair_pao_to_riatom_pao_[ij][q_ij], 
-                                                        lmopair_pao_to_riatom_pao_[ij][q_ij]);
-                    ab_temp = linalg::triplet(X_pno_[ij], ab_temp, X_pno_[ij], true, false, false);
-                    C_DCOPY(npno_ij * npno_ij, &(*ab_temp)(0,0), 1, &(*q_ab)(q_ij, 0), 1);
-                }
-                auto A_solve = submatrix_rows_and_cols(*full_metric_, lmopair_to_ribfs_[ij], lmopair_to_ribfs_[ij]);
-                A_solve->power(0.5, 1.0e-14);
-                C_DGESV_wrapper(A_solve, q_ab);
+                std::stringstream toc_entry;
+                toc_entry << "QAB (PNO) " << pair_no;
 
-                for (int q_ij = 0; q_ij < lmopair_to_ribfs_[ij].size(); q_ij++) {
-                    std::vector<int> q_ij_slice(1, q_ij);
-                    r2_temp = submatrix_rows(*q_ab, q_ij_slice);
-                    r2_temp->reshape(npno_ij, npno_ij);
-                    r2_temp = linalg::triplet(r2_temp, tau[ij], r2_temp);
+                auto q_vv = std::make_shared<Matrix>(toc_entry.str(), nsvd_ij, npno_ij * npno_ij);
+#pragma omp critical
+                q_vv->load(psio_, PSIF_DLPNO_QAB_PNO, psi::Matrix::ThreeIndexLowerTriangle);
+
+                for (int q_ij = 0; q_ij < nsvd_ij; q_ij++) {
+                    auto qab_ij_temp = std::make_shared<Matrix>(npno_ij, npno_ij);
+                    C_DCOPY(npno_ij * npno_ij, &(*q_vv)(q_ij, 0), 1, &(*qab_ij_temp)(0, 0), 1);
+
+                    r2_temp = linalg::triplet(qab_ij_temp, tau[ij], qab_ij_temp);
                     r2_temp->scale(0.5);
                     Rn_iajb[ij]->add(r2_temp);
                 }
-                q_ab = nullptr;
             }
 
             // Madriaga Eq. 35, Term 12
@@ -1954,6 +1962,11 @@ double DLPNOCCSD::compute_energy() {
     timer_on("LCCSD");
     lccsd_iterations();
     timer_off("LCCSD");
+
+    if (write_qab_pno_) {
+        // Bye bye (Q_ij | a_ij b_ij) integrals. You won't be missed
+        psio_->close(PSIF_DLPNO_QAB_PNO, 0);
+    }
 
     print_results();
 
