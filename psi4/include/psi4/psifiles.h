@@ -282,9 +282,7 @@
 
 #define PSIF_DLPNO_QAB_PAO       310  /*- A PSIO file to store all (AUX | PAO * PAO) integrals in a DLPNO computation -*/
 #define PSIF_DLPNO_QAB_PNO       311  /*- A PSIO file to store all (AUX | PNO * PNO) integrals in a DLPNO computation -*/
-#define PSIF_DLPNO_WIJK          312  /*- A PSIO file to store all W_{ijk}^{abc} intermediates in a DLPNO computation -*/
-#define PSIF_DLPNO_VIJK          313  /*- A PSIO file to store all V_{ijk}^{abc} intermediates in a DLPNO computation -*/
-#define PSIF_DLPNO_TRIPLES       314  /*- A PSIO file to store all triples amplitudes in a DLPNO-CCSD(T) computation  -*/
+#define PSIF_DLPNO_TRIPLES       312  /*- A PSIO file to store all triples-like terms in a DLPNO-CCSD(T) computation  -*/
 
 // following four are not completely managed by PSIO and starting number resettable through CI_FILE_START option
 #define PSIF_CI_HD_FILE          350  /*- DETCI H diagonal -*/

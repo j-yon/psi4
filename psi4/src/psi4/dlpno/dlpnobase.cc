@@ -1051,6 +1051,7 @@ void DLPNOBase::compute_qab() {
 
     int nbf = basisset_->nbf();
     int naux = ribasis_->nbf();
+    int natom = molecule_->natom();
 
     size_t nthread = 1;
 #ifdef _OPENMP
@@ -1073,7 +1074,7 @@ void DLPNOBase::compute_qab() {
         outfile->Printf("\n    Writing (aux | pao * pao) integrals to disk...\n");
     } else {
         write_qab_pao_ = false;
-        outfile->Printf("\n    Keeping (aux | pno * pno) integrals in core...\n");
+        outfile->Printf("\n    Keeping (aux | pao * pao) integrals in core...\n");
     }
 
     if (write_qab_pao_) {

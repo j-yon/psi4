@@ -169,7 +169,7 @@ void DLPNOCCSD::estimate_memory() {
 
     if (qvv * sizeof(double) > 0.5 * (memory_ - qab_memory_ * sizeof(double))) {
         write_qab_pno_ = true;
-        outfile->Printf("    Storing (aux | pno * pno) integrals to disk...\n\n");
+        outfile->Printf("    Writing (aux | pno * pno) integrals to disk...\n\n");
     } else {
         write_qab_pno_ = false;
         outfile->Printf("    Keeping (aux | pno * pno) integrals in core...\n\n");
