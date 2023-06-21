@@ -280,7 +280,7 @@ class DLPNOCCSD : public DLPNOBase {
     std::vector<int> n_svd_;
 
     /// PNO overlap integrals
-    std::vector<std::vector<SharedMatrix>> S_pno_ij_mn_; ///< pno overlaps
+    std::vector<std::vector<SharedMatrix>> S_pno_ij_kj_; ///< pno overlaps
 
     /// Coupled-cluster amplitudes
     std::vector<SharedMatrix> T_ia_; ///< singles amplitudes
@@ -395,11 +395,6 @@ class DLPNOCCSD_T : public DLPNOCCSD {
     /// Write amplitudes to disk?
     bool write_amplitudes_ = false;
 
-    /// => TNO overlap matrices <= ///
-    std::vector<std::vector<SharedMatrix>> S_ijk_ljk_; ///< tno overlaps
-    std::vector<std::vector<SharedMatrix>> S_ijk_ilk_; ///< tno overlaps
-    std::vector<std::vector<SharedMatrix>> S_ijk_ijl_; ///< tno overlaps
-
     /// final energies
     double e_lccsd_t_; ///< local (T) correlation energy
 
@@ -417,8 +412,6 @@ class DLPNOCCSD_T : public DLPNOCCSD {
     double compute_lccsd_t0(bool store_amplitudes=false);
     /// A function to estimate Full-(T) memory costs
     void estimate_memory();
-    /// Compute TNO/TNO overlap matrices
-    // void compute_tno_overlaps();
     /// L_CCSD(T) iterations
     double lccsd_t_iterations();
 

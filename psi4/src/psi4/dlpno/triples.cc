@@ -1212,7 +1212,7 @@ double DLPNOCCSD_T::compute_energy() {
     K_tilde_phys_.clear();
     L_tilde_.clear();
     Qab_ij_.clear();
-    S_pno_ij_mn_.clear();
+    S_pno_ij_kj_.clear();
 
     bool scale_triples = options_.get_bool("SCALE_T0");
 

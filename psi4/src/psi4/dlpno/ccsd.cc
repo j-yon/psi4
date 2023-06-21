@@ -62,58 +62,47 @@ inline SharedMatrix DLPNOCCSD::S_PNO(const int ij, const int mn) {
     int i, j, m, n;
     std::tie(i, j) = ij_to_i_j_[ij];
     std::tie(m, n) = ij_to_i_j_[mn];
-    
-    
-    const int m_ij = lmopair_to_lmos_dense_[ij][m], n_ij = lmopair_to_lmos_dense_[ij][n];
-    if (m_ij == -1 || n_ij == -1) {
-        // outfile->Printf("Invalid PNO Pairs (%d, %d) and (%d, %d)\n", i, j, m, n);
-        // throw PSIEXCEPTION("Invalid PNO pairs!");
+
+    int ji = ij_to_ji_[ij];
+    int nm = ij_to_ji_[mn];
+
+    if (i == m) { // S(ij, mn) -> S(ij, in) -> S(ji, ni)
+        return S_pno_ij_kj_[ji][n];
+    } else if (i == n) { // S(ij, mn) -> S(ij, mi) -> S(ji, mi)
+        return S_pno_ij_kj_[ji][m];
+    } else if (j == m) { // S(ij, mn) -> S(ij, jn) -> S(ij, nj)
+        return S_pno_ij_kj_[ij][n];
+    } else if (j == n) { // S(ij, mn) -> S(ij, mj)
+        return S_pno_ij_kj_[ij][m];
+    } else {
         auto S_ij_mn = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[mn]);
         return linalg::triplet(X_pno_[ij], S_ij_mn, X_pno_[mn], true, false, false);
-    }
-
-    const int nlmo_ij = lmopair_to_lmos_[ij].size();
-
-    int mn_ij; 
-    if (m_ij < n_ij) {
-        mn_ij = n_ij * nlmo_ij + m_ij;
-    } else {
-        mn_ij = m_ij * nlmo_ij + n_ij;
-    }
-
-    if (i < j) {
-        const int ji = ij_to_ji_[ij];
-        return S_pno_ij_mn_[ji][mn_ij];
-    } else {
-        return S_pno_ij_mn_[ij][mn_ij];
     }
 }
 
 void DLPNOCCSD::compute_pno_overlaps() {
+
+    const int naocc = i_j_to_ij_.size();
     const int n_lmo_pairs = ij_to_i_j_.size();
-    S_pno_ij_mn_.resize(n_lmo_pairs);
+    S_pno_ij_kj_.resize(n_lmo_pairs);
 
 #pragma omp parallel for schedule(dynamic, 1)
     for (int ij = 0; ij < n_lmo_pairs; ++ij) {
         int i, j;
         std::tie(i, j) = ij_to_i_j_[ij];
 
+        S_pno_ij_kj_[ij].resize(naocc);
+
         const int npno_ij = n_pno_[ij];
-        const int nlmo_ij = lmopair_to_lmos_[ij].size();
+        if (npno_ij == 0) continue;
 
-        if (npno_ij == 0 || i < j) continue;
+        for (int k = 0; k < naocc; ++k) {
+            int kj = i_j_to_ij_[k][j];
 
-        S_pno_ij_mn_[ij].resize(nlmo_ij * nlmo_ij);
+            if (kj == -1 || n_pno_[kj] == 0) continue;
 
-        for (int mn_ij = 0; mn_ij < nlmo_ij * nlmo_ij; mn_ij++) {
-            const int m_ij = mn_ij / nlmo_ij, n_ij = mn_ij % nlmo_ij;
-            const int m = lmopair_to_lmos_[ij][m_ij], n = lmopair_to_lmos_[ij][n_ij];
-            const int mn = i_j_to_ij_[m][n];
-
-            if (mn == -1 || n_pno_[mn] == 0 || m_ij < n_ij) continue;
-
-            S_pno_ij_mn_[ij][mn_ij] = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[mn]);
-            S_pno_ij_mn_[ij][mn_ij] = linalg::triplet(X_pno_[ij], S_pno_ij_mn_[ij][mn_ij], X_pno_[mn], true, false, false);
+            S_pno_ij_kj_[ij][k] = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[kj]);
+            S_pno_ij_kj_[ij][k] = linalg::triplet(X_pno_[ij], S_pno_ij_kj_[ij][k], X_pno_[kj], true, false, false);
         }
     }
 }
@@ -121,6 +110,7 @@ void DLPNOCCSD::compute_pno_overlaps() {
 void DLPNOCCSD::estimate_memory() {
     outfile->Printf("  ==> DLPNO-CCSD Memory Estimate <== \n\n");
 
+    int naocc = i_j_to_ij_.size();
     int n_lmo_pairs = ij_to_i_j_.size();
 
     size_t pno_overlap_memory = 0;
@@ -130,16 +120,14 @@ void DLPNOCCSD::estimate_memory() {
         std::tie(i, j) = ij_to_i_j_[ij];
 
         const int npno_ij = n_pno_[ij];
-        const int nlmo_ij = lmopair_to_lmos_[ij].size();
-        if (npno_ij == 0 || i < j) continue;
+        if (npno_ij == 0) continue;
 
-        for (int mn_ij = 0; mn_ij < nlmo_ij * nlmo_ij; mn_ij++) {
-            const int m_ij = mn_ij / nlmo_ij, n_ij = mn_ij % nlmo_ij;
-            const int m = lmopair_to_lmos_[ij][m_ij], n = lmopair_to_lmos_[ij][n_ij];
-            const int mn = i_j_to_ij_[m][n];
-            if (mn == -1 || n_pno_[mn] == 0 || m_ij < n_ij) continue;
+        for (int k = 0; k < naocc; ++k) {
+            int kj = i_j_to_ij_[k][j];
 
-            pno_overlap_memory += n_pno_[ij] * n_pno_[mn];
+            if (kj == -1 || n_pno_[kj] == 0) continue;
+
+            pno_overlap_memory += n_pno_[ij] * n_pno_[kj];
         }
     }
 
