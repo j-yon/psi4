@@ -621,7 +621,7 @@ void DLPNOCCSD::recompute_pair_domains() {
             int im = i_j_to_ij_[i][m];
             int jm = i_j_to_ij_[j][m];
 
-            if (im != -1 || jm != -1) {
+            if (im != -1 && jm != -1) {
                 lmopair_to_lmos_[ij].push_back(m);
                 lmopair_to_lmos_dense_[ij][m] = m_ij;
                 m_ij++;
