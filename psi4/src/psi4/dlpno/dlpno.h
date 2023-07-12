@@ -328,7 +328,7 @@ class DLPNOCCSD : public DLPNOBase {
     /// (Riplinger 2016 Algo 1 line 26-27)
     void reset_sparsity();
     /// Recompute pair domains using only strong pairs (Riplinger 2016 Algo 1 line 28)
-    void recompute_pair_domains();
+    void recompute_pair_domains(bool crude);
 
     /// compute PNO/PNO overlap matrices for DLPNO-CCSD
     void compute_pno_overlaps();

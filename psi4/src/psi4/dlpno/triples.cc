@@ -230,15 +230,22 @@ void DLPNOCCSD_T::tno_transform(bool scale_triples) {
     i_j_k_to_ijk_.clear();
 
     int ijk = 0;
+    // Every pair contains at least two strong pairs
     for (int ij = 0; ij < n_lmo_pairs; ij++) {
         int i, j;
         std::tie(i, j) = ij_to_i_j_[ij];
         if (i > j) continue;
         for (int k : lmopair_to_lmos_[ij]) {
-            int ik = i_j_to_ij_[i][k], kj = i_j_to_ij_[k][j];
-            if (ik == -1 || kj == -1) continue;
             if (i > k || j > k) continue;
-            if (i_j_k_to_ijk_.count(i * naocc * naocc + j * naocc + k)) continue;
+            int ij_weak = i_j_to_ij_weak_[i][j], ik_weak = i_j_to_ij_weak_[i][k], kj_weak = i_j_to_ij_weak_[k][j];
+
+            int weak_pair_count = 0;
+            if (ij_weak != -1) weak_pair_count += 1;
+            if (ik_weak != -1) weak_pair_count += 1;
+            if (kj_weak != -1) weak_pair_count += 1;
+
+            if (weak_pair_count > 1) continue;
+
             ijk_to_i_j_k_.push_back(std::make_tuple(i, j, k));
             i_j_k_to_ijk_[i * naocc * naocc + j * naocc + k] = ijk;
             i_j_k_to_ijk_[i * naocc * naocc + k * naocc + j] = ijk;

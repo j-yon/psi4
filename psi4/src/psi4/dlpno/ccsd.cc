@@ -569,7 +569,7 @@ void DLPNOCCSD::reset_sparsity() {
     }
 }
 
-void DLPNOCCSD::recompute_pair_domains() {
+void DLPNOCCSD::recompute_pair_domains(bool crude) {
     int natom = molecule_->natom();
     int nbf = basisset_->nbf();
     int naocc = i_j_to_ij_.size();
@@ -578,9 +578,11 @@ void DLPNOCCSD::recompute_pair_domains() {
     int npao = C_pao_->colspi(0);  // same as nbf
 
     // Step 3. Recompute Sparse Maps based on new info
-    ij_to_i_j_ = ij_to_i_j_strong_;
-    i_j_to_ij_ = i_j_to_ij_strong_;
-    ij_to_ji_ = ij_to_ji_strong_;
+    if (crude || (!crude && algorithm_ != CCSD_T)) {
+        ij_to_i_j_ = ij_to_i_j_strong_;
+        i_j_to_ij_ = i_j_to_ij_strong_;
+        ij_to_ji_ = ij_to_ji_strong_;
+    }
 
     n_lmo_pairs = ij_to_i_j_.size();
 
@@ -748,7 +750,7 @@ void DLPNOCCSD::ccsd_pair_prescreening() {
     T_CUT_DO_ *= 0.5;
 
     reset_sparsity();
-    recompute_pair_domains();
+    recompute_pair_domains(true);
 
     // Recompute 3-center integrals (with refined pair domains)
     compute_qia();
@@ -758,8 +760,13 @@ void DLPNOCCSD::ccsd_pair_prescreening() {
     bool iterate = (options_.get_str("PRESCREENING_ALGORITHM") == "FULL_LMP2") ? true : false;
     const std::vector<double>& e_ijs = compute_pair_energies(iterate);
     const auto i_j_to_ij_strong_copy = i_j_to_ij_strong_;
-    de_lmp2_non_crude_ = filter_pairs(e_ijs, i_j_to_ij_strong_copy, T_CUT_PAIRS_);
-    de_lmp2_ += de_lmp2_non_crude_;
+
+    if (algorithm_ != CCSD_T) {
+        de_lmp2_non_crude_ = filter_pairs(e_ijs, i_j_to_ij_strong_copy, T_CUT_PAIRS_);
+        de_lmp2_ += de_lmp2_non_crude_;
+    } else {
+        de_lmp2_non_crude_ = 0.0;
+    }
 
     n_strong_pairs = ij_to_i_j_strong_.size();
     n_weak_pairs = ij_to_i_j_weak_.size();
@@ -769,7 +776,7 @@ void DLPNOCCSD::ccsd_pair_prescreening() {
     outfile->Printf("    Strong Pairs / Total Pairs   = (%.2f %%)\n", (100.0 * n_strong_pairs) / (naocc * naocc));
     outfile->Printf("    SC-LMP2 Weak Pair Correction = %.12f\n\n", de_lmp2_);
 
-    recompute_pair_domains();
+    recompute_pair_domains(false);
 }
 
 void DLPNOCCSD::lmp2_iterations() {
