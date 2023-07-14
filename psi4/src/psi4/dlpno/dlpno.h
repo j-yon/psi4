@@ -124,10 +124,10 @@ class DLPNOBase : public Wavefunction {
 
       /// pre-screening energies
       double de_dipole_; ///< energy correction for distant (LMO, LMO) pairs
-      double e_lmp2_non_trunc_; ///< LMP2 energy in a pure PAO basis (used in tight PNO convergence settings)
-      double e_lmp2_trunc_; ///< LMP2 energy computed with (truncated) PNOs
-      double de_lmp2_; ///< LMP2 correction for weak pairs (only for CC)
-      double de_lmp2_non_crude_; ///< LMP2 correction for weak pairs (non-crude contribution only)
+      double e_lmp2_non_trunc_; ///< LMP2 energy in a pure PAO basis (Strong and Weak Pairs Only)
+      double e_lmp2_trunc_; ///< LMP2 energy computed with (truncated) PNOs (Strong Pairs Only)
+      double de_lmp2_crude_; ///< LMP2 correction for crude pairs (only for CC)
+      double de_lmp2_weak_; ///< LMP2 correction for weak pairs (only for CC)
       double de_pno_total_; ///< energy correction for PNO truncation
       double de_pno_total_os_; ///< energy correction for PNO truncation
       double de_pno_total_ss_; ///< energy correction for PNO truncation
@@ -320,15 +320,17 @@ class DLPNOCCSD : public DLPNOBase {
 
     /// Determine which pairs are strong and weak pairs
     void ccsd_pair_prescreening(); // Encapsulates strong and weak pair screening
-    std::vector<double> compute_pair_energies(bool iterate);
+    std::vector<double> compute_pair_energies(bool crude);
     double filter_pairs(const std::vector<double>& e_ijs, const std::vector<std::vector<int>>& strong_pairs,
                         double tolerance);
+    /// Runs preceeding DLPNO-MP2 computation before DLPNO-CCSD iterations
+    void pno_lmp2_iterations();
     
     /// Regenerate i->u_A, and i->K_A maps after initial prescreening 
     /// (Riplinger 2016 Algo 1 line 26-27)
     void reset_sparsity();
     /// Recompute pair domains using only strong pairs (Riplinger 2016 Algo 1 line 28)
-    void recompute_pair_domains(bool crude);
+    void recompute_pair_domains();
 
     /// compute PNO/PNO overlap matrices for DLPNO-CCSD
     void compute_pno_overlaps();
@@ -339,8 +341,6 @@ class DLPNOCCSD : public DLPNOBase {
     void estimate_memory();
     /// Compute four-center integrals for CC computations
     void compute_cc_integrals();
-    /// Compute LMP2 iterations (to better estimate PNO errors)
-    void lmp2_iterations();
 
     // => CCSD intermediates <= //
 
