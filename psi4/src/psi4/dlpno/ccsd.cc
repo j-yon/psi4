@@ -184,7 +184,8 @@ void DLPNOCCSD::estimate_memory() {
 
 }
 
-std::vector<double> DLPNOCCSD::compute_pair_energies(bool crude) {
+template<bool crude>
+std::vector<double> DLPNOCCSD::compute_pair_energies() {
     /*
         If crude, runs semicanonical (non-iterative) MP2
         If non-crude, computes PNOs (through PNO transform), runs full iterative LMP2
@@ -196,7 +197,7 @@ std::vector<double> DLPNOCCSD::compute_pair_energies(bool crude) {
     std::vector<double> e_ijs(n_lmo_pairs);
 
     outfile->Printf("\n  ==> Computing LMP2 Pair Energies <==\n");
-    if (!crude) {
+    if constexpr (!crude) {
         outfile->Printf("    Using Iterative LMP2\n");
     } else {
         outfile->Printf("    Using Semicanonical (Non-Iterative) LMP2\n");
@@ -208,7 +209,7 @@ std::vector<double> DLPNOCCSD::compute_pair_energies(bool crude) {
     std::vector<SharedMatrix> Tt_paos(n_lmo_pairs);
     std::vector<SharedVector> e_paos(n_lmo_pairs);
 
-    if (!crude) {
+    if constexpr (!crude) {
         outfile->Printf("\n  ==> Forming Pair Natural Orbitals <==\n");
 
         K_iajb_.resize(n_lmo_pairs);   // exchange operators (i.e. (ia|jb) integrals)
@@ -316,7 +317,7 @@ std::vector<double> DLPNOCCSD::compute_pair_energies(bool crude) {
             e_sc_lmp2 += e_ij_pao;
         }
 
-        if (!crude) { // If NOT crude, go ahead and do the PNO transform
+        if constexpr (!crude) { // If NOT crude, go ahead and do the PNO transform
             // Construct pair density from amplitudes
             auto D_ij = linalg::doublet(Tt_pao_ij, T_pao_ij, false, true);
             D_ij->add(linalg::doublet(Tt_pao_ij, T_pao_ij, true, false));
@@ -386,7 +387,7 @@ std::vector<double> DLPNOCCSD::compute_pair_energies(bool crude) {
 
     outfile->Printf("    SC-LMP2 Energy (Using PAOs): %16.12f\n\n", e_sc_lmp2);
 
-    if (crude) return e_ijs;
+    if constexpr (crude) return e_ijs;
 
     // Print out PNO domain information
     int pno_count_total = 0, pno_count_min = nbf, pno_count_max = 0;
@@ -988,7 +989,7 @@ void DLPNOCCSD::ccsd_pair_prescreening() {
 
     outfile->Printf("\n  ==> Determining Crude and Non-Crude Pairs <==\n");
 
-    const std::vector<double>& e_ijs_crude = compute_pair_energies(true);
+    const std::vector<double>& e_ijs_crude = compute_pair_energies<true>();
     de_lmp2_crude_ = filter_pairs(e_ijs_crude, i_j_to_ij_, T_CUT_PAIRS_MP2_);
 
     int n_noncrude_pairs = ij_to_i_j_strong_.size();
@@ -1013,7 +1014,7 @@ void DLPNOCCSD::ccsd_pair_prescreening() {
 
     outfile->Printf("\n  ==> Determining Strong and Weak Pairs (Refined Prescreening Step) <==\n\n");
 
-    const std::vector<double>& e_ijs = compute_pair_energies(false);
+    const std::vector<double>& e_ijs = compute_pair_energies<false>();
     const auto i_j_to_ij_strong_copy = i_j_to_ij_strong_;
 
     de_lmp2_weak_ = filter_pairs(e_ijs, i_j_to_ij_strong_copy, T_CUT_PAIRS_);
@@ -1164,7 +1165,9 @@ void DLPNOCCSD::compute_cc_integrals() {
         L_tilde_[ji]->scale(2.0);
         L_tilde_[ji]->subtract(K_tilde_temp);
 
-        if (i <= j) {
+        bool is_strong_pair = (i_j_to_ij_strong_[i][j] != -1);
+
+        if (is_strong_pair && i <= j) {
             // SVD Decomposition of DF-ERIs
             // DOI: 10.1063/1.4905005
             if (T_CUT_SVD_ > 0.0) {
@@ -1302,6 +1305,9 @@ std::vector<SharedMatrix> DLPNOCCSD::compute_Fbe(const std::vector<SharedMatrix>
 
         int npno_ij = n_pno_[ij];
         if (npno_ij == 0) continue;
+
+        bool is_strong_pair = (i_j_to_ij_strong_[i][j] != -1);
+        if (!is_strong_pair) continue;
 
         // Equation 39, Term 1
         Fbe[ij] = std::make_shared<Matrix>("Fbe", npno_ij, npno_ij);

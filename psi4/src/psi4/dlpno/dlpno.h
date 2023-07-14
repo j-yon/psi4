@@ -320,7 +320,8 @@ class DLPNOCCSD : public DLPNOBase {
 
     /// Determine which pairs are strong and weak pairs
     void ccsd_pair_prescreening(); // Encapsulates strong and weak pair screening
-    std::vector<double> compute_pair_energies(bool crude);
+    template<bool crude>
+    std::vector<double> compute_pair_energies();
     double filter_pairs(const std::vector<double>& e_ijs, const std::vector<std::vector<int>>& strong_pairs,
                         double tolerance);
     /// Runs preceeding DLPNO-MP2 computation before DLPNO-CCSD iterations
