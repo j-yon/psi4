@@ -1248,7 +1248,7 @@ double DLPNOCCSD_T::compute_energy() {
     }
 
     double e_scf = reference_wavefunction_->energy();
-    double e_ccsd_t_corr = e_lccsd_t_ + de_lmp2_weak_ + de_lmp2_crude_ + de_dipole_ + de_pno_total_;
+    double e_ccsd_t_corr = e_lccsd_t_ + de_lmp2_weak_ + de_lmp2_eliminated_ + de_dipole_ + de_pno_total_;
     double e_ccsd_t_total = e_scf + e_ccsd_t_corr;
 
     set_scalar_variable("CCSD(T) CORRELATION ENERGY", e_ccsd_t_corr);
@@ -1270,17 +1270,15 @@ double DLPNOCCSD_T::compute_energy() {
 }
 
 void DLPNOCCSD_T::print_results() {
+    double e_dlpno_ccsd = e_lccsd_ + de_lmp2_weak_ + de_lmp2_eliminated_ + de_pno_total_ + de_dipole_;
+    double e_total = e_lccsd_t_ + de_lmp2_weak_ + de_lmp2_eliminated_ + de_pno_total_ + de_dipole_;
     outfile->Printf("  \n");
-    outfile->Printf("  Total DLPNO-CCSD(T) Correlation Energy: %16.12f \n",
-                    e_lccsd_t_ + de_lmp2_weak_ + de_lmp2_crude_ + de_pno_total_ + de_dipole_);
-    outfile->Printf("    DLPNO-CCSD Contribution:              %16.12f \n", e_lccsd_);
+    outfile->Printf("  Total DLPNO-CCSD(T) Correlation Energy: %16.12f \n", e_total);
+    outfile->Printf("    DLPNO-CCSD Contribution:              %16.12f \n", e_dlpno_ccsd);
     outfile->Printf("    DLPNO-(T) Contribution:               %16.12f \n", e_lccsd_t_ - e_lccsd_);
-    outfile->Printf("    LMP2 Weak Pair Correction:            %16.12f \n", de_lmp2_weak_ + de_lmp2_crude_);
-    outfile->Printf("    LMO Truncation Correction:            %16.12f \n", de_dipole_);
-    outfile->Printf("    PNO Truncation Correction:            %16.12f \n", de_pno_total_);
     outfile->Printf("    Andy Jiang... FOR THREEEEEEEEEEE!!!\n\n\n");
     outfile->Printf("  @Total DLPNO-CCSD(T) Energy: %16.12f \n",
-                    variables_["SCF TOTAL ENERGY"] + de_lmp2_weak_ + de_lmp2_crude_ + e_lccsd_t_ + de_pno_total_ + de_dipole_);
+                    variables_["SCF TOTAL ENERGY"] + de_lmp2_weak_ + de_lmp2_eliminated_ + e_lccsd_t_ + de_pno_total_ + de_dipole_);
 }
 
 }  // namespace dlpno

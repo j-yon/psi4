@@ -126,7 +126,8 @@ class DLPNOBase : public Wavefunction {
       double de_dipole_; ///< energy correction for distant (LMO, LMO) pairs
       double e_lmp2_non_trunc_; ///< LMP2 energy in a pure PAO basis (Strong and Weak Pairs Only)
       double e_lmp2_trunc_; ///< LMP2 energy computed with (truncated) PNOs (Strong Pairs Only)
-      double de_lmp2_crude_; ///< LMP2 correction for crude pairs (only for CC)
+      double de_lmp2_eliminated_; ///< LMP2 correction for eliminated pairs (surviving pairs after dipole screening that
+      // are neither weak nor strong)
       double de_lmp2_weak_; ///< LMP2 correction for weak pairs (only for CC)
       double de_pno_total_; ///< energy correction for PNO truncation
       double de_pno_total_os_; ///< energy correction for PNO truncation
@@ -213,7 +214,7 @@ class DLPNOBase : public Wavefunction {
       /// and LMO sparsity are used to construct domains of PAOs, RI basis functions, and orbital
       /// basis functions for each LMO. These domains are necessary for efficient evaluation of
       /// three-index integrals.
-      void prep_sparsity();
+      void prep_sparsity(bool initial, bool last);
 
       /// Compute the auxiliary metric (P|Q)
       void compute_metric();
@@ -301,6 +302,7 @@ class DLPNOCCSD : public DLPNOBase {
     std::vector<SharedMatrix> K_mnij_; /// (m i | n j)
     /// (3 occupied, 1 virtual)
     std::vector<SharedMatrix> K_bar_; /// (m i | b_ij j) [aka K_bar]
+    std::vector<SharedMatrix> K_bar_chem_; /// (i j | m b_ij)
     std::vector<SharedMatrix> L_bar_; /// 2.0 * K_mbij - K_mbji
     /// (2 occupied, 2 virtual)
     std::vector<SharedMatrix> J_ijab_; /// (i j | a_ij b_ij)
@@ -319,19 +321,12 @@ class DLPNOCCSD : public DLPNOBase {
     inline SharedMatrix S_PNO(const int ij, const int mn);
 
     /// Determine which pairs are strong and weak pairs
-    void ccsd_pair_prescreening(); // Encapsulates strong and weak pair screening
-    template<bool crude>
-    std::vector<double> compute_pair_energies();
-    double filter_pairs(const std::vector<double>& e_ijs, const std::vector<std::vector<int>>& strong_pairs,
-                        double tolerance);
+    template<bool crude> void pair_prescreening(); // Encapsulates crude/refined prescreening step in Riplinger 2016
+    template<bool crude> std::vector<double> compute_pair_energies();
+    template<bool crude> std::pair<double, double> filter_pairs(const std::vector<double>& e_ijs);
+
     /// Runs preceeding DLPNO-MP2 computation before DLPNO-CCSD iterations
     void pno_lmp2_iterations();
-    
-    /// Regenerate i->u_A, and i->K_A maps after initial prescreening 
-    /// (Riplinger 2016 Algo 1 line 26-27)
-    void reset_sparsity();
-    /// Recompute pair domains using only strong pairs (Riplinger 2016 Algo 1 line 28)
-    void recompute_pair_domains();
 
     /// compute PNO/PNO overlap matrices for DLPNO-CCSD
     void compute_pno_overlaps();

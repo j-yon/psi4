@@ -124,14 +124,14 @@ void DLPNOBase::common_init() {
         } else if (options_.get_str("PNO_CONVERGENCE") == "TIGHT") {
             if (!T_CUT_PNO_changed) T_CUT_PNO_ = 1e-7;
             if (!T_CUT_DO_changed) T_CUT_DO_ = 5e-3;
-            if (!DIAG_SCALE_changed) T_CUT_PNO_DIAG_SCALE_ = 3e-2;
+            if (!DIAG_SCALE_changed) T_CUT_PNO_DIAG_SCALE_ = 1e-4;
             if (!T_CUT_PAIRS_changed) T_CUT_PAIRS_ = 1e-5;
             if (!T_CUT_MKN_changed) T_CUT_MKN_ = 1e-4;
             if (!PRESCREENING_changed) options_.set_str("DLPNO", "PRESCREENING_ALGORITHM", "FULL_LMP2");
         } else if (options_.get_str("PNO_CONVERGENCE") == "VERY_TIGHT") {
             if (!T_CUT_PNO_changed) T_CUT_PNO_ = 1e-8;
             if (!T_CUT_DO_changed) T_CUT_DO_ = 5e-3;
-            if (!DIAG_SCALE_changed) T_CUT_PNO_DIAG_SCALE_ = 3e-2;
+            if (!DIAG_SCALE_changed) T_CUT_PNO_DIAG_SCALE_ = 1e-4;
             if (!T_CUT_PAIRS_changed) T_CUT_PAIRS_ = 1e-6;
             if (!T_CUT_MKN_changed) T_CUT_MKN_ = 1e-4;
             if (!PRESCREENING_changed) options_.set_str("DLPNO", "PRESCREENING_ALGORITHM", "FULL_LMP2");
@@ -549,7 +549,7 @@ void DLPNOBase::compute_dipole_ints() {
     }
 }
 
-void DLPNOBase::prep_sparsity() {
+void DLPNOBase::prep_sparsity(bool initial, bool last) {
     int natom = molecule_->natom();
     int nbf = basisset_->nbf();
     int nshell = basisset_->nshell();
@@ -568,108 +568,117 @@ void DLPNOBase::prep_sparsity() {
         ribf_to_atom[i] = ribasis_->function_to_center(i);
     }
 
-    outfile->Printf("  ==> Forming Local MO Domains <==\n");
+    if (!last) {
+        outfile->Printf("  ==> Forming Local MO Domains <==\n");
 
-    // map from LMO to local DF domain (aux basis functions)
-    // locality determined via mulliken charges
+        // map from LMO to local DF domain (aux basis functions)
+        // locality determined via mulliken charges
 
-    lmo_to_ribfs_.resize(naocc);
-    lmo_to_riatoms_.resize(naocc);
+        lmo_to_ribfs_.clear();
+        lmo_to_riatoms_.clear();
 
-    for (size_t i = 0; i < naocc; ++i) {
-        // atomic mulliken populations for this orbital
-        std::vector<double> mkn_pop(natom, 0.0);
+        lmo_to_ribfs_.resize(naocc);
+        lmo_to_riatoms_.resize(naocc);
 
-        auto P_i = reference_wavefunction_->S()->clone();
+        for (size_t i = 0; i < naocc; ++i) {
+            // atomic mulliken populations for this orbital
+            std::vector<double> mkn_pop(natom, 0.0);
 
-        for (size_t u = 0; u < nbf; u++) {
-            P_i->scale_row(0, u, C_lmo_->get(u, i));
-            P_i->scale_column(0, u, C_lmo_->get(u, i));
-        }
+            auto P_i = reference_wavefunction_->S()->clone();
 
-        for (size_t u = 0; u < nbf; u++) {
-            int centerU = basisset_->function_to_center(u);
-            double p_uu = P_i->get(u, u);
-
-            for (size_t v = 0; v < nbf; v++) {
-                int centerV = basisset_->function_to_center(v);
-                double p_vv = P_i->get(v, v);
-
-                // off-diag pops (p_uv) split between u and v prop to diag pops
-                double p_uv = P_i->get(u, v);
-                mkn_pop[centerU] += p_uv * ((p_uu) / (p_uu + p_vv));
-                mkn_pop[centerV] += p_uv * ((p_vv) / (p_uu + p_vv));
+            for (size_t u = 0; u < nbf; u++) {
+                P_i->scale_row(0, u, C_lmo_->get(u, i));
+                P_i->scale_column(0, u, C_lmo_->get(u, i));
             }
-        }
 
-        // if non-zero mulliken pop on atom, include atom in the LMO's fitting domain
-        for (size_t a = 0; a < natom; a++) {
-            if (fabs(mkn_pop[a]) > T_CUT_MKN_) {
-                lmo_to_riatoms_[i].push_back(a);
+            for (size_t u = 0; u < nbf; u++) {
+                int centerU = basisset_->function_to_center(u);
+                double p_uu = P_i->get(u, u);
 
-                // each atom's aux orbitals are all-or-nothing for each LMO
-                for (int u : atom_to_ribf_[a]) {
-                    lmo_to_ribfs_[i].push_back(u);
+                for (size_t v = 0; v < nbf; v++) {
+                    int centerV = basisset_->function_to_center(v);
+                    double p_vv = P_i->get(v, v);
+
+                    // off-diag pops (p_uv) split between u and v prop to diag pops
+                    double p_uv = P_i->get(u, v);
+                    mkn_pop[centerU] += p_uv * ((p_uu) / (p_uu + p_vv));
+                    mkn_pop[centerV] += p_uv * ((p_vv) / (p_uu + p_vv));
+                }
+            }
+
+            // if non-zero mulliken pop on atom, include atom in the LMO's fitting domain
+            for (size_t a = 0; a < natom; a++) {
+                if (fabs(mkn_pop[a]) > T_CUT_MKN_) {
+                    lmo_to_riatoms_[i].push_back(a);
+
+                    // each atom's aux orbitals are all-or-nothing for each LMO
+                    for (int u : atom_to_ribf_[a]) {
+                        lmo_to_ribfs_[i].push_back(u);
+                    }
                 }
             }
         }
-    }
 
-    // map from LMO to local virtual domain (PAOs)
-    // locality determined via differential overlap integrals
+        // map from LMO to local virtual domain (PAOs)
+        // locality determined via differential overlap integrals
 
-    lmo_to_paos_.resize(naocc);
-    lmo_to_paoatoms_.resize(naocc);
-    for (size_t i = 0; i < naocc; ++i) {
-        // PAO domains determined by differential overlap integral
-        std::vector<int> lmo_to_paos_temp;
-        for (size_t u = 0; u < nbf; ++u) {
-            if (fabs(DOI_iu_->get(i, u)) > T_CUT_DO_) {
-                lmo_to_paos_temp.push_back(u);
+        lmo_to_paos_.resize(naocc);
+        lmo_to_paoatoms_.resize(naocc);
+        for (size_t i = 0; i < naocc; ++i) {
+            // PAO domains determined by differential overlap integral
+            std::vector<int> lmo_to_paos_temp;
+            for (size_t u = 0; u < nbf; ++u) {
+                if (fabs(DOI_iu_->get(i, u)) > T_CUT_DO_) {
+                    lmo_to_paos_temp.push_back(u);
+                }
             }
+
+            // if any PAO on an atom is in the list, we take all of the PAOs on that atom
+            lmo_to_paos_[i] = contract_lists(lmo_to_paos_temp, atom_to_bf_);
+
+            // contains the same information as previous map
+            lmo_to_paoatoms_[i] = block_list(lmo_to_paos_[i], bf_to_atom);
         }
-
-        // if any PAO on an atom is in the list, we take all of the PAOs on that atom
-        lmo_to_paos_[i] = contract_lists(lmo_to_paos_temp, atom_to_bf_);
-
-        // contains the same information as previous map
-        lmo_to_paoatoms_[i] = block_list(lmo_to_paos_[i], bf_to_atom);
     }
 
     // map from LMO to local occupied domain (other LMOs)
     // locality determined via differential overlap integrals
     //   and also approximated pair energies from dipole integrals
 
-    i_j_to_ij_.resize(naocc);
-    de_dipole_ = 0.0;
+    if (initial) {
+        i_j_to_ij_.resize(naocc);
+        de_dipole_ = 0.0;
 
-    for (size_t i = 0, ij = 0; i < naocc; i++) {
-        for (size_t j = 0; j < naocc; j++) {
-            bool overlap_big = (DOI_ij_->get(i, j) > options_.get_double("T_CUT_DO_ij"));
-            bool energy_big = (fabs(dipole_pair_e_bound_->get(i, j)) > options_.get_double("T_CUT_PRE"));
+        for (size_t i = 0, ij = 0; i < naocc; i++) {
+            for (size_t j = 0; j < naocc; j++) {
+                bool overlap_big = (DOI_ij_->get(i, j) > options_.get_double("T_CUT_DO_ij"));
+                bool energy_big = (fabs(dipole_pair_e_bound_->get(i, j)) > options_.get_double("T_CUT_PRE"));
 
-            if (overlap_big || energy_big) {
-                i_j_to_ij_[i].push_back(ij);
-                ij_to_i_j_.push_back(std::make_pair(i, j));
-                ij++;
-            } else {
-                de_dipole_ += dipole_pair_e_->get(i, j);
-                i_j_to_ij_[i].push_back(-1);
+                if (overlap_big || energy_big) {
+                    i_j_to_ij_[i].push_back(ij);
+                    ij_to_i_j_.push_back(std::make_pair(i, j));
+                    ij++;
+                } else {
+                    de_dipole_ += dipole_pair_e_->get(i, j);
+                    i_j_to_ij_[i].push_back(-1);
+                }
             }
         }
-    }
 
-    int n_lmo_pairs = ij_to_i_j_.size();
+        int n_lmo_pairs = ij_to_i_j_.size();
 
-    for (size_t ij = 0; ij < n_lmo_pairs; ++ij) {
-        size_t i, j;
-        std::tie(i, j) = ij_to_i_j_[ij];
-        ij_to_ji_.push_back(i_j_to_ij_[j][i]);
+        for (size_t ij = 0; ij < n_lmo_pairs; ++ij) {
+            size_t i, j;
+            std::tie(i, j) = ij_to_i_j_[ij];
+            ij_to_ji_.push_back(i_j_to_ij_[j][i]);
+        }
     }
 
     print_aux_domains();
     print_pao_domains();
-    print_lmo_domains();
+    if (initial) print_lmo_domains();
+
+    int n_lmo_pairs = ij_to_i_j_.size();
 
     outfile->Printf("\n  ==> Merging LMO Domains into LMO Pair Domains <==\n");
 
@@ -694,6 +703,7 @@ void DLPNOBase::prep_sparsity() {
     }
 
     // Create a list of lmos that "interact" with a lmo_pair by differential overlap
+    lmopair_to_lmos_.clear();
     lmopair_to_lmos_.resize(n_lmo_pairs);
     lmopair_to_lmos_dense_.resize(n_lmo_pairs);
 
@@ -719,91 +729,99 @@ void DLPNOBase::prep_sparsity() {
     print_aux_pair_domains();
     print_pao_pair_domains();
 
-    // => Coefficient Sparsity <= //
+    if (initial) {
+        // => Coefficient Sparsity <= //
 
-    // which basis functions (on which atoms) contribute to each local MO?
-    lmo_to_bfs_.resize(naocc);
-    lmo_to_atoms_.resize(naocc);
+        // which basis functions (on which atoms) contribute to each local MO?
+        lmo_to_bfs_.resize(naocc);
+        lmo_to_atoms_.resize(naocc);
 
-    for (int i = 0; i < naocc; ++i) {
-        for (int bf_ind = 0; bf_ind < nbf; ++bf_ind) {
-            if (fabs(C_lmo_->get(bf_ind, i)) > options_.get_double("T_CUT_CLMO")) {
-                lmo_to_bfs_[i].push_back(bf_ind);
+        for (int i = 0; i < naocc; ++i) {
+            for (int bf_ind = 0; bf_ind < nbf; ++bf_ind) {
+                if (fabs(C_lmo_->get(bf_ind, i)) > options_.get_double("T_CUT_CLMO")) {
+                    lmo_to_bfs_[i].push_back(bf_ind);
+                }
+            }
+            lmo_to_atoms_[i] = block_list(lmo_to_bfs_[i], bf_to_atom);
+        }
+
+        // which basis functions (on which atoms) contribute to each projected AO?
+        pao_to_bfs_.resize(nbf);
+        pao_to_atoms_.resize(nbf);
+
+        for (int u = 0; u < nbf; ++u) {
+            for (int bf_ind = 0; bf_ind < nbf; ++bf_ind) {
+                if (fabs(C_pao_->get(bf_ind, u)) > options_.get_double("T_CUT_CPAO")) {
+                    pao_to_bfs_[u].push_back(bf_ind);
+                }
+            }
+            pao_to_atoms_[u] = block_list(pao_to_bfs_[u], bf_to_atom);
+        }
+    }
+
+    if (!last) {
+        // determine maps to extended LMO domains, which are the union of an LMO's domain with domains
+        //   of all interacting LMOs
+        lmo_to_riatoms_ext_ = extend_maps(lmo_to_riatoms_, ij_to_i_j_);
+
+        riatom_to_lmos_ext_ = invert_map(lmo_to_riatoms_ext_, natom);
+        riatom_to_paos_ext_ = chain_maps(riatom_to_lmos_ext_, lmo_to_paos_);
+
+        // We'll use these maps to screen the the local MO transform (first index):
+        //   (mn|Q) * C_mi -> (in|Q)
+        riatom_to_atoms1_ = chain_maps(riatom_to_lmos_ext_, lmo_to_atoms_);
+        riatom_to_shells1_ = chain_maps(riatom_to_atoms1_, atom_to_shell_);
+        riatom_to_bfs1_ = chain_maps(riatom_to_atoms1_, atom_to_bf_);
+
+        // We'll use these maps to screen the projected AO transform (second index):
+        //   (mn|Q) * C_nu -> (mu|Q)
+        riatom_to_atoms2_ = chain_maps(riatom_to_lmos_ext_, chain_maps(lmo_to_paos_, pao_to_atoms_));
+        riatom_to_shells2_ = chain_maps(riatom_to_atoms2_, atom_to_shell_);
+        riatom_to_bfs2_ = chain_maps(riatom_to_atoms2_, atom_to_bf_);
+
+        // Need dense versions of previous maps for quick lookup
+
+        // riatom_to_lmos_ext_dense_[riatom][lmo] is the index of lmo in riatom_to_lmos_ext_[riatom]
+        //   (if present), else -1
+        riatom_to_lmos_ext_dense_.resize(natom);
+        // riatom_to_paos_ext_dense_[riatom][pao] is the index of pao in riatom_to_paos_ext_[riatom]
+        //   (if present), else -1
+        riatom_to_paos_ext_dense_.resize(natom);
+
+        // riatom_to_atoms1_dense_(1,2)[riatom][a] is true if the orbitals basis functions of atom A
+        //   are needed for the (LMO,PAO) transform
+        riatom_to_atoms1_dense_.resize(natom);
+        riatom_to_atoms2_dense_.resize(natom);
+
+        for (int a_ri = 0; a_ri < natom; a_ri++) {
+            riatom_to_lmos_ext_dense_[a_ri] = std::vector<int>(naocc, -1);
+            riatom_to_paos_ext_dense_[a_ri] = std::vector<int>(npao, -1);
+            riatom_to_atoms1_dense_[a_ri] = std::vector<bool>(natom, false);
+            riatom_to_atoms2_dense_[a_ri] = std::vector<bool>(natom, false);
+
+            for (int i_ind = 0; i_ind < riatom_to_lmos_ext_[a_ri].size(); i_ind++) {
+                int i = riatom_to_lmos_ext_[a_ri][i_ind];
+                riatom_to_lmos_ext_dense_[a_ri][i] = i_ind;
+            }
+            for (int u_ind = 0; u_ind < riatom_to_paos_ext_[a_ri].size(); u_ind++) {
+                int u = riatom_to_paos_ext_[a_ri][u_ind];
+                riatom_to_paos_ext_dense_[a_ri][u] = u_ind;
+            }
+            for (int a_bf : riatom_to_atoms1_[a_ri]) {
+                riatom_to_atoms1_dense_[a_ri][a_bf] = true;
+            }
+            for (int a_bf : riatom_to_atoms2_[a_ri]) {
+                riatom_to_atoms2_dense_[a_ri][a_bf] = true;
             }
         }
-        lmo_to_atoms_[i] = block_list(lmo_to_bfs_[i], bf_to_atom);
-    }
+    } // end if
 
-    // which basis functions (on which atoms) contribute to each projected AO?
-    pao_to_bfs_.resize(nbf);
-    pao_to_atoms_.resize(nbf);
-
-    for (int u = 0; u < nbf; ++u) {
-        for (int bf_ind = 0; bf_ind < nbf; ++bf_ind) {
-            if (fabs(C_pao_->get(bf_ind, u)) > options_.get_double("T_CUT_CPAO")) {
-                pao_to_bfs_[u].push_back(bf_ind);
-            }
-        }
-        pao_to_atoms_[u] = block_list(pao_to_bfs_[u], bf_to_atom);
-    }
-
-    // determine maps to extended LMO domains, which are the union of an LMO's domain with domains
-    //   of all interacting LMOs
-    lmo_to_riatoms_ext_ = extend_maps(lmo_to_riatoms_, ij_to_i_j_);
-
-    riatom_to_lmos_ext_ = invert_map(lmo_to_riatoms_ext_, natom);
-    riatom_to_paos_ext_ = chain_maps(riatom_to_lmos_ext_, lmo_to_paos_);
-
-    // We'll use these maps to screen the the local MO transform (first index):
-    //   (mn|Q) * C_mi -> (in|Q)
-    riatom_to_atoms1_ = chain_maps(riatom_to_lmos_ext_, lmo_to_atoms_);
-    riatom_to_shells1_ = chain_maps(riatom_to_atoms1_, atom_to_shell_);
-    riatom_to_bfs1_ = chain_maps(riatom_to_atoms1_, atom_to_bf_);
-
-    // We'll use these maps to screen the projected AO transform (second index):
-    //   (mn|Q) * C_nu -> (mu|Q)
-    riatom_to_atoms2_ = chain_maps(riatom_to_lmos_ext_, chain_maps(lmo_to_paos_, pao_to_atoms_));
-    riatom_to_shells2_ = chain_maps(riatom_to_atoms2_, atom_to_shell_);
-    riatom_to_bfs2_ = chain_maps(riatom_to_atoms2_, atom_to_bf_);
-
-    // Need dense versions of previous maps for quick lookup
-
-    // riatom_to_lmos_ext_dense_[riatom][lmo] is the index of lmo in riatom_to_lmos_ext_[riatom]
-    //   (if present), else -1
-    riatom_to_lmos_ext_dense_.resize(natom);
-    // riatom_to_paos_ext_dense_[riatom][pao] is the index of pao in riatom_to_paos_ext_[riatom]
-    //   (if present), else -1
-    riatom_to_paos_ext_dense_.resize(natom);
-
-    // riatom_to_atoms1_dense_(1,2)[riatom][a] is true if the orbitals basis functions of atom A
-    //   are needed for the (LMO,PAO) transform
-    riatom_to_atoms1_dense_.resize(natom);
-    riatom_to_atoms2_dense_.resize(natom);
-
-    for (int a_ri = 0; a_ri < natom; a_ri++) {
-        riatom_to_lmos_ext_dense_[a_ri] = std::vector<int>(naocc, -1);
-        riatom_to_paos_ext_dense_[a_ri] = std::vector<int>(npao, -1);
-        riatom_to_atoms1_dense_[a_ri] = std::vector<bool>(natom, false);
-        riatom_to_atoms2_dense_[a_ri] = std::vector<bool>(natom, false);
-
-        for (int i_ind = 0; i_ind < riatom_to_lmos_ext_[a_ri].size(); i_ind++) {
-            int i = riatom_to_lmos_ext_[a_ri][i_ind];
-            riatom_to_lmos_ext_dense_[a_ri][i] = i_ind;
-        }
-        for (int u_ind = 0; u_ind < riatom_to_paos_ext_[a_ri].size(); u_ind++) {
-            int u = riatom_to_paos_ext_[a_ri][u_ind];
-            riatom_to_paos_ext_dense_[a_ri][u] = u_ind;
-        }
-        for (int a_bf : riatom_to_atoms1_[a_ri]) {
-            riatom_to_atoms1_dense_[a_ri][a_bf] = true;
-        }
-        for (int a_bf : riatom_to_atoms2_[a_ri]) {
-            riatom_to_atoms2_dense_[a_ri][a_bf] = true;
-        }
-    }
+    lmopair_lmo_to_riatom_lmo_.clear();
+    lmopair_pao_to_riatom_pao_.clear();
 
     lmopair_lmo_to_riatom_lmo_.resize(n_lmo_pairs);
     lmopair_pao_to_riatom_pao_.resize(n_lmo_pairs);
+
 #pragma omp parallel for
     for (int ij = 0; ij < n_lmo_pairs; ++ij) {
         int naux_ij = lmopair_to_ribfs_[ij].size();
