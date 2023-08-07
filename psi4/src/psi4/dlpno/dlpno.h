@@ -64,6 +64,8 @@ class DLPNOBase : public Wavefunction {
       double T_CUT_PAIRS_;
       /// tolerance to separate MP2 pairs in between crude and refined prescreening
       double T_CUT_PAIRS_MP2_;
+      /// tolerance for energy of a pair for it to be considered a "dipole pair"
+      double T_CUT_PRE_;
       /// tolerance for local density fitting (by Mulliken population)
       double T_CUT_MKN_;
       /// tolerance for eigenvalue decomposition of (Q|u_t v_t) integrals

@@ -74,6 +74,7 @@ void DLPNOBase::common_init() {
     T_CUT_EIG_ = options_.get_double("T_CUT_EIG");
     T_CUT_SVD_ = options_.get_double("T_CUT_SVD");
     T_CUT_TNO_ = options_.get_double("T_CUT_TNO");
+    T_CUT_PRE_ = options_.get_double("T_CUT_PRE");
 
     if (options_.get_str("DLPNO_ALGORITHM") == "MP2") {
         algorithm_ = MP2;
@@ -89,6 +90,7 @@ void DLPNOBase::common_init() {
     const bool T_CUT_DO_changed = options_["T_CUT_DO"].has_changed();
     const bool T_CUT_PAIRS_changed = options_["T_CUT_PAIRS"].has_changed();
     const bool T_CUT_MKN_changed = options_["T_CUT_MKN"].has_changed();
+    const bool T_CUT_PRE_changed = options_["T_CUT_PRE"].has_changed();
     const bool PRESCREENING_changed = options_["PRESCREENING_ALGORITHM"].has_changed();
 
     // if not, values are determined by the user-friendly "PNO_CONVERGENCE"
@@ -136,6 +138,7 @@ void DLPNOBase::common_init() {
             if (!T_CUT_MKN_changed) T_CUT_MKN_ = 1e-4;
             if (!PRESCREENING_changed) options_.set_str("DLPNO", "PRESCREENING_ALGORITHM", "FULL_LMP2");
         }
+        if (!T_CUT_PRE_changed) T_CUT_PRE_ = std::min(T_CUT_PRE_, 0.01 * T_CUT_PAIRS_);
     }
 
     // TODO: Is this reasonable?
@@ -652,7 +655,7 @@ void DLPNOBase::prep_sparsity(bool initial, bool last) {
         for (size_t i = 0, ij = 0; i < naocc; i++) {
             for (size_t j = 0; j < naocc; j++) {
                 bool overlap_big = (DOI_ij_->get(i, j) > options_.get_double("T_CUT_DO_ij"));
-                bool energy_big = (fabs(dipole_pair_e_bound_->get(i, j)) > options_.get_double("T_CUT_PRE"));
+                bool energy_big = (fabs(dipole_pair_e_bound_->get(i, j)) > T_CUT_PRE_);
 
                 if (overlap_big || energy_big) {
                     i_j_to_ij_[i].push_back(ij);
@@ -1454,7 +1457,7 @@ void DLPNOBase::print_lmo_domains() {
                 lmos += 1;
             }
             bool overlap_big = (DOI_ij_->get(i, j) > options_.get_double("T_CUT_DO_ij"));
-            bool energy_big = (fabs(dipole_pair_e_bound_->get(i, j)) > options_.get_double("T_CUT_PRE"));
+            bool energy_big = (fabs(dipole_pair_e_bound_->get(i, j)) > T_CUT_PRE_);
             if (!overlap_big) exclude_pairs_overlap++;
             if (!energy_big) exclude_pairs_energy++;
         }

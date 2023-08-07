@@ -2055,7 +2055,7 @@ void DLPNOCCSD::print_header() {
     outfile->Printf("    T_CUT_SVD    = %6.3e \n", T_CUT_SVD_);
     outfile->Printf("    DIAG_SCALE   = %6.3e \n", T_CUT_PNO_DIAG_SCALE_);
     outfile->Printf("    T_CUT_DO_ij  = %6.3e \n", options_.get_double("T_CUT_DO_ij"));
-    outfile->Printf("    T_CUT_PRE    = %6.3e \n", options_.get_double("T_CUT_PRE"));
+    outfile->Printf("    T_CUT_PRE    = %6.3e \n", T_CUT_PRE_);
     outfile->Printf("    T_CUT_DO_PRE = %6.3e \n", options_.get_double("T_CUT_DO_PRE"));
     outfile->Printf("    T_CUT_CLMO   = %6.3e \n", options_.get_double("T_CUT_CLMO"));
     outfile->Printf("    T_CUT_CPAO   = %6.3e \n", options_.get_double("T_CUT_CPAO"));
@@ -2066,6 +2066,19 @@ void DLPNOCCSD::print_header() {
 }
 
 void DLPNOCCSD::print_results() {
+    int naocc = i_j_to_ij_.size();
+    double t1diag = 0.0;
+#pragma omp parallel for reduction(+ : t1diag)
+    for (int i = 0; i < naocc; ++i) {
+        t1diag += T_ia_[i]->vector_dot(T_ia_[i]);
+    }
+    t1diag = std::sqrt(t1diag / (2.0 * naocc));
+    outfile->Printf("\n  T1 Diagnostic: %8.8f \n", t1diag);
+    if (t1diag > 0.02) {
+        outfile->Printf("    WARNING: T1 Diagnostic is greater than 0.02, CCSD results may be unreliable!\n");
+    }
+    set_scalar_variable("CC T1 DIAGNOSTIC", t1diag);
+
     outfile->Printf("  \n");
     outfile->Printf("  Total DLPNO-CCSD Correlation Energy: %16.12f \n", e_lccsd_ + de_lmp2_weak_ + de_lmp2_eliminated_ + de_pno_total_ + de_dipole_);
     outfile->Printf("    CCSD Correlation Energy:           %16.12f \n", e_lccsd_);
