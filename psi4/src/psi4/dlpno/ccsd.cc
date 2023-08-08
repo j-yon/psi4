@@ -208,19 +208,6 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
     std::vector<SharedMatrix> Tt_paos(n_lmo_pairs);
     std::vector<SharedVector> e_paos(n_lmo_pairs);
 
-    if constexpr (!crude) {
-        outfile->Printf("\n  ==> Forming Pair Natural Orbitals <==\n");
-
-        K_iajb_.resize(n_lmo_pairs);   // exchange operators (i.e. (ia|jb) integrals)
-        T_iajb_.resize(n_lmo_pairs);   // amplitudes
-        Tt_iajb_.resize(n_lmo_pairs);  // antisymmetrized amplitudes
-        X_pno_.resize(n_lmo_pairs);    // global PAOs -> canonical PNOs
-        e_pno_.resize(n_lmo_pairs);    // PNO orbital energies
-
-        n_pno_.resize(n_lmo_pairs);   // number of pnos
-        de_pno_.resize(n_lmo_pairs);  // PNO truncation error
-    }
-
     double e_sc_lmp2 = 0.0;
 
     // Step 1: compute SC-LMP2 pair energies
@@ -315,96 +302,11 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
             e_paos[ji] = e_paos[ij];
             e_sc_lmp2 += e_ij_pao;
         }
-
-        if constexpr (!crude) { // If NOT crude, go ahead and do the PNO transform
-            // Construct pair density from amplitudes
-            auto D_ij = linalg::doublet(Tt_pao_ij, T_pao_ij, false, true);
-            D_ij->add(linalg::doublet(Tt_pao_ij, T_pao_ij, true, false));
-
-            // Diagonalization of pair density gives PNOs (in basis of the LMO's virtual domain) and PNO occ numbers
-            auto X_pno_ij = std::make_shared<Matrix>("eigenvectors", nvir_ij, nvir_ij);
-            Vector pno_occ("eigenvalues", nvir_ij);
-            D_ij->diagonalize(*X_pno_ij, pno_occ, descending);
-
-            double t_cut_scale = (i == j) ? T_CUT_PNO_DIAG_SCALE_ : 1.0;
-
-            int nvir_ij_final = 0;
-            for (size_t a = 0; a < nvir_ij; ++a) {
-                if (fabs(pno_occ.get(a)) >= t_cut_scale * T_CUT_PNO_) {
-                    nvir_ij_final++;
-                }
-            }
-
-            Dimension zero(1);
-            Dimension dim_final(1);
-            dim_final.fill(nvir_ij_final);
-
-            // This transformation gives orbitals that are orthonormal but not canonical
-            X_pno_ij = X_pno_ij->get_block({zero, X_pno_ij->rowspi()}, {zero, dim_final});
-            pno_occ = pno_occ.get_block({zero, dim_final});
-
-            SharedMatrix pno_canon;
-            SharedVector e_pno_ij;
-            std::tie(pno_canon, e_pno_ij) = canonicalizer(X_pno_ij, F_pao_ij);
-
-            // This transformation gives orbitals that are orthonormal and canonical
-            X_pno_ij = linalg::doublet(X_pno_ij, pno_canon, false, false);
-
-            auto K_pno_ij = linalg::triplet(X_pno_ij, K_pao_ij, X_pno_ij, true, false, false);
-            auto T_pno_ij = linalg::triplet(X_pno_ij, T_pao_ij, X_pno_ij, true, false, false);
-            auto Tt_pno_ij = linalg::triplet(X_pno_ij, Tt_pao_ij, X_pno_ij, true, false, false);
-
-            // mp2 energy of this LMO pair after transformation to PNOs and truncation
-            double e_ij_trunc = K_pno_ij->vector_dot(Tt_pno_ij);
-
-            // truncation error
-            double de_pno_ij = e_ij_pao - e_ij_trunc;
-
-            X_pno_ij = linalg::doublet(X_pao_ij, X_pno_ij, false, false);
-
-            K_iajb_[ij] = K_pno_ij;
-            T_iajb_[ij] = T_pno_ij;
-            Tt_iajb_[ij] = Tt_pno_ij;
-            X_pno_[ij] = X_pno_ij;
-            e_pno_[ij] = e_pno_ij;
-            n_pno_[ij] = X_pno_ij->colspi(0);
-            de_pno_[ij] = de_pno_ij;
-
-            // account for symmetry
-            if (i < j) {
-                K_iajb_[ji] = K_iajb_[ij]->transpose();
-                T_iajb_[ji] = T_iajb_[ij]->transpose();
-                Tt_iajb_[ji] = Tt_iajb_[ij]->transpose();
-                X_pno_[ji] = X_pno_[ij];
-                e_pno_[ji] = e_pno_[ij];
-                n_pno_[ji] = n_pno_[ij];
-                de_pno_[ji] = de_pno_ij;
-            } // end if (i < j)
-
-        } // end if (non-crude)
     } // end for (ij pairs)
 
     outfile->Printf("    SC-LMP2 Energy (Using PAOs): %16.12f\n\n", e_sc_lmp2);
 
     if constexpr (crude) return e_ijs;
-
-    // Print out PNO domain information
-    int pno_count_total = 0, pno_count_min = nbf, pno_count_max = 0;
-    de_pno_total_ = 0.0, de_pno_total_os_ = 0.0, de_pno_total_ss_ = 0.0;
-    for (int ij = 0; ij < n_lmo_pairs; ++ij) {
-        pno_count_total += n_pno_[ij];
-        pno_count_min = std::min(pno_count_min, n_pno_[ij]);
-        pno_count_max = std::max(pno_count_max, n_pno_[ij]);
-        de_pno_total_ += de_pno_[ij];
-    }
-
-    outfile->Printf("  \n");
-    outfile->Printf("    Natural Orbitals per Local MO pair:\n");
-    outfile->Printf("      Avg: %3d NOs \n", pno_count_total / n_lmo_pairs);
-    outfile->Printf("      Min: %3d NOs \n", pno_count_min);
-    outfile->Printf("      Max: %3d NOs \n", pno_count_max);
-    outfile->Printf("  \n");
-    outfile->Printf("    PNO truncation energy = %.12f\n", de_pno_total_);
 
     // Compute PAO-LMP2 Pair Energies (For both strong AND weak pairs)
     outfile->Printf("\n  ==> Iterative Local MP2 with Projected Atomic Orbitals (PAOs) <==\n\n");
@@ -530,6 +432,122 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
 
     e_lmp2_non_trunc_ = e_curr;
     outfile->Printf("\n    PAO-LMP2 Iteration Energy: %16.12f\n\n", e_lmp2_non_trunc_);
+
+    outfile->Printf("\n  ==> Forming Pair Natural Orbitals (from converged LMP2 amplitudes) <==\n");
+    
+    K_iajb_.resize(n_lmo_pairs);   // exchange operators (i.e. (ia|jb) integrals)
+    T_iajb_.resize(n_lmo_pairs);   // amplitudes
+    Tt_iajb_.resize(n_lmo_pairs);  // antisymmetrized amplitudes
+    X_pno_.resize(n_lmo_pairs);    // global PAOs -> canonical PNOs
+    e_pno_.resize(n_lmo_pairs);    // PNO orbital energies
+
+    n_pno_.resize(n_lmo_pairs);   // number of pnos
+    de_pno_.resize(n_lmo_pairs);  // PNO truncation error
+
+#pragma omp parallel for schedule(dynamic, 1)
+    for (int ij = 0; ij < n_lmo_pairs; ++ij) {
+        int i, j;
+        std::tie(i, j) = ij_to_i_j_[ij];
+        int ji = ij_to_ji_[ij];
+
+        // number of PAOs in the pair domain (before removing linear dependencies)
+        int npao_ij = lmopair_to_paos_[ij].size();
+
+        // Read in previously saved information
+        SharedMatrix X_pao_ij = X_paos[ij];
+        SharedVector e_pao_ij = e_paos[ij];
+        SharedMatrix K_pao_ij = K_paos[ij];
+        SharedMatrix T_pao_ij = T_paos[ij];
+        SharedMatrix Tt_pao_ij = Tt_paos[ij];
+
+        // Compute orthocanonical PAO Fock matrix
+        auto F_pao_ij = submatrix_rows_and_cols(*F_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[ij]);
+        F_pao_ij = linalg::triplet(X_pao_ij, F_pao_ij, X_pao_ij, true, false, false);
+
+        // Construct pair density from amplitudes
+        auto D_ij = linalg::doublet(Tt_pao_ij, T_pao_ij, false, true);
+        D_ij->add(linalg::doublet(Tt_pao_ij, T_pao_ij, true, false));
+
+        int nvir_ij = F_pao_ij->rowspi(0);
+
+        // Diagonalization of pair density gives PNOs (in basis of the LMO's virtual domain) and PNO occ numbers
+        auto X_pno_ij = std::make_shared<Matrix>("eigenvectors", nvir_ij, nvir_ij);
+        Vector pno_occ("eigenvalues", nvir_ij);
+        D_ij->diagonalize(*X_pno_ij, pno_occ, descending);
+
+        double t_cut_scale = (i == j) ? T_CUT_PNO_DIAG_SCALE_ : 1.0;
+
+        int nvir_ij_final = 0;
+        for (size_t a = 0; a < nvir_ij; ++a) {
+            if (fabs(pno_occ.get(a)) >= t_cut_scale * T_CUT_PNO_) {
+                nvir_ij_final++;
+            }
+        }
+
+        Dimension zero(1);
+        Dimension dim_final(1);
+        dim_final.fill(nvir_ij_final);
+
+        // This transformation gives orbitals that are orthonormal but not canonical
+        X_pno_ij = X_pno_ij->get_block({zero, X_pno_ij->rowspi()}, {zero, dim_final});
+        pno_occ = pno_occ.get_block({zero, dim_final});
+
+        SharedMatrix pno_canon;
+        SharedVector e_pno_ij;
+        std::tie(pno_canon, e_pno_ij) = canonicalizer(X_pno_ij, F_pao_ij);
+
+        // This transformation gives orbitals that are orthonormal and canonical
+        X_pno_ij = linalg::doublet(X_pno_ij, pno_canon, false, false);
+
+        auto K_pno_ij = linalg::triplet(X_pno_ij, K_pao_ij, X_pno_ij, true, false, false);
+        auto T_pno_ij = linalg::triplet(X_pno_ij, T_pao_ij, X_pno_ij, true, false, false);
+        auto Tt_pno_ij = linalg::triplet(X_pno_ij, Tt_pao_ij, X_pno_ij, true, false, false);
+
+        // mp2 energy of this LMO pair after transformation to PNOs and truncation
+        double e_ij_trunc = K_pno_ij->vector_dot(Tt_pno_ij);
+
+        // truncation error
+        double de_pno_ij = e_ijs[ij] - e_ij_trunc;
+
+        X_pno_ij = linalg::doublet(X_pao_ij, X_pno_ij, false, false);
+
+        K_iajb_[ij] = K_pno_ij;
+        T_iajb_[ij] = T_pno_ij;
+        Tt_iajb_[ij] = Tt_pno_ij;
+        X_pno_[ij] = X_pno_ij;
+        e_pno_[ij] = e_pno_ij;
+        n_pno_[ij] = X_pno_ij->colspi(0);
+        de_pno_[ij] = de_pno_ij;
+
+        // account for symmetry
+        if (i < j) {
+            K_iajb_[ji] = K_iajb_[ij]->transpose();
+            T_iajb_[ji] = T_iajb_[ij]->transpose();
+            Tt_iajb_[ji] = Tt_iajb_[ij]->transpose();
+            X_pno_[ji] = X_pno_[ij];
+            e_pno_[ji] = e_pno_[ij];
+            n_pno_[ji] = n_pno_[ij];
+            de_pno_[ji] = de_pno_ij;
+        } // end if (i < j)
+    }
+
+    // Print out PNO domain information
+    int pno_count_total = 0, pno_count_min = nbf, pno_count_max = 0;
+    de_pno_total_ = 0.0, de_pno_total_os_ = 0.0, de_pno_total_ss_ = 0.0;
+    for (int ij = 0; ij < n_lmo_pairs; ++ij) {
+        pno_count_total += n_pno_[ij];
+        pno_count_min = std::min(pno_count_min, n_pno_[ij]);
+        pno_count_max = std::max(pno_count_max, n_pno_[ij]);
+        de_pno_total_ += de_pno_[ij];
+    }
+
+    outfile->Printf("  \n");
+    outfile->Printf("    Natural Orbitals per Local MO pair:\n");
+    outfile->Printf("      Avg: %3d NOs \n", pno_count_total / n_lmo_pairs);
+    outfile->Printf("      Min: %3d NOs \n", pno_count_min);
+    outfile->Printf("      Max: %3d NOs \n", pno_count_max);
+    outfile->Printf("  \n");
+    outfile->Printf("    PNO truncation energy = %.12f\n", de_pno_total_);
 
     return e_ijs;
 }
