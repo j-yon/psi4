@@ -705,6 +705,25 @@ void DLPNOBase::prep_sparsity(bool initial, bool last) {
         lmopair_to_riatoms_[ij] = merge_lists(lmo_to_riatoms_[i], lmo_to_riatoms_[j]);
     }
 
+    /*
+    // For diagonal LMO pairs (ii), the pao (and ri) domain is the union of the pao domain of ALL 
+    // interacting LMO pairs
+#pragma omp parallel for
+    for (size_t i = 0; i < naocc; ++i) {
+        size_t ii = i_j_to_ij_[i][i];
+        for (size_t j = 0; j < naocc; ++j) {
+            int ij = i_j_to_ij_[i][j];
+            if (ij != -1) {
+                lmopair_to_paos_[ii] = merge_lists(lmopair_to_paos_[ii], lmo_to_paos_[j]);
+                lmopair_to_paoatoms_[ii] = merge_lists(lmopair_to_paoatoms_[ii], lmo_to_paoatoms_[j]);
+
+                lmopair_to_ribfs_[i] = merge_lists(lmopair_to_ribfs_[ii], lmo_to_ribfs_[j]);
+                lmopair_to_riatoms_[ii] = merge_lists(lmopair_to_riatoms_[ii], lmo_to_riatoms_[j]);
+            }
+        }
+    }
+    */
+
     // Create a list of lmos that "interact" with a lmo_pair by differential overlap
     lmopair_to_lmos_.clear();
     lmopair_to_lmos_.resize(n_lmo_pairs);

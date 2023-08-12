@@ -46,6 +46,7 @@
 #include "psi4/libpsi4util/process.h"
 #include "psi4/libqt/qt.h"
 
+#include <ctime>
 #include <algorithm>
 
 #ifdef _OPENMP
@@ -312,7 +313,7 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
     outfile->Printf("\n  ==> Iterative Local MP2 with Projected Atomic Orbitals (PAOs) <==\n\n");
     outfile->Printf("    E_CONVERGENCE = %.2e\n", options_.get_double("E_CONVERGENCE"));
     outfile->Printf("    R_CONVERGENCE = %.2e\n\n", options_.get_double("R_CONVERGENCE"));
-    outfile->Printf("                          Corr. Energy    Delta E     Max R\n");
+    outfile->Printf("                         Corr. Energy    Delta E     Max R     Time (s)\n");
 
     std::vector<SharedMatrix> R_iajb(n_lmo_pairs);
 
@@ -325,6 +326,7 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
     while (!(e_converged && r_converged)) {
         // RMS of residual per LMO pair, for assessing convergence
         std::vector<double> R_iajb_rms(n_lmo_pairs, 0.0);
+        std::time_t time_start = std::time(nullptr);
 
         // Calculate residuals from current amplitudes
 #pragma omp parallel for schedule(dynamic, 1)
@@ -421,7 +423,9 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
         r_converged = (fabs(r_curr) < options_.get_double("R_CONVERGENCE"));
         e_converged = (fabs(e_curr - e_prev) < options_.get_double("E_CONVERGENCE"));
 
-        outfile->Printf("  @PAO-LMP2 iter %3d: %16.12f %10.3e %10.3e\n", iteration, e_curr, e_curr - e_prev, r_curr);
+        std::time_t time_stop = std::time(nullptr);
+
+        outfile->Printf("  @PAO-LMP2 iter %3d: %16.12f %10.3e %10.3e %8d\n", iteration, e_curr, e_curr - e_prev, r_curr, (int)time_stop - (int)time_start);
 
         iteration++;
 
@@ -449,6 +453,8 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
         int i, j;
         std::tie(i, j) = ij_to_i_j_[ij];
         int ji = ij_to_ji_[ij];
+
+        if (i > j) continue;
 
         // number of PAOs in the pair domain (before removing linear dependencies)
         int npao_ij = lmopair_to_paos_[ij].size();
@@ -561,7 +567,7 @@ void DLPNOCCSD::pno_lmp2_iterations() {
     outfile->Printf("\n  ==> Iterative Local MP2 with Pair Natural Orbitals (PNOs) <==\n\n");
     outfile->Printf("    E_CONVERGENCE = %.2e\n", options_.get_double("E_CONVERGENCE"));
     outfile->Printf("    R_CONVERGENCE = %.2e\n\n", options_.get_double("R_CONVERGENCE"));
-    outfile->Printf("                          Corr. Energy    Delta E     Max R\n");
+    outfile->Printf("                         Corr. Energy    Delta E     Max R     Time (s)\n");
 
     std::vector<SharedMatrix> R_iajb(n_lmo_pairs);
 
@@ -573,6 +579,8 @@ void DLPNOCCSD::pno_lmp2_iterations() {
     while (!(e_converged && r_converged)) {
         // RMS of residual per LMO pair, for assessing convergence
         std::vector<double> R_iajb_rms(n_lmo_pairs, 0.0);
+
+        std::time_t time_start = std::time(nullptr);
 
         // Calculate residuals from current amplitudes
 #pragma omp parallel for schedule(dynamic, 1)
@@ -667,7 +675,9 @@ void DLPNOCCSD::pno_lmp2_iterations() {
         r_converged = (fabs(r_curr) < options_.get_double("R_CONVERGENCE"));
         e_converged = (fabs(e_curr - e_prev) < options_.get_double("E_CONVERGENCE"));
 
-        outfile->Printf("  @PNO-LMP2 iter %3d: %16.12f %10.3e %10.3e\n", iteration, e_curr, e_curr - e_prev, r_curr);
+        std::time_t time_stop = std::time(nullptr);
+
+        outfile->Printf("  @PNO-LMP2 iter %3d: %16.12f %10.3e %10.3e %8d\n", iteration, e_curr, e_curr - e_prev, r_curr, (int)time_stop - (int)time_start);
 
         iteration++;
 
@@ -1426,7 +1436,7 @@ void DLPNOCCSD::lccsd_iterations() {
     outfile->Printf("\n  ==> Local CCSD <==\n\n");
     outfile->Printf("    E_CONVERGENCE = %.2e\n", options_.get_double("E_CONVERGENCE"));
     outfile->Printf("    R_CONVERGENCE = %.2e\n\n", options_.get_double("R_CONVERGENCE"));
-    outfile->Printf("                      Corr. Energy    Delta E     Max R1     Max R2\n");
+    outfile->Printf("                      Corr. Energy    Delta E     Max R1     Max R2     Time (s)\n");
 
     // => Initialize Singles Amplitudes <= //
 
@@ -1473,6 +1483,8 @@ void DLPNOCCSD::lccsd_iterations() {
         std::vector<double> R_ia_rms(naocc, 0.0);
         // RMS of residual per LMO pair, for assessing convergence
         std::vector<double> R_iajb_rms(n_lmo_pairs, 0.0);
+
+        std::time_t time_start = std::time(nullptr);
 
         // Build one-particle intermediates
         auto Fmi = compute_Fmi(tau_tilde);
@@ -1864,7 +1876,9 @@ void DLPNOCCSD::lccsd_iterations() {
         r_converged &= (fabs(r_curr2) < options_.get_double("R_CONVERGENCE"));
         e_converged = (fabs(e_curr - e_prev) < options_.get_double("E_CONVERGENCE"));
 
-        outfile->Printf("  @LCCSD iter %3d: %16.12f %10.3e %10.3e %10.3e\n", iteration, e_curr, e_curr - e_prev, r_curr1, r_curr2);
+        std::time_t time_stop = std::time(nullptr);
+
+        outfile->Printf("  @LCCSD iter %3d: %16.12f %10.3e %10.3e %10.3e %8d\n", iteration, e_curr, e_curr - e_prev, r_curr1, r_curr2, (int)time_stop - (int)time_start);
 
         iteration++;
 

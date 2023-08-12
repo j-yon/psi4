@@ -46,6 +46,7 @@
 #include "psi4/libpsi4util/process.h"
 #include "psi4/libqt/qt.h"
 
+#include <ctime>
 #include <algorithm>
 
 #ifdef _OPENMP
@@ -1024,7 +1025,7 @@ double DLPNOCCSD_T::lccsd_t_iterations() {
     outfile->Printf("\n  ==> Local CCSD(T) <==\n\n");
     outfile->Printf("    E_CONVERGENCE = %.2e\n", options_.get_double("E_CONVERGENCE"));
     outfile->Printf("    R_CONVERGENCE = %.2e\n\n", options_.get_double("R_CONVERGENCE"));
-    outfile->Printf("                         Corr. Energy    Delta E     Max R\n");
+    outfile->Printf("                         Corr. Energy    Delta E     Max R     Time (s)\n");
 
     int iteration = 1, max_iteration = options_.get_int("DLPNO_MAXITER");
     double e_curr = 0.0, e_prev = 0.0, r_curr = 0.0;
@@ -1035,6 +1036,8 @@ double DLPNOCCSD_T::lccsd_t_iterations() {
     while (!(e_converged && r_converged)) {
         // RMS of residual per single LMO, for assesing convergence
         std::vector<double> R_iajbkc_rms(n_lmo_triplets, 0.0);
+
+        std::time_t time_start = std::time(nullptr);
 
 #pragma omp parallel for schedule(dynamic)
         for (int ijk = 0; ijk < n_lmo_triplets; ++ijk) {
@@ -1187,7 +1190,9 @@ double DLPNOCCSD_T::lccsd_t_iterations() {
         r_converged = fabs(r_curr) < options_.get_double("R_CONVERGENCE");
         e_converged = fabs(e_curr - e_prev) < options_.get_double("E_CONVERGENCE");
 
-        outfile->Printf("  @LCCSD(T) iter %3d: %16.12f %10.3e %10.3e\n", iteration, e_curr, e_curr - e_prev, r_curr);
+        std::time_t time_stop = std::time(nullptr);
+
+        outfile->Printf("  @LCCSD(T) iter %3d: %16.12f %10.3e %10.3e %8d\n", iteration, e_curr, e_curr - e_prev, r_curr, (int)time_stop - (int)time_start);
 
         iteration++;
 
