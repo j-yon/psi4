@@ -2499,9 +2499,11 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         /*- Residual convergence criteria for local MP2 iterations -*/
         options.add_double("R_CONVERGENCE", 1e-6);
         /*- Orbital localizer -*/
-        options.add_str("DLPNO_LOCAL_ORBITALS", "BOYS", "BOYS PIPEK_MEZEY");
+        options.add_str("DLPNO_LOCAL_ORBITALS", "BOYS", "BOYS PIPEK_MEZEY NONE");
         /*- Maximum number of iterations to determine the MP2 amplitudes. -*/
         options.add_int("DLPNO_MAXITER", 50);
+        /*- Use T1-transformed Hamiltonian for DLPNO-CCSD? -*/
+        options.add_bool("DLPNO_T1_HAMILTONIAN", false);
         /*- Which DLPNO Algorithm to run !expert*/
         options.add_str("DLPNO_ALGORITHM", "CCSD", "MP2 CCSD CCSD(T)");
         /*- Use T0 approximation for DLPNO-CCSD(T)? !expert*/

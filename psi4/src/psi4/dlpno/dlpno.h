@@ -84,11 +84,17 @@ class DLPNOBase : public Wavefunction {
       /// localized molecular orbitals (LMOs)
       SharedMatrix C_lmo_;
       SharedMatrix F_lmo_;
+      SharedMatrix H_lmo_;
 
       /// projected atomic orbitals (PAOs)
       SharedMatrix C_pao_;
       SharedMatrix F_pao_;
       SharedMatrix S_pao_;
+      SharedMatrix H_pao_;
+
+      // LMO/PAO Hamiltonian (Used in T1-Hamiltonian CCSD)
+      SharedMatrix H_lmo_pao_;
+      SharedMatrix F_lmo_pao_;
 
       /// differential overlap integrals (EQ 4)
       SharedMatrix DOI_ij_; // LMO/LMO
@@ -315,6 +321,10 @@ class DLPNOCCSD : public DLPNOBase {
     std::vector<SharedMatrix> K_tilde_phys_; /// (i e_ij | a_ij f_ij) [aka K_tilde] (stored as (a, e*f)) [Physicist's Notation]
     std::vector<SharedMatrix> L_tilde_; /// 2.0 * K_tilde_chem - K_tilde_phys
     /// (0 occupied, 4 virtual)
+
+    // DF Integrals (Used in DLPNO-T1-CCSD)
+    std::vector<std::vector<SharedMatrix>> Qmn_ij_; // (q_ij | m_ij n_ij)
+    std::vector<std::vector<SharedMatrix>> Qma_ij_; // (q_ij | m_ij a_ij)
     std::vector<std::vector<SharedMatrix>> Qab_ij_; // (q_ij | a_ij b_ij)
 
     double e_lccsd_; ///< raw (uncorrected) local CCSD correlation energy
@@ -357,6 +367,9 @@ class DLPNOCCSD : public DLPNOBase {
 
     /// iteratively solve local CCSD equations
     void lccsd_iterations();
+
+    /// local CCSD equations (with the T1-transformation)
+    void t1_lccsd_iterations();
 
     void print_header();
     void print_results();
