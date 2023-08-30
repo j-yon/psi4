@@ -1920,6 +1920,170 @@ void DLPNOCCSD::lccsd_iterations() {
     e_lccsd_ = e_curr;
 }
 
+void DLPNOCCSD::t1_ints() {
+    timer_on("DLPNO-CCSD: T1 Ints");
+
+    timer_off("DLPNO-CCSD: T1 Ints");
+}
+
+void DLPNOCCSD::t1_fock() {
+    timer_on("DLPNO-CCSD: T1 Fock");
+
+    int naocc = nalpha_ - nfrzc();
+    int n_lmo_pairs = ij_to_i_j_.size();
+
+    Fkj_ = F_lmo_->clone();
+    Fkc_.resize(n_lmo_pairs);
+    Fai_.resize(naocc);
+    Fab_.resize(n_lmo_pairs);
+
+#pragma omp parallel for schedule(dynamic, 1)
+    for (int ij = 0; ij < n_lmo_pairs; ++ij) {
+        auto &[i, j] = ij_to_i_j_[ij];
+        int i_ij = lmopair_to_lmos_dense_[ij][i], j_ij = lmopair_to_lmos_dense_[ij][j];
+        int ji = ij_to_ji_[ij], jj = i_j_to_ij_[j][j];
+
+        int naux_ij = lmopair_to_ribfs_[ij].size();
+        int nlmo_ij = lmopair_to_lmos_[ij].size();
+        int npno_ij = n_pno_[ij];
+
+        if (npno_ij == 0) continue;
+
+        // Create T(n, a_ij) intermediate (for integral dressing)
+        // TODO: Consolidate thsi code later
+        auto T_n = std::make_shared<Matrix>(nlmo_ij, npno_ij);
+        for (int n_ij = 0; n_ij < nlmo_ij; ++n_ij) {
+            int n = lmopair_to_lmos_[ij][n_ij];
+            int nn = i_j_to_ij_[n][n];
+            auto T_n_temp = linalg::doublet(S_PNO(ij, nn), T_ia_[n], false, false);
+            
+            for (int a_ij = 0; a_ij < npno_ij; ++a_ij) {
+                (*T_n)(n_ij, a_ij) = (*T_n_temp)(a_ij, 0);
+            } // end a_ij
+        } // end n_ij
+
+        // Dress Fkj matrices
+        (*Fkj_)(i, j) += 2.0 * T_n->vector_dot(K_bar_chem_[ij]);
+        (*Fkj_)(i, j) -= T_n->vector_dot(K_bar_[ji]);
+
+        // Dress Fkc matrices
+        Fkc_[ij] = std::make_shared<Matrix>(1, npno_ij);
+
+        // Dress Fab matrices
+        Fab_[ij] = std::make_shared<Matrix>(npno_ij, npno_ij);
+        Fab_[ij]->set_diagonal(e_pno_[ij]);
+
+        for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
+            int k = lmopair_to_lmos_[ij][k_ij];
+            int ik = i_j_to_ij_[i][k], kk = i_j_to_ij_[k][k];
+
+            // Common intermediates
+            auto T_j = linalg::doublet(S_PNO(ik, jj), T_ia_[j]);
+            auto T_k = linalg::doublet(S_PNO(ik, kk), T_ia_[k]);
+
+            // Fkj contributions
+            (*Fkj_)(i, j) += (*linalg::triplet(T_j, L_iajb_[ik], T_k, true, false, false))(0, 0);
+
+            // Fkc contributions
+            Fkc_[ij]->add(linalg::triplet(S_PNO(ij, ik), L_iajb_[ik], T_k)->transpose());
+
+            // Fab contributions
+            auto L_temp = linalg::doublet(T_ia_[k], L_tilde_[kk], true, false);
+            L_temp->reshape(n_pno_[kk], n_pno_[kk]);
+            Fab_[ij]->add(linalg::triplet(S_PNO(ij, kk), L_temp, S_PNO(kk, ij)));
+
+            auto T_k_ij = linalg::doublet(S_PNO(ij, kk), T_ia_[k]);
+            for (int l_ij = 0; l_ij < nlmo_ij; ++l_ij) {
+                int l = lmopair_to_lmos_[ij][l_ij];
+                int kl = i_j_to_ij_[k][l];
+
+                if (kl == -1 || n_pno_[kl] == 0) continue;
+
+                auto T_k_kl = linalg::doublet(S_PNO(kl, kk), T_ia_[k]);
+                auto L_temp = linalg::triplet(S_PNO(ij, kl), L_iajb_[kl], T_k_kl);
+                
+                for (int a_ij = 0; a_ij < npno_ij; ++a_ij) {
+                    for (int b_ij = 0; b_ij < npno_ij; ++b_ij) {
+                        (*Fab_[ij])(a_ij, b_ij) -= (*T_k_ij)(a_ij, 0) * (*L_temp)(b_ij, 0);
+                    }
+                }
+
+            }
+        }
+    }
+
+#pragma omp parallel for
+    for (int i = 0; i < naocc; ++i) {
+        int ii = i_j_to_ij_[i][i];
+        int nlmo_ii = lmopair_to_lmos_[ii].size();
+        int npno_ii = n_pno_[ii];
+
+        Fai_[i] = std::make_shared<Matrix>(npno_ii, 1);
+        for (int a_ii = 0; a_ii < npno_ii; ++a_ii) {
+            (*Fai_[i])(a_ii, 0) = (*T_ia_[i])(a_ii, 0) * (*e_pno_[ii])(a_ii);
+        }
+
+        for (int j_ii = 0; j_ii < nlmo_ii; ++j_ii) {
+            int j = lmopair_to_lmos_[ii][j_ii];
+            int jj = i_j_to_ij_[j][j], ij = i_j_to_ij_[i][j];
+
+            int naux_ij = lmopair_to_ribfs_[ij].size();
+            int nlmo_ij = lmopair_to_lmos_[ij].size();
+            int npno_ij = n_pno_[ij];
+
+            if (npno_ij == 0) continue;
+
+            // Create T(n, a_ij) intermediate (for integral dressing)
+            // TODO: Consolidate thsi code later
+            auto T_n = std::make_shared<Matrix>(nlmo_ij, npno_ij);
+            for (int n_ij = 0; n_ij < nlmo_ij; ++n_ij) {
+                int n = lmopair_to_lmos_[ij][n_ij];
+                int nn = i_j_to_ij_[n][n];
+                auto T_n_temp = linalg::doublet(S_PNO(ij, nn), T_ia_[n], false, false);
+                
+                for (int a_ij = 0; a_ij < npno_ij; ++a_ij) {
+                    (*T_n)(n_ij, a_ij) = (*T_n_temp)(a_ij, 0);
+                } // end a_ij
+            } // end n_ij
+
+            auto T_j = linalg::doublet(S_PNO(ii, jj), T_ia_[j]);
+
+            auto T_j_clone = T_j->clone();
+            T_j_clone->scale((*F_lmo_)(i, j));
+            Fai_[i]->subtract(T_j_clone);
+
+            auto T_ij = linalg::doublet(S_PNO(ij, jj), T_ia_[j]);
+            Fai_[i]->add(linalg::triplet(S_PNO(ii, ij), M_iajb_[ij], T_ij));
+
+            double fai_scale = 2.0 * K_bar_chem_[ij]->vector_dot(T_n);
+            fai_scale -= K_bar_[ij]->vector_dot(T_n);
+            T_j_clone = T_j->clone();
+            T_j_clone->scale(fai_scale);
+            Fai_[i]->subtract(T_j_clone);
+
+            auto T_i = linalg::doublet(S_PNO(jj, ii), T_ia_[i]);
+            auto L_temp = linalg::doublet(T_ia_[j], L_tilde_[jj], true, false);
+            L_temp->reshape(n_pno_[jj], n_pno_[jj]);
+            Fai_[i]->add(linalg::triplet(S_PNO(ii, jj), L_temp, T_i));
+
+            for (int k_ii = 0; k_ii < nlmo_ii; ++k_ii) {
+                int k = lmopair_to_lmos_[ii][k_ii];
+                int jk = i_j_to_ij_[j][k], kk = i_j_to_ij_[k][k];
+
+                auto T_i = linalg::doublet(S_PNO(jk, ii), T_ia_[i]);
+                auto T_k = linalg::doublet(S_PNO(jk, kk), T_ia_[k]);
+
+                double triple_scale = (*linalg::triplet(T_i, L_iajb_[jk], T_k, true, false, false))(0, 0);
+                T_j_clone = T_j->clone();
+                T_j_clone->scale(triple_scale);
+                Fai_[i]->subtract(T_j_clone);
+            }
+        }
+    }
+
+    timer_off("DLPNO-CCSD: T1 Fock");
+}
+
 void DLPNOCCSD::t1_lccsd_iterations() {
 
     int n_lmo_pairs = ij_to_i_j_.size();
@@ -2170,6 +2334,8 @@ void DLPNOCCSD::t1_lccsd_iterations() {
 
         timer_off("T1-dressing of integrals");
 
+        t1_fock();
+
         // Special integrals after T1-transformation
 
         std::vector<SharedMatrix> J_ijab_t1(n_lmo_pairs);
@@ -2200,7 +2366,7 @@ void DLPNOCCSD::t1_lccsd_iterations() {
                 }
             } // end q_ij
 
-            F_kj_t1[ij] = (*Fmn_tilde[pair_idx])(i_ij, j_ij);
+            F_kj_t1[ij] = (*Fkj_)(i, j);
             for (int l_ij = 0; l_ij < nlmo_ij; ++l_ij) {
                 int l = lmopair_to_lmos_[ij][l_ij];
                 int il = i_j_to_ij_[i][l], lj = i_j_to_ij_[l][j];
@@ -2238,7 +2404,7 @@ void DLPNOCCSD::t1_lccsd_iterations() {
                 int i_ii = lmopair_to_lmos_dense_[ii][i];
                 
                 std::vector<int> i_ii_slice(1, i_ii);
-                R_ia[i]->add(submatrix_cols(*Fam_tilde[ii], i_ii_slice));
+                R_ia[i]->add(Fai_[i]);
             }
             // if (iteration <= 1) R_ia[i]->print_out();
 
@@ -2278,8 +2444,7 @@ void DLPNOCCSD::t1_lccsd_iterations() {
             // if (iteration <= 1) R_ia[i]->print_out();
 
             // C_{i}^{a} = F_{kc}U_{ik}^{ac}  (DePrince 2013 Equation 22)
-            auto C1temp = linalg::triplet(S_PNO(ii, ik), Tt_iajb_[ik], 
-                                            submatrix_rows(*Fma_tilde[pair_idx], k_ik_slice), false, false, true);
+            auto C1temp = linalg::triplet(S_PNO(ii, ik), Tt_iajb_[ik], Fkc_[ki], false, false, true);
             for (int a_ii = 0; a_ii < n_pno_[ii]; ++a_ii) {
 #pragma omp atomic
                 (*R_ia[i])(a_ii, 0) += (*C1temp)(a_ii, 0);
@@ -2542,7 +2707,7 @@ void DLPNOCCSD::t1_lccsd_iterations() {
 
             // E_{ij}^{ab} = t_{ij}^{ac} (Fbc - U_{kl}^{bd}[B^{Q}_{ld}B^{Q}_{kc}]) (DePrince Equation 15)
             SharedMatrix E_ij;
-            auto Fac = Fab_tilde[pair_idx]->clone();
+            auto Fac = Fab_[ij]->clone();
             for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
                 int k = lmopair_to_lmos_[ij][k_ij];
 

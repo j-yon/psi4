@@ -327,6 +327,16 @@ class DLPNOCCSD : public DLPNOBase {
     std::vector<std::vector<SharedMatrix>> Qma_ij_; // (q_ij | m_ij a_ij)
     std::vector<std::vector<SharedMatrix>> Qab_ij_; // (q_ij | a_ij b_ij)
 
+    std::vector<std::vector<SharedMatrix>> Qmn_t1_; // (q_ij | m_ij n_ij)
+    std::vector<std::vector<SharedMatrix>> Qma_t1_; // (q_ij | m_ij a_ij)
+    std::vector<std::vector<SharedMatrix>> Qab_t1_; // (q_ij | a_ij b_ij)
+
+    // Dressed Fock matrices (used in DLPNO-T1-CCSD)
+    SharedMatrix Fkj_;
+    std::vector<SharedMatrix> Fkc_;
+    std::vector<SharedMatrix> Fai_;
+    std::vector<SharedMatrix> Fab_;
+
     double e_lccsd_; ///< raw (uncorrected) local CCSD correlation energy
 
     /// Returns the appropriate overlap matrix given two LMO pairs
@@ -368,6 +378,10 @@ class DLPNOCCSD : public DLPNOBase {
     /// iteratively solve local CCSD equations
     void lccsd_iterations();
 
+    /// compute T1-dressed DF integrals
+    void t1_ints();
+    /// compute T1-dressed Fock matrix intermediates
+    void t1_fock();
     /// local CCSD equations (with the T1-transformation)
     void t1_lccsd_iterations();
 
