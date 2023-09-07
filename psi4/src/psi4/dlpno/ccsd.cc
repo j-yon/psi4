@@ -2089,6 +2089,12 @@ void DLPNOCCSD::t1_lccsd_iterations() {
     int n_lmo_pairs = ij_to_i_j_.size();
     int naocc = nalpha_ - nfrzc();
 
+    // Thread and OMP Parallel info
+    int nthreads = 1;
+#ifdef _OPENMP
+    nthreads = Process::environment.get_n_threads();
+#endif
+
     outfile->Printf("\n  ==> Local CCSD (T1-transformed Hamiltonian) <==\n\n");
     outfile->Printf("    E_CONVERGENCE = %.2e\n", options_.get_double("E_CONVERGENCE"));
     outfile->Printf("    R_CONVERGENCE = %.2e\n\n", options_.get_double("R_CONVERGENCE"));
@@ -2119,6 +2125,17 @@ void DLPNOCCSD::t1_lccsd_iterations() {
     std::vector<SharedMatrix> R_ia(naocc);
     std::vector<SharedMatrix> Rn_iajb(n_lmo_pairs);
     std::vector<SharedMatrix> R_iajb(n_lmo_pairs);
+
+    // => Thread buffers <= //
+
+    std::vector<std::vector<SharedMatrix>> R_ia_buffer(nthreads);
+    for (int thread = 0; thread < nthreads; ++thread) {
+        R_ia_buffer[thread].resize(naocc);
+        for (int i = 0; i < naocc; ++i) {
+            int ii = i_j_to_ij_[i][i];
+            R_ia_buffer[thread][i] = std::make_shared<Matrix>(n_pno_[ii], 1);
+        }
+    }
 
     int iteration = 0, max_iteration = options_.get_int("DLPNO_MAXITER");
     double e_curr = 0.0, e_prev = 0.0, r1_curr = 0.0, r2_curr = 0.0;
@@ -2354,11 +2371,18 @@ void DLPNOCCSD::t1_lccsd_iterations() {
 
         timer_on("DLPNO-CCSD: Compute R1");
 
-        // Make R1 residuals
+        // Initialize R1 residuals, DePrince 2013 Equation 19, Term 1
 #pragma omp parallel for schedule(dynamic, 1)
         for (int i = 0; i < naocc; ++i) {
             int ii = i_j_to_ij_[i][i];
-            R_ia[i] = std::make_shared<Matrix>(n_pno_[ii], 1);
+            R_ia[i] = Fai_[i]->clone();
+        }
+
+        // Zero out buffers
+        for (int thread = 0; thread < nthreads; ++thread) {
+            for (int i = 0; i < naocc; ++i) {
+                R_ia_buffer[thread][i]->zero();
+            }
         }
 
         // Compute residual for singles amplitude
@@ -2371,19 +2395,13 @@ void DLPNOCCSD::t1_lccsd_iterations() {
             int naux_ik = lmopair_to_ribfs_[ik].size();
             int npno_ik = n_pno_[ik];
 
+            int thread = 0;
+#ifdef _OPENMP
+            thread = omp_get_thread_num();
+#endif
+
             if (npno_ik == 0) continue;
             int pair_idx = (i > k) ? ki : ik;
-
-            // DePrince 2013 Equation 19, Term 1
-            if (i == k) {
-                // Aliasing variables (to aid code readability)
-                int &ii = ik;
-                int i_ii = lmopair_to_lmos_dense_[ii][i];
-                
-                std::vector<int> i_ii_slice(1, i_ii);
-                R_ia[i]->add(Fai_[i]);
-            }
-            // if (iteration <= 1) R_ia[i]->print_out();
 
             int i_ik = lmopair_to_lmos_dense_[ik][i], k_ik = lmopair_to_lmos_dense_[ik][k];
             std::vector<int> k_ik_slice = std::vector<int>(1, k_ik);
@@ -2392,13 +2410,7 @@ void DLPNOCCSD::t1_lccsd_iterations() {
             // A_{i}^{a} = u_{ki}^{cd}B^{Q}_{kc}B^{Q}_{ad} (DePrince 2013 Equation 20)
             auto Uki = Tt_iajb_[ki]->clone();
             Uki->reshape(npno_ik * npno_ik, 1);
-            auto A1temp = linalg::triplet(S_PNO(ii, ki), K_adkc_t1[ki], Uki);
-            for (int a_ii = 0; a_ii < n_pno_[ii]; ++a_ii) {
-#pragma omp atomic
-                (*R_ia[i])(a_ii, 0) += (*A1temp)(a_ii, 0);
-            } // end a_ii
-            
-            // if (iteration <= 1) R_ia[i]->print_out();
+            R_ia_buffer[thread][i]->add(linalg::triplet(S_PNO(ii, ki), K_adkc_t1[ki], Uki));
 
             // B_{i}^{a} = -u_{kl}^{ac}B^{Q}_{ki}B^{Q}_{lc} (DePrince 2013 Equation 21)
             for (int l_ik = 0; l_ik < nlmo_ik; ++l_ik) {
@@ -2407,24 +2419,20 @@ void DLPNOCCSD::t1_lccsd_iterations() {
                 if (n_pno_[kl] == 0) continue;
 
                 std::vector<int> i_kl_slice(1, lmopair_to_lmos_dense_[kl][i]);
-                auto U_kl = linalg::triplet(S_PNO(ii, kl), Tt_iajb_[kl], submatrix_rows(*K_kilc_t1[kl], i_kl_slice), false, false, true);
-                for (int a_ii = 0; a_ii < n_pno_[ii]; ++a_ii) {
-#pragma omp atomic
-                    (*R_ia[i])(a_ii, 0) -= (*U_kl)(a_ii, 0);
-                } // end a_iiS
-                
+                R_ia_buffer[thread][i]->subtract(linalg::triplet(S_PNO(ii, kl), Tt_iajb_[kl], 
+                                        submatrix_rows(*K_kilc_t1[kl], i_kl_slice), false, false, true));
             } // end l_ik
-            // if (iteration <= 1) R_ia[i]->print_out();
 
             // C_{i}^{a} = F_{kc}U_{ik}^{ac}  (DePrince 2013 Equation 22)
-            auto C1temp = linalg::triplet(S_PNO(ii, ik), Tt_iajb_[ik], Fkc_[ki], false, false, true);
-            for (int a_ii = 0; a_ii < n_pno_[ii]; ++a_ii) {
-#pragma omp atomic
-                (*R_ia[i])(a_ii, 0) += (*C1temp)(a_ii, 0);
-            } // end a_ii
-            // if (iteration <= 1) R_ia[i]->print_out();
+            R_ia_buffer[thread][i]->add(linalg::triplet(S_PNO(ii, ik), Tt_iajb_[ik], Fkc_[ki], false, false, true));
         } // end ki
-        // if (iteration == 1) abort();
+
+        // Add R_ia buffers to R_ia
+        for (int i = 0; i < naocc; ++i) {
+            for (int thread = 0; thread < nthreads; ++thread) {
+                R_ia[i]->add(R_ia_buffer[thread][i]);
+            }
+        }
 
         // Get rms of R_ia
 #pragma omp parallel for schedule(dynamic, 1)
