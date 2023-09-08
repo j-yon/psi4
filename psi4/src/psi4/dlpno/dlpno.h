@@ -378,6 +378,7 @@ class DLPNOCCSD : public DLPNOBase {
     // => T1-CCSD intermediates
     std::vector<SharedMatrix> compute_C_tilde(const std::vector<SharedMatrix>& J_ijab_t1);
     std::vector<SharedMatrix> compute_D_tilde(const std::vector<SharedMatrix>& L_aikc_t1);
+    SharedMatrix compute_E_tilde();
 
     /// iteratively solve local CCSD equations
     void lccsd_iterations();

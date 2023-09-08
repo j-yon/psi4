@@ -1995,12 +1995,12 @@ void DLPNOCCSD::t1_fock() {
             auto T_k_ij = linalg::doublet(S_PNO(ij, kk), T_ia_[k]);
             for (int l_ij = 0; l_ij < nlmo_ij; ++l_ij) {
                 int l = lmopair_to_lmos_[ij][l_ij];
-                int kl = i_j_to_ij_[k][l];
+                int kl = i_j_to_ij_[k][l], ll = i_j_to_ij_[l][l];
 
                 if (kl == -1 || n_pno_[kl] == 0) continue;
 
-                auto T_k_kl = linalg::doublet(S_PNO(kl, kk), T_ia_[k]);
-                auto L_temp = linalg::triplet(S_PNO(ij, kl), L_iajb_[kl], T_k_kl);
+                auto T_l_kl = linalg::doublet(S_PNO(kl, ll), T_ia_[l]);
+                auto L_temp = linalg::triplet(S_PNO(ij, kl), L_iajb_[kl], T_l_kl);
                 
                 for (int a_ij = 0; a_ij < npno_ij; ++a_ij) {
                     for (int b_ij = 0; b_ij < npno_ij; ++b_ij) {
@@ -2151,6 +2151,15 @@ std::vector<SharedMatrix> DLPNOCCSD::compute_D_tilde(const std::vector<SharedMat
     timer_off("DLPNO-CCSD: D tilde");
 
     return D_tilde;
+}
+
+SharedMatrix DLPNOCCSD::compute_E_tilde() {
+    
+    timer_on("DLPNO-CCSD: E tilde");
+
+    timer_off("DLPNO-CCSD: E tilde");
+
+    return nullptr;
 }
 
 void DLPNOCCSD::t1_lccsd_iterations() {
@@ -2438,6 +2447,7 @@ void DLPNOCCSD::t1_lccsd_iterations() {
 
         auto C_tilde = compute_C_tilde(J_ijab_t1);
         auto D_tilde = compute_D_tilde(L_aikc_t1);
+        auto E_tilde = compute_E_tilde();
 
         timer_off("Special Integrals");
 
