@@ -2216,21 +2216,40 @@ SharedMatrix DLPNOCCSD::compute_E_tilde() {
 
     SharedMatrix E_tilde = F_pao_->clone();
 
+    int nthreads = 1;
+#ifdef _OPENMP
+    nthreads = Process::environment.get_n_threads();
+#endif
+    std::vector<SharedMatrix> E_tilde_buffer(nthreads);
+
+    for (int thread = 0; thread < nthreads; ++thread) {
+        E_tilde_buffer[thread] = std::make_shared<Matrix>(E_tilde->nrow(), E_tilde->ncol());
+    }
+
 #pragma omp parallel for schedule(dynamic, 1)
     for (int k = 0; k < naocc; ++k) {
         int kk = i_j_to_ij_[k][k];
         auto S_k = linalg::doublet(submatrix_cols(*S_pao_, lmopair_to_paos_[kk]), X_pno_[kk], false, false);
 
+        int thread = 0;
+#ifdef _OPENMP
+        thread = omp_get_thread_num();
+#endif
+
         auto L_temp = linalg::doublet(T_ia_[k], L_tilde_[kk], true, false);
         L_temp->reshape(n_pno_[kk], n_pno_[kk]);
-#pragma omp critical
-        E_tilde->add(linalg::triplet(S_k, L_temp, S_k, false, false, true));
+        E_tilde_buffer[thread]->add(linalg::triplet(S_k, L_temp, S_k, false, false, true));
     }
 
 #pragma omp parallel for schedule(dynamic, 1)
     for (int kl = 0; kl < n_lmo_pairs; ++kl) {
         auto &[k, l] = ij_to_i_j_[kl];
         int kk = i_j_to_ij_[k][k], ll = i_j_to_ij_[l][l];
+
+        int thread = 0;
+#ifdef _OPENMP
+        thread = omp_get_thread_num();
+#endif
 
         auto S_k = linalg::doublet(submatrix_cols(*S_pao_, lmopair_to_paos_[kk]), X_pno_[kk], false, false);
         auto S_kl = linalg::doublet(submatrix_cols(*S_pao_, lmopair_to_paos_[kl]), X_pno_[kl], false, false);
@@ -2240,20 +2259,15 @@ SharedMatrix DLPNOCCSD::compute_E_tilde() {
 
         auto E_temp = std::make_shared<Matrix>(n_pno_[kk], n_pno_[kl]);
         C_DGER(n_pno_[kk], n_pno_[kl], 1.0, T_ia_[k]->get_pointer(), 1, L_temp->get_pointer(), 1, E_temp->get_pointer(), n_pno_[kl]);
-        /*
-        for (int b_kk = 0; b_kk < n_pno_[kk]; ++b_kk) {
-            for (int c_kl = 0; c_kl < n_pno_[kl]; ++c_kl) {
-                (*E_temp)(b_kk, c_kl) += (*T_ia_[k])(b_kk, 0) * (*L_temp)(c_kl, 0);
-            }
-        }
-        */
-#pragma omp critical
-        E_tilde->subtract(linalg::triplet(S_k, E_temp, S_kl, false, false, true));
+        
+        E_tilde_buffer[thread]->subtract(linalg::triplet(S_k, E_temp, S_kl, false, false, true));
 
         E_temp = linalg::doublet(Tt_iajb_[kl], K_iajb_[kl], false, true);
-#pragma omp critical
-        E_tilde->subtract(linalg::triplet(S_kl, E_temp, S_kl, false, false, true));
+        E_tilde_buffer[thread]->subtract(linalg::triplet(S_kl, E_temp, S_kl, false, false, true));
+    }
 
+    for (int thread = 0; thread < nthreads; ++thread) {
+        E_tilde->add(E_tilde_buffer[thread]);
     }
 
     timer_off("DLPNO-CCSD: E tilde");
@@ -2365,27 +2379,18 @@ void DLPNOCCSD::t1_lccsd_iterations() {
             thread = omp_get_thread_num();
 #endif
 
-            if (thread == 0) timer_on("K_kilj");
-
             K_kilj_t1[ij] = std::make_shared<Matrix>(nlmo_ij, nlmo_ij);
 
             for (int q_ij = 0; q_ij < naux_ij; ++q_ij) {
+                // K_kilj contributions
                 C_DGER(nlmo_ij, nlmo_ij, 1.0, &(*Qmn_t1_[pair_idx][q_ij])(0, i_ij), nlmo_ij, &(*Qmn_t1_[pair_idx][q_ij])(0, j_ij), nlmo_ij, &(*K_kilj_t1[ij])(0,0), nlmo_ij);
             } // end q_ij
-
-            if (thread == 0) timer_off("K_kilj");
-
-            if (thread == 0) timer_on("J_ijab");
 
             J_ijab_t1[ij] = std::make_shared<Matrix>(npno_ij, npno_ij);
 
             for (int q_ij = 0; q_ij < naux_ij; ++q_ij) {
                 C_DAXPY(npno_ij * npno_ij, (*Qmn_t1_[pair_idx][q_ij])(i_ij, j_ij), &(*Qab_t1_[pair_idx][q_ij])(0, 0), 1, &(*J_ijab_t1[ij])(0,0), 1);
             } // end q_ij
-
-            if (thread == 0) timer_off("J_ijab");
-
-            if (thread == 0) timer_on("L_aikc");
 
             L_aikc_t1[ij] = std::make_shared<Matrix>(npno_ij, npno_ij);
 
@@ -2394,19 +2399,11 @@ void DLPNOCCSD::t1_lccsd_iterations() {
                 C_DAXPY(npno_ij * npno_ij, -(*Qmn_t1_[pair_idx][q_ij])(j_ij, i_ij), &(*Qab_t1_[pair_idx][q_ij])(0, 0), 1, &(*L_aikc_t1[ij])(0,0), 1);
             } // end q_ij
 
-            if (thread == 0) timer_off("L_aikc");
-
-            if (thread == 0) timer_on("K_kilc");
-
             K_kilc_t1[ij] = std::make_shared<Matrix>(nlmo_ij, npno_ij);
 
             for (int q_ij = 0; q_ij < naux_ij; ++q_ij) {
                 C_DGER(nlmo_ij, npno_ij, 1.0, &(*Qmn_t1_[pair_idx][q_ij])(i_ij, 0), 1, &(*Qma_ij_[pair_idx][q_ij])(j_ij, 0), 1, &(*K_kilc_t1[ij])(0,0), npno_ij);
             } // end q_ij
-
-            if (thread == 0) timer_off("K_kilc");
-
-            if (thread == 0) timer_on("F_kj");
 
             F_kj_t1[ij] = (*Fkj_)(i, j);
             for (int l_ij = 0; l_ij < nlmo_ij; ++l_ij) {
@@ -2417,8 +2414,6 @@ void DLPNOCCSD::t1_lccsd_iterations() {
                 auto U_lj = linalg::triplet(S_PNO(il, lj), Tt_iajb_[lj], S_PNO(lj, il));
                 F_kj_t1[ij] += K_iajb_[il]->vector_dot(U_lj->transpose());
             }
-
-            if (thread == 0) timer_off("F_kj");
 
         }
 
