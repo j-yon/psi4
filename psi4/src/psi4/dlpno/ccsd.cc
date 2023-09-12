@@ -2109,6 +2109,33 @@ void DLPNOCCSD::t1_fock() {
     timer_off("DLPNO-CCSD: T1 Fock");
 }
 
+std::vector<SharedMatrix> DLPNOCCSD::compute_B_tilde(const std::vector<SharedMatrix>& K_kilj_t1) {
+    timer_on("DLPNO-CCSD: B tilde");
+
+    int naocc = nalpha_ - nfrzc();
+    int n_lmo_pairs = ij_to_i_j_.size();
+
+    std::vector<SharedMatrix> B_tilde(n_lmo_pairs);
+
+#pragma omp parallel for schedule(dynamic, 1)
+    for (int ij = 0; ij < n_lmo_pairs; ++ij) {
+        auto &[i, j] = ij_to_i_j_[ij];
+
+        int naux_ij = lmopair_to_ribfs_[ij].size();
+        int pair_idx = (i > j) ? ij_to_ji_[ij] : ij;
+
+        B_tilde[ij] = K_kilj_t1[ij]->clone();
+
+        for (int q_ij = 0; q_ij < naux_ij; ++q_ij) {
+            B_tilde[ij]->add(linalg::triplet(Qma_ij_[pair_idx][q_ij], T_iajb_[ij], Qma_ij_[pair_idx][q_ij], false, false, true));
+        }
+    }
+
+    timer_off("DLPNO-CCSD: B tilde");
+
+    return B_tilde;
+}
+
 std::vector<SharedMatrix> DLPNOCCSD::compute_C_tilde(const std::vector<SharedMatrix>& J_ijab_t1) {
     
     timer_on("DLPNO-CCSD: C tilde");
@@ -2390,6 +2417,7 @@ void DLPNOCCSD::t1_lccsd_iterations() {
 
         }
 
+        auto B_tilde = compute_B_tilde(K_kilj_t1);
         auto C_tilde = compute_C_tilde(J_ijab_t1);
         auto D_tilde = compute_D_tilde(L_aikc_t1);
         auto E_tilde = compute_E_tilde();
@@ -2503,11 +2531,7 @@ void DLPNOCCSD::t1_lccsd_iterations() {
                 // R_{ij}^{ab} += (i a_ij | q_ij)' * (q_ij | j b_ij)' (Deprince Equation 10, Term 1)
                 auto K_ij = std::make_shared<Matrix>(npno_ij, npno_ij);
                 for (int q_ij = 0; q_ij < naux_ij; ++q_ij) {
-                    for (int a_ij = 0; a_ij < npno_ij; ++a_ij) {
-                        for (int b_ij = 0; b_ij < npno_ij; ++b_ij) {
-                            (*K_ij)(a_ij, b_ij) += (*Qma_t1_[pair_idx][q_ij])(i_ij, a_ij) * (*Qma_t1_[pair_idx][q_ij])(j_ij, b_ij);
-                        } // end b_ij
-                    } // end a_ij
+                    C_DGER(npno_ij, npno_ij, 1.0, &(*Qma_t1_[pair_idx][q_ij])(i_ij, 0), 1, &(*Qma_t1_[pair_idx][q_ij])(j_ij, 0), 1, &(*K_ij)(0, 0), npno_ij);
                 } // end q_ij
                 R_iajb[ij]->add(K_ij);
                 if (i != j) R_iajb[ji]->add(K_ij->transpose());
@@ -2530,13 +2554,10 @@ void DLPNOCCSD::t1_lccsd_iterations() {
                         int kl = i_j_to_ij_[k][l];
                         if (kl == -1 || n_pno_[kl] == 0) continue;
 
-                        double Bscale = (*K_kilj_t1[ij])(k_ij, l_ij);
-                        auto T_ij = linalg::triplet(S_PNO(kl, ij), T_iajb_[ij], S_PNO(ij, kl));
-                        Bscale += T_ij->vector_dot(K_iajb_[kl]);
-                        
                         auto T_kl = linalg::triplet(S_PNO(ij, kl), T_iajb_[kl], S_PNO(kl, ij));
-                        T_kl->scale(Bscale);
+                        T_kl->scale((*B_tilde[ij])(k_ij, l_ij));
                         B_ij->add(T_kl);
+
                     } // end l_ij
                 } // end k_ij
                 R_iajb[ij]->add(B_ij);
