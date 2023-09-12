@@ -2239,11 +2239,14 @@ SharedMatrix DLPNOCCSD::compute_E_tilde() {
         auto L_temp = linalg::doublet(L_iajb_[kl], T_l);
 
         auto E_temp = std::make_shared<Matrix>(n_pno_[kk], n_pno_[kl]);
+        C_DGER(n_pno_[kk], n_pno_[kl], 1.0, T_ia_[k]->get_pointer(), 1, L_temp->get_pointer(), 1, E_temp->get_pointer(), n_pno_[kl]);
+        /*
         for (int b_kk = 0; b_kk < n_pno_[kk]; ++b_kk) {
             for (int c_kl = 0; c_kl < n_pno_[kl]; ++c_kl) {
                 (*E_temp)(b_kk, c_kl) += (*T_ia_[k])(b_kk, 0) * (*L_temp)(c_kl, 0);
             }
         }
+        */
 #pragma omp critical
         E_tilde->subtract(linalg::triplet(S_k, E_temp, S_kl, false, false, true));
 
