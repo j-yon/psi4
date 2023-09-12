@@ -2185,12 +2185,12 @@ SharedMatrix DLPNOCCSD::compute_E_tilde() {
     int naocc = nalpha_ - nfrzc();
     int n_lmo_pairs = ij_to_i_j_.size();
 
-    SharedMatrix E_tilde = linalg::triplet(X_pao_canon_, F_pao_, X_pao_canon_, true, false, false);
+    SharedMatrix E_tilde = F_pao_->clone();
 
 #pragma omp parallel for schedule(dynamic, 1)
     for (int k = 0; k < naocc; ++k) {
         int kk = i_j_to_ij_[k][k];
-        auto S_k = linalg::triplet(X_pao_canon_, submatrix_cols(*S_pao_, lmopair_to_paos_[kk]), X_pno_[kk], true, false, false);
+        auto S_k = linalg::doublet(submatrix_cols(*S_pao_, lmopair_to_paos_[kk]), X_pno_[kk], false, false);
 
         auto L_temp = linalg::doublet(T_ia_[k], L_tilde_[kk], true, false);
         L_temp->reshape(n_pno_[kk], n_pno_[kk]);
@@ -2203,8 +2203,8 @@ SharedMatrix DLPNOCCSD::compute_E_tilde() {
         auto &[k, l] = ij_to_i_j_[kl];
         int kk = i_j_to_ij_[k][k], ll = i_j_to_ij_[l][l];
 
-        auto S_k = linalg::triplet(X_pao_canon_, submatrix_cols(*S_pao_, lmopair_to_paos_[kk]), X_pno_[kk], true, false, false);
-        auto S_kl = linalg::triplet(X_pao_canon_, submatrix_cols(*S_pao_, lmopair_to_paos_[kl]), X_pno_[kl], true, false, false);
+        auto S_k = linalg::doublet(submatrix_cols(*S_pao_, lmopair_to_paos_[kk]), X_pno_[kk], false, false);
+        auto S_kl = linalg::doublet(submatrix_cols(*S_pao_, lmopair_to_paos_[kl]), X_pno_[kl], false, false);
 
         auto T_l = linalg::doublet(S_PNO(kl, ll), T_ia_[l]);
         auto L_temp = linalg::doublet(L_iajb_[kl], T_l);
@@ -2233,9 +2233,6 @@ void DLPNOCCSD::t1_lccsd_iterations() {
 
     int n_lmo_pairs = ij_to_i_j_.size();
     int naocc = nalpha_ - nfrzc();
-
-    // Canonicalize PAOs
-    std::tie(X_pao_canon_, e_pao_canon_) = orthocanonicalizer(S_pao_, F_pao_);
 
     // Thread and OMP Parallel info
     int nthreads = 1;
@@ -2681,10 +2678,9 @@ void DLPNOCCSD::t1_lccsd_iterations() {
             Rn_iajb[ij]->add(D_ij);
 
             // E_{ij}^{ab} = t_{ij}^{ac} (Fbc - U_{kl}^{bd}[B^{Q}_{ld}B^{Q}_{kc}]) (DePrince Equation 15)
-            SharedMatrix E_ij;
-            auto S_ij = linalg::triplet(X_pao_canon_, submatrix_cols(*S_pao_, lmopair_to_paos_[ij]), X_pno_[ij], true, false, false);
-            auto Fac = linalg::triplet(S_ij, E_tilde, S_ij, true, false, false);
-            E_ij = linalg::doublet(T_iajb_[ij], Fac, false, true);
+            auto Fac = submatrix_rows_and_cols(*E_tilde, lmopair_to_paos_[ij], lmopair_to_paos_[ij]);
+            Fac = linalg::triplet(X_pno_[ij], Fac, X_pno_[ij], true, false, false);
+            SharedMatrix E_ij = linalg::doublet(T_iajb_[ij], Fac, false, true);
             Rn_iajb[ij]->add(E_ij);
 
             // G_{ij}^{ab} = - t_{ik}^{ab} (Fkj + U_{lj}^{cd}[B^{Q}_{kd}B^{Q}_{lc}]) (DePrince Equation 16)

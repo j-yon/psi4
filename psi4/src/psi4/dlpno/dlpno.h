@@ -336,10 +336,6 @@ class DLPNOCCSD : public DLPNOBase {
     std::vector<SharedMatrix> Fkc_;
     std::vector<SharedMatrix> Fai_;
 
-    // Canonicalized PAOs
-    SharedMatrix X_pao_canon_;
-    SharedVector e_pao_canon_;
-
     double e_lccsd_; ///< raw (uncorrected) local CCSD correlation energy
 
     /// Returns the appropriate overlap matrix given two LMO pairs
