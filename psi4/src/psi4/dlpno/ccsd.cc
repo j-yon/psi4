@@ -489,6 +489,8 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
                 nvir_ij_final++;
             }
         }
+        // Make sure there is at least one PNO per pair :)
+        nvir_ij_final = std::max(1, nvir_ij_final);
 
         Dimension zero(1);
         Dimension dim_final(1);
@@ -2599,7 +2601,7 @@ void DLPNOCCSD::t1_lccsd_iterations() {
             SharedMatrix E_ij = linalg::doublet(T_iajb_[ij], Fac, false, true);
             Rn_iajb[ij]->add(E_ij);
 
-            // G_{ij}^{ab} = - t_{ik}^{ab} (Fkj + U_{lj}^{cd}[B^{Q}_{kd}B^{Q}_{lc}]) (DePrince Equation 16)
+            // G_{ij}^{ab} = -t_{ik}^{ab} (Fkj + U_{lj}^{cd}[B^{Q}_{kd}B^{Q}_{lc}]) (DePrince Equation 16)
             auto G_ij = R_iajb[ij]->clone();
             G_ij->zero();
 
