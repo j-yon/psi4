@@ -2097,6 +2097,8 @@ void DLPNOCCSD::t1_fock() {
                 int k = lmopair_to_lmos_[ii][k_ii];
                 int jk = i_j_to_ij_[j][k], kk = i_j_to_ij_[k][k];
 
+                if (jk == -1) continue;
+
                 auto T_i = linalg::doublet(S_PNO(jk, ii), T_ia_[i]);
                 auto T_k = linalg::doublet(S_PNO(jk, kk), T_ia_[k]);
 
