@@ -136,9 +136,11 @@ void DLPNOCCSD::estimate_memory() {
     size_t ooov = 0;
     size_t oovv = 0;
     size_t ovvv = 0;
+    size_t qoo = 0;
+    size_t qov = 0;
     size_t qvv = 0;
 
-#pragma omp parallel for schedule(dynamic) reduction(+ : oooo, ooov, oovv, ovvv, qvv)
+#pragma omp parallel for schedule(dynamic) reduction(+ : oooo, ooov, oovv, ovvv, qoo, qov, qvv)
     for (int ij = 0; ij < n_lmo_pairs; ij++) {
         int i, j;
         std::tie(i, j) = ij_to_i_j_[ij];
@@ -151,7 +153,11 @@ void DLPNOCCSD::estimate_memory() {
         ooov += 3 * nlmo_ij * npno_ij;
         oovv += 4 * npno_ij * npno_ij;
         ovvv += 3 * npno_ij * npno_ij * npno_ij;
-        if (i >= j) qvv += naux_ij * npno_ij * npno_ij;
+        if (i >= j) {
+            qoo += 2 * naux_ij * nlmo_ij * nlmo_ij;
+            qov += 2 * naux_ij * nlmo_ij * npno_ij;
+            qvv += 2 * naux_ij * npno_ij * npno_ij;
+        }
     }
 
     if (write_qab_pao_) qab_memory_ = 0;
@@ -167,7 +173,7 @@ void DLPNOCCSD::estimate_memory() {
     if (write_qab_pno_) qvv  = 0;
 
     const size_t total_df_memory = qij_memory_ + qia_memory_ + qab_memory_;
-    const size_t total_pno_int_memory = oooo + ooov + oovv + ovvv + qvv;
+    const size_t total_pno_int_memory = oooo + ooov + oovv + ovvv + qoo + qov + qvv;
     const size_t total_memory = total_df_memory + pno_overlap_memory + total_pno_int_memory;
 
     // 2^30 bytes per GiB
@@ -178,7 +184,9 @@ void DLPNOCCSD::estimate_memory() {
     outfile->Printf("    1-virtual PNO integrals: %.3f [GiB]\n", ooov * pow(2.0, -30) * sizeof(double));
     outfile->Printf("    2-virtual PNO integrals: %.3f [GiB]\n", oovv * pow(2.0, -30) * sizeof(double));
     outfile->Printf("    3-virtual PNO integrals: %.3f [GiB]\n", ovvv * pow(2.0, -30) * sizeof(double));
-    outfile->Printf("    4-virtual PNO integrals: %.3f [GiB]\n", qvv * pow(2.0, -30) * sizeof(double));
+    outfile->Printf("    (Q_{ij}|m_{ij} n_{ij}) : %.3f [GiB]\n", qoo * pow(2.0, -30) * sizeof(double));
+    outfile->Printf("    (Q_{ij}|m_{ij} a_{ij}) : %.3f [GiB]\n", qov * pow(2.0, -30) * sizeof(double));
+    outfile->Printf("    (Q_{ij}|a_{ij} b_{ij}) : %.3f [GiB]\n", qvv * pow(2.0, -30) * sizeof(double));
     outfile->Printf("    PNO/PNO overlaps       : %.3f [GiB]\n\n", pno_overlap_memory * pow(2.0, -30) * sizeof(double));
     outfile->Printf("    Total Memory Given     : %.3f [GiB]\n", memory_ * pow(2.0, -30));
     outfile->Printf("    Total Memory Required  : %.3f [GiB]\n\n", total_memory * pow(2.0, -30) * sizeof(double));
