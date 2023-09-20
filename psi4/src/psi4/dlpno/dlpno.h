@@ -293,6 +293,7 @@ class DLPNOCCSD : public DLPNOBase {
 
     /// Coupled-cluster amplitudes
     std::vector<SharedMatrix> T_ia_; ///< singles amplitudes
+    std::vector<SharedMatrix> T_n_ij_; ///< singles amplitudes of LMO n_ij in PNO basis of ij (dim: n_lmo_pairs * nlmo_ij * npno_ij)
 
     // => Strong and Weak Pair Info <=//
 
@@ -330,6 +331,11 @@ class DLPNOCCSD : public DLPNOBase {
     std::vector<std::vector<SharedMatrix>> Qmn_t1_; // (q_ij | m_ij n_ij)
     std::vector<std::vector<SharedMatrix>> Qma_t1_; // (q_ij | m_ij a_ij)
     std::vector<std::vector<SharedMatrix>> Qab_t1_; // (q_ij | a_ij b_ij)
+
+    std::vector<SharedMatrix> i_Qk_ij_;   // (q_ij | k_ij i)
+    std::vector<SharedMatrix> i_Qa_ij_;   // (q_ij | a_ij i)
+    std::vector<SharedMatrix> i_Qk_t1_;   // (q_ij | k_ij i) [T1-dressed]
+    std::vector<SharedMatrix> i_Qa_t1_;   // (q_ij | a_ij i) [T1-dressed]
 
     // Dressed Fock matrices (used in DLPNO-T1-CCSD)
     SharedMatrix Fkj_;

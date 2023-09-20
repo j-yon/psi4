@@ -893,6 +893,9 @@ void DLPNOCCSD::compute_cc_integrals() {
     Qma_ij_.resize(n_lmo_pairs);
     Qab_ij_.resize(n_lmo_pairs);
 
+    i_Qa_ij_.resize(n_lmo_pairs);
+    i_Qk_ij_.resize(n_lmo_pairs);
+
     n_svd_.resize(n_lmo_pairs);
 
     size_t qvv_memory = 0;
@@ -1027,6 +1030,9 @@ void DLPNOCCSD::compute_cc_integrals() {
         L_tilde_[ji] = K_tilde_chem_[ji]->clone();
         L_tilde_[ji]->scale(2.0);
         L_tilde_[ji]->subtract(K_tilde_temp);
+
+        i_Qk_ij_[ij] = q_io;
+        i_Qa_ij_[ji] = q_jv;
 
         /*
         bool is_strong_pair = (i_j_to_ij_strong_[i][j] != -1);
@@ -1941,28 +1947,29 @@ void DLPNOCCSD::t1_ints() {
     for (int ij = 0; ij < n_lmo_pairs; ++ij) {
         auto &[i, j] = ij_to_i_j_[ij];
 
-        if (i > j) continue;
-
         int nlmo_ij = lmopair_to_lmos_[ij].size();
         int naux_ij = lmopair_to_ribfs_[ij].size();
         int npno_ij = n_pno_[ij];
+        int pair_idx = (i > j) ? ij_to_ji_[ij] : ij;
+        int i_ij = lmopair_to_lmos_dense_[ij][i], j_ij = lmopair_to_lmos_dense_[ij][j];
 
-        // Create T(n, a_ij) intermediate (for integral dressing)
-        auto T_n = std::make_shared<Matrix>(nlmo_ij, npno_ij);
-        for (int n_ij = 0; n_ij < nlmo_ij; ++n_ij) {
-            int n = lmopair_to_lmos_[ij][n_ij];
-            int nn = i_j_to_ij_[n][n];
-            auto T_n_temp = linalg::doublet(S_PNO(ij, nn), T_ia_[n], false, false);
-            
-            for (int a_ij = 0; a_ij < npno_ij; ++a_ij) {
-                (*T_n)(n_ij, a_ij) = (*T_n_temp)(a_ij, 0);
-            } // end a_ij
-        } // end n_ij
+        i_Qk_t1_[ij] = i_Qk_ij_[ij]->clone();
+        for (int q_ij = 0; q_ij < naux_ij; ++q_ij) {
+            for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
+                for (int a_ij = 0; a_ij < npno_ij; ++a_ij) {
+                    (*i_Qk_t1_[ij])(q_ij, k_ij) += (*Qma_ij_[pair_idx][q_ij])(k_ij, a_ij) * (*T_n_ij_[ij])(i_ij, a_ij);
+                }
+            }
+        }
+
+        if (i > j) continue;
 
         // Dress DF ints
-        Qmn_t1_[ij].resize(naux_ij);
-        Qma_t1_[ij].resize(naux_ij);
-        Qab_t1_[ij].resize(naux_ij);
+        if (!Qmn_t1_[ij].size()) {
+            Qmn_t1_[ij].resize(naux_ij);
+            Qma_t1_[ij].resize(naux_ij);
+            Qab_t1_[ij].resize(naux_ij);
+        }
 
         for (int q_ij = 0; q_ij < naux_ij; ++q_ij) {
             auto Qmn = Qmn_ij_[ij][q_ij];
@@ -1971,17 +1978,17 @@ void DLPNOCCSD::t1_ints() {
 
             // Dress (q_ij | m_ij n_ij) integrals
             Qmn_t1_[ij][q_ij] = Qmn->clone();
-            Qmn_t1_[ij][q_ij]->add(linalg::doublet(Qma, T_n, false, true));
+            Qmn_t1_[ij][q_ij]->add(linalg::doublet(Qma, T_n_ij_[ij], false, true));
 
             // Dress (q_ij | m_ij a_ij) integrals
             Qma_t1_[ij][q_ij] = Qma->clone();
-            Qma_t1_[ij][q_ij]->subtract(linalg::doublet(Qmn, T_n, false, false));
-            Qma_t1_[ij][q_ij]->add(linalg::doublet(T_n, Qab, false, true));
-            Qma_t1_[ij][q_ij]->subtract(linalg::triplet(T_n, Qma, T_n, false, true, false));
+            Qma_t1_[ij][q_ij]->subtract(linalg::doublet(Qmn, T_n_ij_[ij], false, false));
+            Qma_t1_[ij][q_ij]->add(linalg::doublet(T_n_ij_[ij], Qab, false, true));
+            Qma_t1_[ij][q_ij]->subtract(linalg::triplet(T_n_ij_[ij], Qma, T_n_ij_[ij], false, true, false));
 
             // Dress (q_ij | a_ij b_ij) integrals
             Qab_t1_[ij][q_ij] = Qab->clone();
-            Qab_t1_[ij][q_ij]->subtract(linalg::doublet(T_n, Qma, true, false));
+            Qab_t1_[ij][q_ij]->subtract(linalg::doublet(T_n_ij_[ij], Qma, true, false));
         } // end q_ij
     }
 
@@ -2009,24 +2016,9 @@ void DLPNOCCSD::t1_fock() {
         int nlmo_ij = lmopair_to_lmos_[ij].size();
         int npno_ij = n_pno_[ij];
 
-        if (npno_ij == 0) continue;
-
-        // Create T(n, a_ij) intermediate (for integral dressing)
-        // TODO: Consolidate thsi code later
-        auto T_n = std::make_shared<Matrix>(nlmo_ij, npno_ij);
-        for (int n_ij = 0; n_ij < nlmo_ij; ++n_ij) {
-            int n = lmopair_to_lmos_[ij][n_ij];
-            int nn = i_j_to_ij_[n][n];
-            auto T_n_temp = linalg::doublet(S_PNO(ij, nn), T_ia_[n], false, false);
-            
-            for (int a_ij = 0; a_ij < npno_ij; ++a_ij) {
-                (*T_n)(n_ij, a_ij) = (*T_n_temp)(a_ij, 0);
-            } // end a_ij
-        } // end n_ij
-
         // Dress Fkj matrices
-        (*Fkj_)(i, j) += 2.0 * T_n->vector_dot(K_bar_chem_[ij]);
-        (*Fkj_)(i, j) -= T_n->vector_dot(K_bar_[ji]);
+        (*Fkj_)(i, j) += 2.0 * T_n_ij_[ij]->vector_dot(K_bar_chem_[ij]);
+        (*Fkj_)(i, j) -= T_n_ij_[ij]->vector_dot(K_bar_[ji]);
 
         // Dress Fkc matrices
         Fkc_[ij] = std::make_shared<Matrix>(1, npno_ij);
@@ -2066,21 +2058,6 @@ void DLPNOCCSD::t1_fock() {
             int nlmo_ij = lmopair_to_lmos_[ij].size();
             int npno_ij = n_pno_[ij];
 
-            if (npno_ij == 0) continue;
-
-            // Create T(n, a_ij) intermediate (for integral dressing)
-            // TODO: Consolidate thsi code later
-            auto T_n = std::make_shared<Matrix>(nlmo_ij, npno_ij);
-            for (int n_ij = 0; n_ij < nlmo_ij; ++n_ij) {
-                int n = lmopair_to_lmos_[ij][n_ij];
-                int nn = i_j_to_ij_[n][n];
-                auto T_n_temp = linalg::doublet(S_PNO(ij, nn), T_ia_[n], false, false);
-                
-                for (int a_ij = 0; a_ij < npno_ij; ++a_ij) {
-                    (*T_n)(n_ij, a_ij) = (*T_n_temp)(a_ij, 0);
-                } // end a_ij
-            } // end n_ij
-
             auto T_j = linalg::doublet(S_PNO(ii, jj), T_ia_[j]);
 
             auto T_j_clone = T_j->clone();
@@ -2090,8 +2067,8 @@ void DLPNOCCSD::t1_fock() {
             auto T_ij = linalg::doublet(S_PNO(ij, jj), T_ia_[j]);
             Fai_[i]->add(linalg::triplet(S_PNO(ii, ij), M_iajb_[ij], T_ij));
 
-            double fai_scale = 2.0 * K_bar_chem_[ij]->vector_dot(T_n);
-            fai_scale -= K_bar_[ij]->vector_dot(T_n);
+            double fai_scale = 2.0 * K_bar_chem_[ij]->vector_dot(T_n_ij_[ij]);
+            fai_scale -= K_bar_[ij]->vector_dot(T_n_ij_[ij]);
             T_j_clone = T_j->clone();
             T_j_clone->scale(fai_scale);
             Fai_[i]->subtract(T_j_clone);
@@ -2132,18 +2109,14 @@ std::vector<SharedMatrix> DLPNOCCSD::compute_B_tilde() {
 #pragma omp parallel for schedule(dynamic, 1)
     for (int ij = 0; ij < n_lmo_pairs; ++ij) {
         auto &[i, j] = ij_to_i_j_[ij];
+        int ji = ij_to_ji_[ij];
 
         int naux_ij = lmopair_to_ribfs_[ij].size();
         int nlmo_ij = lmopair_to_lmos_[ij].size();
-        int pair_idx = (i > j) ? ij_to_ji_[ij] : ij;
+        int pair_idx = (i > j) ? ji : ij;
         int i_ij = lmopair_to_lmos_dense_[ij][i], j_ij = lmopair_to_lmos_dense_[ij][j];
 
-        B_tilde[ij] = std::make_shared<Matrix>(nlmo_ij, nlmo_ij);
-
-        for (int q_ij = 0; q_ij < naux_ij; ++q_ij) {
-            // K_kilj contributions
-            C_DGER(nlmo_ij, nlmo_ij, 1.0, &(*Qmn_t1_[pair_idx][q_ij])(0, i_ij), nlmo_ij, &(*Qmn_t1_[pair_idx][q_ij])(0, j_ij), nlmo_ij, &(*B_tilde[ij])(0,0), nlmo_ij);
-        } // end q_ij
+        B_tilde[ij] = linalg::doublet(i_Qk_t1_[ij], i_Qk_t1_[ji], true, false);
 
         for (int q_ij = 0; q_ij < naux_ij; ++q_ij) {
             B_tilde[ij]->add(linalg::triplet(Qma_ij_[pair_idx][q_ij], T_iajb_[ij], Qma_ij_[pair_idx][q_ij], false, false, true));
@@ -2167,18 +2140,35 @@ std::vector<SharedMatrix> DLPNOCCSD::compute_C_tilde() {
 #pragma omp parallel for schedule(dynamic, 1)
     for (int ki = 0; ki < n_lmo_pairs; ++ki) {
         auto &[k, i] = ij_to_i_j_[ki];
+        int ii = i_j_to_ij_[i][i];
 
         int naux_ki = lmopair_to_ribfs_[ki].size();
         int nlmo_ki = lmopair_to_lmos_[ki].size();
         int npno_ki = n_pno_[ki];
         int k_ki = lmopair_to_lmos_dense_[ki][k], i_ki = lmopair_to_lmos_dense_[ki][i];
         int pair_idx = (k > i) ? ij_to_ji_[ki] : ki;
-        
-        C_tilde[ki] = std::make_shared<Matrix>(npno_ki, npno_ki);
 
-        for (int q_ki = 0; q_ki < naux_ki; ++q_ki) {
-            C_DAXPY(npno_ki * npno_ki, (*Qmn_t1_[pair_idx][q_ki])(k_ki, i_ki), &(*Qab_t1_[pair_idx][q_ki])(0, 0), 1, &(*C_tilde[ki])(0,0), 1);
-        } // end q_ki
+        // First term of C_tilde is the dressing of J_ijab
+        C_tilde[ki] = J_ijab_[ki]->clone();
+
+        auto T_i = linalg::doublet(S_PNO(ki, ii), T_ia_[i]);
+        auto K_temp = linalg::doublet(T_i, K_tilde_chem_[ki], true, false);
+        K_temp->reshape(n_pno_[ki], n_pno_[ki]);
+        C_tilde[ki]->add(K_temp);
+
+        C_tilde[ki]->subtract(linalg::doublet(T_n_ij_[ki], K_bar_chem_[ki], true, false));
+
+        for (int l_ki = 0; l_ki < nlmo_ki; ++l_ki) {
+            int l = lmopair_to_lmos_[ki][l_ki];
+            int kl = i_j_to_ij_[k][l], ll = i_j_to_ij_[l][l];
+
+            auto T_l = linalg::doublet(S_PNO(ki, ll), T_ia_[l]);
+            auto T_i_kl = linalg::doublet(S_PNO(kl, ii), T_ia_[i]);
+            auto K_kl = linalg::triplet(S_PNO(ki, kl), K_iajb_[kl], T_i_kl, false, true, false);
+
+            C_DGER(npno_ki, npno_ki, -1.0, T_l->get_pointer(), 1, K_kl->get_pointer(), 1, C_tilde[ki]->get_pointer(), npno_ki);
+            
+        }
                 
         for (int l_ki = 0; l_ki < nlmo_ki; ++l_ki) {
             int l = lmopair_to_lmos_[ki][l_ki];
@@ -2404,6 +2394,11 @@ void DLPNOCCSD::t1_lccsd_iterations() {
     Qma_t1_.resize(n_lmo_pairs);
     Qab_t1_.resize(n_lmo_pairs);
 
+    i_Qk_t1_.resize(n_lmo_pairs);
+    i_Qa_t1_.resize(n_lmo_pairs);
+
+    T_n_ij_.resize(n_lmo_pairs);
+
     while (!(e_converged && r_converged)) {
         // RMS of residual per single LMO, for assesing convergence
         std::vector<double> R_ia_rms(naocc, 0.0);
@@ -2411,6 +2406,27 @@ void DLPNOCCSD::t1_lccsd_iterations() {
         std::vector<double> R_iajb_rms(n_lmo_pairs, 0.0);
 
         std::time_t time_start = std::time(nullptr);
+
+        // Step 1: Create T_n intermediate
+#pragma omp parallel for schedule(dynamic, 1)
+        for (int ij = 0; ij < n_lmo_pairs; ++ij) {
+            auto &[i, j] = ij_to_i_j_[ij];
+
+            int nlmo_ij = lmopair_to_lmos_[ij].size();
+            int npno_ij = n_pno_[ij];
+            
+            T_n_ij_[ij] = std::make_shared<Matrix>(nlmo_ij, npno_ij);
+
+            for (int n_ij = 0; n_ij < nlmo_ij; ++n_ij) {
+                int n = lmopair_to_lmos_[ij][n_ij];
+                int nn = i_j_to_ij_[n][n];
+                auto T_n_temp = linalg::doublet(S_PNO(ij, nn), T_ia_[n], false, false);
+                
+                for (int a_ij = 0; a_ij < npno_ij; ++a_ij) {
+                    (*T_n_ij_[ij])(n_ij, a_ij) = (*T_n_temp)(a_ij, 0);
+                } // end a_ij
+            } // end n_ij
+        }
 
         t1_ints();
         t1_fock();
