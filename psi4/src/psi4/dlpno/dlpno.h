@@ -324,12 +324,8 @@ class DLPNOCCSD : public DLPNOBase {
     /// (0 occupied, 4 virtual)
 
     // DF Integrals (Used in DLPNO-T1-CCSD)
-    std::vector<std::vector<SharedMatrix>> Qmn_ij_; // (q_ij | m_ij n_ij)
     std::vector<std::vector<SharedMatrix>> Qma_ij_; // (q_ij | m_ij a_ij)
     std::vector<std::vector<SharedMatrix>> Qab_ij_; // (q_ij | a_ij b_ij)
-
-    std::vector<std::vector<SharedMatrix>> Qmn_t1_; // (q_ij | m_ij n_ij)
-    std::vector<std::vector<SharedMatrix>> Qma_t1_; // (q_ij | m_ij a_ij)
     std::vector<std::vector<SharedMatrix>> Qab_t1_; // (q_ij | a_ij b_ij)
 
     std::vector<SharedMatrix> i_Qk_ij_;   // (q_ij | k_ij i)
