@@ -290,6 +290,7 @@ class DLPNOCCSD : public DLPNOBase {
 
     /// PNO overlap integrals
     std::vector<std::vector<SharedMatrix>> S_pno_ij_kj_; ///< pno overlaps
+    std::vector<std::vector<SharedMatrix>> S_pno_ij_mn_; ///< pno overlaps
 
     /// Coupled-cluster amplitudes
     std::vector<SharedMatrix> T_ia_; ///< singles amplitudes

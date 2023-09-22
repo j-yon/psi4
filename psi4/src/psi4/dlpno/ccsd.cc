@@ -76,8 +76,32 @@ inline SharedMatrix DLPNOCCSD::S_PNO(const int ij, const int mn) {
     } else if (j == n) { // S(ij, mn) -> S(ij, mj)
         return S_pno_ij_kj_[ij][m];
     } else {
-        auto S_ij_mn = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[mn]);
-        return linalg::triplet(X_pno_[ij], S_ij_mn, X_pno_[mn], true, false, false);
+        int i, j, m, n;
+        std::tie(i, j) = ij_to_i_j_[ij];
+        std::tie(m, n) = ij_to_i_j_[mn];
+
+        const int m_ij = lmopair_to_lmos_dense_[ij][m], n_ij = lmopair_to_lmos_dense_[ij][n];
+        if (m_ij == -1 || n_ij == -1) {
+            outfile->Printf("Invalid PNO Pairs (%d, %d) and (%d, %d)\n", i, j, m, n);
+            throw PSIEXCEPTION("Invalid PNO pairs!");
+        }
+        
+        const int nlmo_ij = lmopair_to_lmos_[ij].size();
+
+        int mn_ij; 
+        if (m_ij > n_ij) {
+            mn_ij = n_ij * nlmo_ij + m_ij;
+        } else {
+            mn_ij = m_ij * nlmo_ij + n_ij;
+        }
+
+        if (i > j) {
+            const int ji = ij_to_ji_[ij];
+            return S_pno_ij_mn_[ji][mn_ij];
+        } else {
+            return S_pno_ij_mn_[ij][mn_ij];
+        }
+    
     }
 }
 
@@ -85,7 +109,9 @@ void DLPNOCCSD::compute_pno_overlaps() {
 
     const int naocc = i_j_to_ij_.size();
     const int n_lmo_pairs = ij_to_i_j_.size();
+    
     S_pno_ij_kj_.resize(n_lmo_pairs);
+    S_pno_ij_mn_.resize(n_lmo_pairs);
 
 #pragma omp parallel for schedule(dynamic, 1)
     for (int ij = 0; ij < n_lmo_pairs; ++ij) {
@@ -95,15 +121,30 @@ void DLPNOCCSD::compute_pno_overlaps() {
         S_pno_ij_kj_[ij].resize(naocc);
 
         const int npno_ij = n_pno_[ij];
-        if (npno_ij == 0) continue;
+        const int nlmo_ij = lmopair_to_lmos_[ij].size();
 
         for (int k = 0; k < naocc; ++k) {
             int kj = i_j_to_ij_[k][j];
 
-            if (kj == -1 || n_pno_[kj] == 0) continue;
+            if (kj == -1) continue;
 
             S_pno_ij_kj_[ij][k] = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[kj]);
             S_pno_ij_kj_[ij][k] = linalg::triplet(X_pno_[ij], S_pno_ij_kj_[ij][k], X_pno_[kj], true, false, false);
+        }
+
+        if (i > j) continue;
+
+        S_pno_ij_mn_[ij].resize(nlmo_ij * nlmo_ij);
+
+        for (int mn_ij = 0; mn_ij < nlmo_ij * nlmo_ij; ++mn_ij) {
+            const int m_ij = mn_ij / nlmo_ij, n_ij = mn_ij % nlmo_ij;
+            const int m = lmopair_to_lmos_[ij][m_ij], n = lmopair_to_lmos_[ij][n_ij];
+            const int mn = i_j_to_ij_[m][n];
+
+            if (mn == -1 || m_ij > n_ij) continue;
+
+            S_pno_ij_mn_[ij][mn_ij] = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[mn]);
+            S_pno_ij_mn_[ij][mn_ij] = linalg::triplet(X_pno_[ij], S_pno_ij_mn_[ij][mn_ij], X_pno_[mn], true, false, false);
         }
     }
 }
@@ -121,14 +162,16 @@ void DLPNOCCSD::estimate_memory() {
         std::tie(i, j) = ij_to_i_j_[ij];
 
         const int npno_ij = n_pno_[ij];
-        if (npno_ij == 0) continue;
+        const int nlmo_ij = lmopair_to_lmos_[ij].size();
+        if (i > j) continue;
 
-        for (int k = 0; k < naocc; ++k) {
-            int kj = i_j_to_ij_[k][j];
+        for (int mn_ij = 0; mn_ij < nlmo_ij * nlmo_ij; mn_ij++) {
+            const int m_ij = mn_ij / nlmo_ij, n_ij = mn_ij % nlmo_ij;
+            const int m = lmopair_to_lmos_[ij][m_ij], n = lmopair_to_lmos_[ij][n_ij];
+            const int mn = i_j_to_ij_[m][n];
+            if (mn == -1 || m_ij > n_ij) continue;
 
-            if (kj == -1 || n_pno_[kj] == 0) continue;
-
-            pno_overlap_memory += n_pno_[ij] * n_pno_[kj];
+            pno_overlap_memory += n_pno_[ij] * n_pno_[mn];
         }
     }
 
@@ -136,11 +179,10 @@ void DLPNOCCSD::estimate_memory() {
     size_t ooov = 0;
     size_t oovv = 0;
     size_t ovvv = 0;
-    size_t qoo = 0;
     size_t qov = 0;
     size_t qvv = 0;
 
-#pragma omp parallel for schedule(dynamic) reduction(+ : oooo, ooov, oovv, ovvv, qoo, qov, qvv)
+#pragma omp parallel for schedule(dynamic) reduction(+ : oooo, ooov, oovv, ovvv, qov, qvv)
     for (int ij = 0; ij < n_lmo_pairs; ij++) {
         int i, j;
         std::tie(i, j) = ij_to_i_j_[ij];
@@ -154,8 +196,7 @@ void DLPNOCCSD::estimate_memory() {
         oovv += 4 * npno_ij * npno_ij;
         ovvv += 3 * npno_ij * npno_ij * npno_ij;
         if (i >= j) {
-            qoo += 2 * naux_ij * nlmo_ij * nlmo_ij;
-            qov += 2 * naux_ij * nlmo_ij * npno_ij;
+            qov += naux_ij * nlmo_ij * npno_ij;
             qvv += 2 * naux_ij * npno_ij * npno_ij;
         }
     }
@@ -173,7 +214,7 @@ void DLPNOCCSD::estimate_memory() {
     if (write_qab_pno_) qvv  = 0;
 
     const size_t total_df_memory = qij_memory_ + qia_memory_ + qab_memory_;
-    const size_t total_pno_int_memory = oooo + ooov + oovv + ovvv + qoo + qov + qvv;
+    const size_t total_pno_int_memory = oooo + ooov + oovv + ovvv + qov + qvv;
     const size_t total_memory = total_df_memory + pno_overlap_memory + total_pno_int_memory;
 
     // 2^30 bytes per GiB
@@ -184,7 +225,6 @@ void DLPNOCCSD::estimate_memory() {
     outfile->Printf("    1-virtual PNO integrals: %.3f [GiB]\n", ooov * pow(2.0, -30) * sizeof(double));
     outfile->Printf("    2-virtual PNO integrals: %.3f [GiB]\n", oovv * pow(2.0, -30) * sizeof(double));
     outfile->Printf("    3-virtual PNO integrals: %.3f [GiB]\n", ovvv * pow(2.0, -30) * sizeof(double));
-    outfile->Printf("    (Q_{ij}|m_{ij} n_{ij}) : %.3f [GiB]\n", qoo * pow(2.0, -30) * sizeof(double));
     outfile->Printf("    (Q_{ij}|m_{ij} a_{ij}) : %.3f [GiB]\n", qov * pow(2.0, -30) * sizeof(double));
     outfile->Printf("    (Q_{ij}|a_{ij} b_{ij}) : %.3f [GiB]\n", qvv * pow(2.0, -30) * sizeof(double));
     outfile->Printf("    PNO/PNO overlaps       : %.3f [GiB]\n\n", pno_overlap_memory * pow(2.0, -30) * sizeof(double));
@@ -2757,10 +2797,8 @@ void DLPNOCCSD::t1_lccsd_iterations() {
 
             if (n_pno_[ij] == 0) continue;
             // ONLY strong pair doubles contribute to CCSD energy
+            if (i_j_to_ij_strong_[i][j] == -1) continue;
             e_curr += tau[ij]->vector_dot(L_iajb_[ij]);
-            if (i_j_to_ij_strong_[i][j] == -1) {
-                e_curr -= T_iajb_[ij]->vector_dot(L_iajb_[ij]);
-            }
         }
         double r_curr1 = *max_element(R_ia_rms.begin(), R_ia_rms.end());
         double r_curr2 = *max_element(R_iajb_rms.begin(), R_iajb_rms.end());
