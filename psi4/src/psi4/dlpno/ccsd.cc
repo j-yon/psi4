@@ -361,7 +361,7 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
 
     double e_curr = e_sc_lmp2;
 
-    if (options_.get_option("PNO_CONVERGENCE").contains("TIGHT")) { // Only do PAO-LMP2 for Tight and Very Tight
+    if (options_.get_str("PNO_CONVERGENCE").contains("TIGHT")) { // Only do PAO-LMP2 for Tight and Very Tight
 
         // Compute PAO-LMP2 Pair Energies (For both strong AND weak pairs)
         outfile->Printf("\n  ==> Iterative Local MP2 with Projected Atomic Orbitals (PAOs) <==\n\n");
