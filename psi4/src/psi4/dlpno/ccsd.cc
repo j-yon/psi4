@@ -82,8 +82,10 @@ inline SharedMatrix DLPNOCCSD::S_PNO(const int ij, const int mn) {
 
         const int m_ij = lmopair_to_lmos_dense_[ij][m], n_ij = lmopair_to_lmos_dense_[ij][n];
         if (m_ij == -1 || n_ij == -1) {
-            outfile->Printf("Invalid PNO Pairs (%d, %d) and (%d, %d)\n", i, j, m, n);
-            throw PSIEXCEPTION("Invalid PNO pairs!");
+            // outfile->Printf("Invalid PNO Pairs (%d, %d) and (%d, %d)\n", i, j, m, n);
+            // throw PSIEXCEPTION("Invalid PNO pairs!");
+            auto S_ij_mn = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[mn]);
+            return linalg::triplet(X_pno_[ij], S_ij_mn, X_pno_[mn], true, false, false);
         }
         
         const int nlmo_ij = lmopair_to_lmos_[ij].size();
