@@ -359,6 +359,8 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
 
     if constexpr (crude) return e_ijs;
 
+    /*
+
     // Compute PAO-LMP2 Pair Energies (For both strong AND weak pairs)
     outfile->Printf("\n  ==> Iterative Local MP2 with Projected Atomic Orbitals (PAOs) <==\n\n");
     outfile->Printf("    E_CONVERGENCE = %.2e\n", options_.get_double("E_CONVERGENCE"));
@@ -483,8 +485,9 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
             throw PSIEXCEPTION("Maximum DLPNO iterations exceeded.");
         }
     }
+    */
 
-    e_lmp2_non_trunc_ = e_curr;
+    e_lmp2_non_trunc_ = e_sc_lmp2;
     outfile->Printf("\n    PAO-LMP2 Iteration Energy: %16.12f\n\n", e_lmp2_non_trunc_);
 
     outfile->Printf("\n  ==> Forming Pair Natural Orbitals (from converged LMP2 amplitudes) <==\n");
