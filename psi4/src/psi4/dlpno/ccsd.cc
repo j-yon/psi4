@@ -199,7 +199,7 @@ void DLPNOCCSD::estimate_memory() {
         ovvv += 3 * npno_ij * npno_ij * npno_ij;
         if (i >= j) {
             qov += naux_ij * nlmo_ij * npno_ij;
-            qvv += 2 * naux_ij * npno_ij * npno_ij;
+            qvv += naux_ij * npno_ij * npno_ij;
         }
     }
 
@@ -389,6 +389,8 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
                 int i, j;
                 std::tie(i, j) = ij_to_i_j_[ij];
 
+                if (i > j) continue;
+
                 int npao_ij = e_paos[ij]->dim(0);
 
                 R_iajb[ij] = std::make_shared<Matrix>("Residual", npao_ij, npao_ij);
@@ -425,6 +427,12 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
                 }
 
                 R_iajb_rms[ij] = R_iajb[ij]->rms();
+                
+                if (i < j) {
+                    int ji = ij_to_ji_[ij];
+                    R_iajb[ji] = R_iajb[ij]->transpose();
+                    R_iajb_rms[ji] = R_iajb_rms[ij];
+                }   
             }
 
         // use residuals to get next amplitudes
@@ -2010,21 +2018,6 @@ void DLPNOCCSD::t1_ints() {
                 } // end b_ij
             } // end a_ij
         } // end q_ij
-
-
-        if (i > j) continue;
-
-        // Dress DF ints
-        if (!Qab_t1_[ij].size()) Qab_t1_[ij].resize(naux_ij);
-
-        for (int q_ij = 0; q_ij < naux_ij; ++q_ij) {
-            auto Qma = Qma_ij_[ij][q_ij];
-            auto Qab = Qab_ij_[ij][q_ij];
-
-            // Dress (q_ij | a_ij b_ij) integrals
-            Qab_t1_[ij][q_ij] = Qab->clone();
-            Qab_t1_[ij][q_ij]->subtract(linalg::doublet(T_n_ij_[ij], Qma, true, false));
-        } // end q_ij
     }
 
     timer_off("DLPNO-CCSD: T1 Ints");
@@ -2443,8 +2436,6 @@ void DLPNOCCSD::t1_lccsd_iterations() {
 
     double F_CUT = options_.get_double("F_CUT");
 
-    Qab_t1_.resize(n_lmo_pairs);
-
     i_Qk_t1_.resize(n_lmo_pairs);
     i_Qa_t1_.resize(n_lmo_pairs);
 
@@ -2504,7 +2495,7 @@ void DLPNOCCSD::t1_lccsd_iterations() {
             }
         }
 
-        // Compute residual for singles amplitude (A and C contributions)
+        // Compute residual for singles amplitude (A1 and C contributions)
 #pragma omp parallel for schedule(dynamic, 1)
         for (int ik = 0; ik < n_lmo_pairs; ++ik) {
             auto &[i, k] = ij_to_i_j_[ik];
@@ -2527,17 +2518,16 @@ void DLPNOCCSD::t1_lccsd_iterations() {
             int ii = i_j_to_ij_[i][i];
 
             // A_{i}^{a} = u_{ki}^{cd}B^{Q}_{kc}B^{Q}_{ad} (DePrince 2013 Equation 20)
+            auto K_kcad = K_tilde_phys_[ki]->clone();
             auto Uki = Tt_iajb_[ki]->clone();
-            for (int q_ki = 0; q_ki < naux_ik; ++q_ki) {
-                auto A1temp = linalg::triplet(submatrix_rows(*Qma_ij_[pair_idx][q_ki], k_ik_slice), Tt_iajb_[ki], Qab_t1_[pair_idx][q_ki], false, false, true);
-                R_ia_buffer[thread][i]->add(linalg::doublet(S_PNO(ii, ki), A1temp, false, true));
-            }
+            Uki->reshape(npno_ik * npno_ik, 1);
+            R_ia_buffer[thread][i]->add(linalg::triplet(S_PNO(ii, ki), K_kcad, Uki));
 
             // C_{i}^{a} = F_{kc}U_{ik}^{ac}  (DePrince 2013 Equation 22)
             R_ia_buffer[thread][i]->add(linalg::triplet(S_PNO(ii, ik), Tt_iajb_[ik], Fkc_[ki], false, false, true));
         } // end ki
 
-        // B contribution
+        // A2 and B contributions
 #pragma omp parallel for schedule(dynamic, 1)
         for (int kl = 0; kl < n_lmo_pairs; ++kl) {
             auto &[k, l] = ij_to_i_j_[kl];
@@ -2556,14 +2546,21 @@ void DLPNOCCSD::t1_lccsd_iterations() {
             // B_{i}^{a} = -u_{kl}^{ac}B^{Q}_{ki}B^{Q}_{lc} (DePrince 2013 Equation 21)
             auto K_kilc = K_bar_[kl]->clone();
             K_kilc->add(linalg::doublet(T_n_ij_[kl], K_iajb_[kl]));
-
             auto B_ia = linalg::doublet(Tt_iajb_[kl], K_kilc, false, true);
 
             for (int i_kl = 0; i_kl < nlmo_kl; ++i_kl) {
                 int i = lmopair_to_lmos_[kl][i_kl];
-                int ii = i_j_to_ij_[i][i];
-                std::vector<int> i_kl_slice(1, i_kl);
+                int ii = i_j_to_ij_[i][i], ki = i_j_to_ij_[k][i];
 
+                // A2 conribution
+                std::vector<int> l_ii_slice(1, lmopair_to_lmos_dense_[ii][l]);
+                auto U_ki = linalg::triplet(S_PNO(kl, ki), Tt_iajb_[ki], S_PNO(ki, kl));
+                auto T_l = submatrix_rows(*T_n_ij_[ii], l_ii_slice);
+                T_l->scale(K_iajb_[kl]->vector_dot(U_ki));
+                R_ia_buffer[thread][i]->subtract(T_l->transpose());
+
+                // B contribution
+                std::vector<int> i_kl_slice(1, i_kl);
                 R_ia_buffer[thread][i]->subtract(linalg::doublet(S_PNO(ii, kl), submatrix_cols(*B_ia, i_kl_slice), false, false));
             }
         }
@@ -2620,7 +2617,10 @@ void DLPNOCCSD::t1_lccsd_iterations() {
                 // A_{ij}^{ab} = B^{Q}_{ac} * t_{ij}^{cd} * B^{Q}_{bd} (DePrince Equation 11)
                 auto A_ij = std::make_shared<Matrix>(npno_ij, npno_ij);
                 for (int q_ij = 0; q_ij < naux_ij; ++q_ij) {
-                    A_ij->add(linalg::triplet(Qab_t1_[pair_idx][q_ij], T_iajb_[ij], Qab_t1_[pair_idx][q_ij], false, false, true));
+                    auto Qab_t1 = Qab_ij_[ij][q_ij]->clone();
+                    Qab_t1->subtract(linalg::doublet(T_n_ij_[ij], Qma_ij_[ij][q_ij], true, false));
+
+                    A_ij->add(linalg::triplet(Qab_t1, T_iajb_[ij], Qab_t1, false, false, true));
                 } // end q_ij
                 R_iajb[ij]->add(A_ij);
                 if (i != j) R_iajb[ji]->add(A_ij->transpose());
