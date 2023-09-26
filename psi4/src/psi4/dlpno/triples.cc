@@ -238,6 +238,7 @@ void DLPNOCCSD_T::tno_transform(bool scale_triples) {
         if (i > j) continue;
         for (int k : lmopair_to_lmos_[ij]) {
             if (i > k || j > k) continue;
+            if (i == j && j == k) continue;
             int ij_weak = i_j_to_ij_weak_[i][j], ik_weak = i_j_to_ij_weak_[i][k], kj_weak = i_j_to_ij_weak_[k][j];
 
             int weak_pair_count = 0;
@@ -578,7 +579,7 @@ void DLPNOCCSD_T::tno_transform(bool scale_triples) {
         tno_count_max = std::max(tno_count_max, n_tno_[ijk]);
     }
 
-    int n_total_possible = (naocc + 2) * (naocc + 1) * (naocc) / 6;
+    int n_total_possible = (naocc + 2) * (naocc + 1) * (naocc) / 6 - naocc;
 
     outfile->Printf("  \n");
     outfile->Printf("    Number of (Unique) Local MO triplets: %d\n", n_lmo_triplets);
