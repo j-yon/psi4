@@ -197,7 +197,7 @@ void DLPNOCCSD::estimate_memory() {
         ooov += 3 * nlmo_ij * npno_ij;
         oovv += 4 * npno_ij * npno_ij;
         ovvv += 3 * npno_ij * npno_ij * npno_ij;
-        if (i >= j) {
+        if (i >= j && i_j_to_ij_strong_[i][j] != -1) {
             qov += naux_ij * nlmo_ij * npno_ij;
             qvv += naux_ij * npno_ij * npno_ij;
         }
@@ -1074,9 +1074,6 @@ void DLPNOCCSD::compute_cc_integrals() {
         L_tilde_[ji]->scale(2.0);
         L_tilde_[ji]->subtract(K_tilde_temp);
 
-        i_Qk_ij_[ij] = q_io;
-        i_Qa_ij_[ji] = q_jv;
-
         /*
         bool is_strong_pair = (i_j_to_ij_strong_[i][j] != -1);
 
@@ -1128,8 +1125,13 @@ void DLPNOCCSD::compute_cc_integrals() {
         }
         */
 
-        // Save DF integrals
-        if (i <= j) {
+        if (i_j_to_ij_strong_[i][j] != -1) {
+            i_Qk_ij_[ij] = q_io;
+            i_Qa_ij_[ji] = q_jv;
+        }
+
+        // Save DF integrals (only for strong pairs)
+        if (i <= j && i_j_to_ij_strong_[i][j] != -1) {
             Qma_ij_[ij].resize(naux_ij);
             Qab_ij_[ij].resize(naux_ij);
             for (int q_ij = 0; q_ij < naux_ij; ++q_ij) {
@@ -1991,6 +1993,8 @@ void DLPNOCCSD::t1_ints() {
         int pair_idx = (i > j) ? ij_to_ji_[ij] : ij;
         int i_ij = lmopair_to_lmos_dense_[ij][i], j_ij = lmopair_to_lmos_dense_[ij][j];
 
+        if (i_j_to_ij_strong_[i][j] == -1) continue;
+
         i_Qk_t1_[ij] = i_Qk_ij_[ij]->clone();
         for (int q_ij = 0; q_ij < naux_ij; ++q_ij) {
             for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
@@ -2132,6 +2136,8 @@ std::vector<SharedMatrix> DLPNOCCSD::compute_B_tilde() {
     for (int ij = 0; ij < n_lmo_pairs; ++ij) {
         auto &[i, j] = ij_to_i_j_[ij];
         int ji = ij_to_ji_[ij];
+
+        if (i_j_to_ij_strong_[i][j] == -1) continue;
 
         int naux_ij = lmopair_to_ribfs_[ij].size();
         int nlmo_ij = lmopair_to_lmos_[ij].size();
