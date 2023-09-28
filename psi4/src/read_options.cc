@@ -2543,8 +2543,22 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_str("PRESCREENING_ALGORITHM", "SC_LMP2", "SC_LMP2 FULL_LMP2");
         /*- Occupation number threshold for removing TNOs !expert -*/
         options.add_double("T_CUT_TNO", 1e-9);
-        /*- Occupation number threshold for iterative (T) algorithm !expert */
-        options.add_double("T_CUT_TNO_T", 1e-7);
+        /*- T_CUT_TNO scaling for strong triplets in the iterative (T) algorithm !expert -*/
+        options.add_double("T_CUT_TNO_STRONG_SCALE", 10.0);
+        /*- T_CUT_TNO scaling for weak triplets in the iterative (T) algorithm !expert -*/
+        options.add_double("T_CUT_TNO_WEAK_SCALE", 100.0);
+        /*- Occupation number threshold used in the prescreening step !expert -*/
+        options.add_double("T_CUT_TNO_PRE", 1e-6);
+        /*- Local density fitting tolerance for the prescreening portion of the (T) algorithm -*/
+        options.add_double("T_CUT_MKN_TRIPLES_PRE", 0.1);
+        /*- LMO/PAO threshold for the prescreening portion of the (T) algorithm -*/
+        options.add_double("T_CUT_DO_TRIPLES_PRE", 2e-2);
+        /*- Triples energy threshold for a triplet (ijk) to not be further considered -*/
+        options.add_double("T_CUT_TRIPLES_WEAK", 1e-7);
+        /*- Local density fitting tolerance for the (T) algorithm -*/
+        options.add_double("T_CUT_MKN_TRIPLES", 1e-2);
+        /*- LMO/PAO threshold for the (T) algorithm -*/
+        options.add_double("T_CUT_DO_TRIPLES", 1e-2);
         /*- Scale (T0) energy using MP2 truncation error estimate? !expert */
         options.add_bool("SCALE_T0", false);
         /*- Fock matrix threshold for treating ampltudes as coupled during local (T) iterations !expert -*/

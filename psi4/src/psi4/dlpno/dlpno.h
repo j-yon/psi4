@@ -423,18 +423,27 @@ class DLPNOCCSD_T : public DLPNOCCSD {
     std::vector<SharedMatrix> T_iajbkc_; ///< Triples amplitude for each lmo triplet
     std::vector<SharedMatrix> X_tno_; ///< global PAO -> canonical TNO transforms
     std::vector<SharedVector> e_tno_; ///< TNO orbital energies
-    std::vector<int> n_tno_; ///<number of tnos per triplet domain
+    std::vector<int> n_tno_; ///< number of tnos per triplet domain
+    std::vector<double> e_ijk_; ///< energy of triplet ijk (used for pre-screening and convergence purposes)
+    std::vector<double> ijk_scale_; ///< scaling factor to apply to triplet energy ijk (based on MP2 scaling)
     std::vector<double> tno_scale_; ///< scaling factor to apply to each triplet to account for TNO truncation error
+    std::vector<bool> is_strong_triplet_; ///< whether or not triplet is strong
+
     /// Write amplitudes to disk?
     bool write_amplitudes_ = false;
 
     /// final energies
+    double de_lccsd_t_screened_; ///< energy contribution from screened triplets
     double e_lccsd_t_; ///< local (T) correlation energy
 
     /// Recompute PNOs (Pair Natural Orbitals) using CCSD densities
     void recompute_pnos();
+    /// Create sparsity maps for triples
+    void triples_sparsity(bool prescreening);
     /// Create TNOs (Triplet Natural Orbitals) for DLPNO-(T)
-    void tno_transform(bool scale_triples);
+    void tno_transform(bool scale_triples, double tno_tolerance);
+    /// Sort triplets to split between "strong" and "weak" triplets (for (T) iterations)
+    void sort_triplets(double e_total);
 
     /// Returns a symmetrized version of that matrix (in i <= j <= k ordering)
     inline SharedMatrix triples_permuter(const SharedMatrix& X, int i, int j, int k, bool reverse=false);
