@@ -2554,7 +2554,7 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         /*- LMO/PAO threshold for the prescreening portion of the (T) algorithm -*/
         options.add_double("T_CUT_DO_TRIPLES_PRE", 2e-2);
         /*- Triples energy threshold for a triplet (ijk) to not be further considered -*/
-        options.add_double("T_CUT_TRIPLES_WEAK", 1e-7);
+        options.add_double("T_CUT_TRIPLES_WEAK", 1e-8);
         /*- Local density fitting tolerance for the (T) algorithm -*/
         options.add_double("T_CUT_MKN_TRIPLES", 1e-2);
         /*- LMO/PAO threshold for the (T) algorithm -*/
@@ -2563,6 +2563,8 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_bool("SCALE_T0", false);
         /*- Fock matrix threshold for treating ampltudes as coupled during local (T) iterations !expert -*/
         options.add_double("F_CUT_T", 1e-3);
+        /*- Energy difference in which to stop considering triples in iterative (T) */
+        options.add_double("T_CUT_ITER", 1e-3);
 
         /*- Number of spherical points in DOI grid !expert -*/
         options.add_int("DOI_SPHERICAL_POINTS", 50);

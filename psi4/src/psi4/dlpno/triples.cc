@@ -387,7 +387,7 @@ void DLPNOCCSD_T::triples_sparsity(bool prescreening) {
         lmotriplet_to_ribfs_[ijk] = merge_lists(lmo_to_ribfs[i], merge_lists(lmo_to_ribfs[j], lmo_to_ribfs[k]));
         for (int l = 0; l < naocc; ++l) {
             int il = i_j_to_ij_[i][l], jl = i_j_to_ij_[j][l], kl = i_j_to_ij_[k][l];
-            if (il != -1 || jl != -1 || kl != -1) lmotriplet_to_lmos_[ijk].push_back(l);
+            if (il != -1 && jl != -1 && kl != -1) lmotriplet_to_lmos_[ijk].push_back(l);
         }
         lmotriplet_to_paos_[ijk] = merge_lists(lmo_to_paos[i], merge_lists(lmo_to_paos[j], lmo_to_paos[k]));
 
@@ -1120,12 +1120,14 @@ double DLPNOCCSD_T::compute_t_iteration_energy() {
             T_ijk = T_iajbkc_[ijk];
         }
 
-        E_T += 8.0 * prefactor * V_ijk->vector_dot(T_ijk);
-        E_T -= 4.0 * prefactor * triples_permuter(V_ijk, k, j, i)->vector_dot(T_ijk);
-        E_T -= 4.0 * prefactor * triples_permuter(V_ijk, i, k, j)->vector_dot(T_ijk);
-        E_T -= 4.0 * prefactor * triples_permuter(V_ijk, j, i, k)->vector_dot(T_ijk);
-        E_T += 2.0 * prefactor * triples_permuter(V_ijk, j, k, i)->vector_dot(T_ijk);
-        E_T += 2.0 * prefactor * triples_permuter(V_ijk, k, i, j)->vector_dot(T_ijk);
+        e_ijk_[ijk] = 8.0 * prefactor * V_ijk->vector_dot(T_ijk);
+        e_ijk_[ijk] -= 4.0 * prefactor * triples_permuter(V_ijk, k, j, i)->vector_dot(T_ijk);
+        e_ijk_[ijk] -= 4.0 * prefactor * triples_permuter(V_ijk, i, k, j)->vector_dot(T_ijk);
+        e_ijk_[ijk] -= 4.0 * prefactor * triples_permuter(V_ijk, j, i, k)->vector_dot(T_ijk);
+        e_ijk_[ijk] += 2.0 * prefactor * triples_permuter(V_ijk, j, k, i)->vector_dot(T_ijk);
+        e_ijk_[ijk] += 2.0 * prefactor * triples_permuter(V_ijk, k, i, j)->vector_dot(T_ijk);
+
+        E_T += e_ijk_[ijk];
     }
 
     timer_off("Compute (T) Energy");
@@ -1190,6 +1192,9 @@ double DLPNOCCSD_T::lccsd_t_iterations() {
     bool e_converged = false, r_converged = false;
 
     double F_CUT = options_.get_double("F_CUT_T");
+    double T_CUT_ITER = options_.get_double("T_CUT_ITER");
+
+    std::vector<double> e_ijk_old(n_lmo_triplets, 0.0);
 
     while (!(e_converged && r_converged)) {
         // RMS of residual per single LMO, for assesing convergence
@@ -1203,6 +1208,8 @@ double DLPNOCCSD_T::lccsd_t_iterations() {
             std::tie(i, j, k) = ijk_to_i_j_k_[ijk];
 
             int ntno_ijk = n_tno_[ijk];
+
+            if (std::fabs(e_ijk_[ijk] - e_ijk_old[ijk]) < std::fabs(e_ijk_old[ijk] * T_CUT_ITER)) continue;
 
             auto R_ijk = std::make_shared<Matrix>("R_ijk", ntno_ijk, ntno_ijk * ntno_ijk);
 
@@ -1340,6 +1347,7 @@ double DLPNOCCSD_T::lccsd_t_iterations() {
 
         // evaluate convergence
         e_prev = e_curr;
+        e_ijk_old = e_ijk_;
         // Compute LCCSD(T) energy
         e_curr = compute_t_iteration_energy();
 
