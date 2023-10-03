@@ -370,7 +370,6 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
     int iteration = 0, max_iteration = options_.get_int("DLPNO_MAXITER");
     double e_curr = 0.0, e_prev = 0.0, r_curr = 0.0;
     bool e_converged = false, r_converged = false;
-    DIISManager diis(options_.get_int("DIIS_MAX_VECS"), "LMP2 DIIS", DIISManager::RemovalPolicy::LargestError, DIISManager::StoragePolicy::InCore);
 
     // Calculate residuals from current amplitudes
     while (!(e_converged && r_converged)) {
@@ -443,20 +442,6 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
                 }
             }
         }
-
-        // DIIS extrapolation
-        auto T_iajb_flat = flatten_mats(T_paos);
-        auto R_iajb_flat = flatten_mats(R_iajb);
-
-        if (iteration == 0) {
-            diis.set_error_vector_size(R_iajb_flat.get());
-            diis.set_vector_size(T_iajb_flat.get());
-        }
-
-        diis.add_entry(R_iajb_flat.get(), T_iajb_flat.get());
-        diis.extrapolate(T_iajb_flat.get());
-
-        copy_flat_mats(T_iajb_flat, T_paos);
 
 #pragma omp parallel for schedule(dynamic, 1)
         for (int ij = 0; ij < n_lmo_pairs; ++ij) {
