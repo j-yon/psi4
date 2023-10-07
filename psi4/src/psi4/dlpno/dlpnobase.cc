@@ -152,6 +152,8 @@ void DLPNOBase::common_init() {
 
     ribasis_ = get_basisset("DF_BASIS_MP2");
     psio_ = _default_psio_lib_;
+
+    memory_ = Process::environment.get_memory();
 }
 
 /* Utility function for making C_DGESV calls

@@ -380,7 +380,7 @@ class DLPNOCCSD : public DLPNOBase {
     std::vector<SharedMatrix> compute_B_tilde();
     std::vector<SharedMatrix> compute_C_tilde();
     std::vector<SharedMatrix> compute_D_tilde();
-    SharedMatrix compute_E_tilde();
+    std::vector<SharedMatrix> compute_E_tilde();
     SharedMatrix compute_G_tilde();
 
     /// iteratively solve local CCSD equations
