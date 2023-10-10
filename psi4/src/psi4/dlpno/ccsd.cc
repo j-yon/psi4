@@ -997,12 +997,12 @@ void DLPNOCCSD::compute_cc_integrals() {
                 q_vv_tmp = std::make_shared<Matrix>(toc_entry.str(), npao_q, npao_q);
 #pragma omp critical
                 q_vv_tmp->load(psio_, PSIF_DLPNO_QAB_PAO, psi::Matrix::LowerTriangle);
-            } else {
-                q_vv_tmp = qab_[q]->clone();
-            }
-            
-            q_vv_tmp = submatrix_rows_and_cols(*q_vv_tmp, lmopair_pao_to_riatom_pao_[ij][q_ij],
+                q_vv_tmp = submatrix_rows_and_cols(*q_vv_tmp, lmopair_pao_to_riatom_pao_[ij][q_ij],
                                 lmopair_pao_to_riatom_pao_[ij][q_ij]);
+            } else {
+                q_vv_tmp = submatrix_rows_and_cols(*qab_[q], lmopair_pao_to_riatom_pao_[ij][q_ij],
+                                lmopair_pao_to_riatom_pao_[ij][q_ij]);
+            }
             q_vv_tmp = linalg::triplet(X_pno_[ij], q_vv_tmp, X_pno_[ij], true, false, false);
             
             C_DCOPY(npno_ij * npno_ij, &(*q_vv_tmp)(0,0), 1, &(*q_vv)(q_ij, 0), 1);
