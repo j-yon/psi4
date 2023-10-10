@@ -868,12 +868,12 @@ double DLPNOCCSD_T::compute_lccsd_t0(bool store_amplitudes) {
                 q_vv_tmp = std::make_shared<Matrix>(toc_entry.str(), npao_q, npao_q);
 #pragma omp critical
                 q_vv_tmp->load(psio_, PSIF_DLPNO_QAB_PAO, psi::Matrix::LowerTriangle);
-            } else {
-                q_vv_tmp = qab_[q]->clone();
-            }
-                
-            q_vv_tmp = submatrix_rows_and_cols(*q_vv_tmp, lmotriplet_pao_to_riatom_pao_[ijk][q_ijk],
+                q_vv_tmp = submatrix_rows_and_cols(*q_vv_tmp, lmotriplet_pao_to_riatom_pao_[ijk][q_ijk],
                                                 lmotriplet_pao_to_riatom_pao_[ijk][q_ijk]);
+            } else {
+                q_vv_tmp = submatrix_rows_and_cols(*qab_[q], lmotriplet_pao_to_riatom_pao_[ijk][q_ijk],
+                                                lmotriplet_pao_to_riatom_pao_[ijk][q_ijk]);
+            }
             q_vv_tmp = linalg::triplet(X_tno_[ijk], q_vv_tmp, X_tno_[ijk], true, false, false);
                 
             C_DCOPY(ntno_ijk * ntno_ijk, &(*q_vv_tmp)(0, 0), 1, &(*q_vv)(q_ijk, 0), 1);
