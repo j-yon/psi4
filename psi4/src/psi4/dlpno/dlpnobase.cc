@@ -124,11 +124,11 @@ void DLPNOBase::common_init() {
             if (!T_CUT_MKN_changed) T_CUT_MKN_ = 1e-3;
             if (!PRESCREENING_changed) options_.set_str("DLPNO", "PRESCREENING_ALGORITHM", "SC_LMP2");
         } else if (options_.get_str("PNO_CONVERGENCE") == "TIGHT") {
-            if (!T_CUT_PNO_changed) T_CUT_PNO_ = 1e-7;
+            if (!T_CUT_PNO_changed) T_CUT_PNO_ = 1e-8;
             if (!T_CUT_DO_changed) T_CUT_DO_ = 5e-3;
             if (!DIAG_SCALE_changed) T_CUT_PNO_DIAG_SCALE_ = 1e-4;
             if (!T_CUT_PAIRS_changed) T_CUT_PAIRS_ = 1e-5;
-            if (!T_CUT_MKN_changed) T_CUT_MKN_ = 1e-4;
+            if (!T_CUT_MKN_changed) T_CUT_MKN_ = 1e-3;
             if (!PRESCREENING_changed) options_.set_str("DLPNO", "PRESCREENING_ALGORITHM", "FULL_LMP2");
         } else if (options_.get_str("PNO_CONVERGENCE") == "VERY_TIGHT") {
             if (!T_CUT_PNO_changed) T_CUT_PNO_ = 1e-8;

@@ -2548,13 +2548,13 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         /*- T_CUT_TNO scaling for weak triplets in the iterative (T) algorithm !expert -*/
         options.add_double("T_CUT_TNO_WEAK_SCALE", 100.0);
         /*- Occupation number threshold used in the prescreening step !expert -*/
-        options.add_double("T_CUT_TNO_PRE", 1e-6);
+        options.add_double("T_CUT_TNO_PRE", 1e-7);
         /*- Local density fitting tolerance for the prescreening portion of the (T) algorithm -*/
         options.add_double("T_CUT_MKN_TRIPLES_PRE", 0.1);
         /*- LMO/PAO threshold for the prescreening portion of the (T) algorithm -*/
         options.add_double("T_CUT_DO_TRIPLES_PRE", 2e-2);
         /*- Triples energy threshold for a triplet (ijk) to not be further considered -*/
-        options.add_double("T_CUT_TRIPLES_WEAK", 1e-8);
+        options.add_double("T_CUT_TRIPLES_WEAK", 1e-7);
         /*- Local density fitting tolerance for the (T) algorithm -*/
         options.add_double("T_CUT_MKN_TRIPLES", 1e-2);
         /*- LMO/PAO threshold for the (T) algorithm -*/
