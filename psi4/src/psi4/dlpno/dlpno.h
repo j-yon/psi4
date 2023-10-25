@@ -298,6 +298,8 @@ class DLPNOCCSD : public DLPNOBase {
 
     // => Strong and Weak Pair Info <=//
 
+    std::vector<double> e_ij_mp2_scale_; ///< how much to scale MP2 energies for scaled approximation to PAO-LMP2
+
     std::vector<std::vector<int>> i_j_to_ij_strong_;
     std::vector<std::pair<int,int>> ij_to_i_j_strong_;
     std::vector<int> ij_to_ji_strong_;

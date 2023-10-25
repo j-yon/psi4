@@ -246,12 +246,9 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
     int n_lmo_pairs = ij_to_i_j_.size();
     std::vector<double> e_ijs(n_lmo_pairs);
 
-    outfile->Printf("\n  ==> Computing LMP2 Pair Energies <==\n");
-    if constexpr (!crude) {
-        outfile->Printf("    Using Iterative LMP2\n");
-    } else {
-        outfile->Printf("    Using Semicanonical (Non-Iterative) LMP2\n");
-    }
+    outfile->Printf("\n  ==> Computing LMP2 Pair Energies <==\n\n");
+
+    outfile->Printf("    Starting semicanonical (non-iterative) LMP2 step...\n\n");
 
     std::vector<SharedMatrix> X_paos(n_lmo_pairs);
     std::vector<SharedMatrix> K_paos(n_lmo_pairs);
@@ -359,134 +356,140 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
 
     if constexpr (crude) return e_ijs;
 
-    // Compute PAO-LMP2 Pair Energies (For both strong AND weak pairs)
-    outfile->Printf("\n  ==> Iterative Local MP2 with Projected Atomic Orbitals (PAOs) <==\n\n");
-    outfile->Printf("    E_CONVERGENCE = %.2e\n", options_.get_double("E_CONVERGENCE"));
-    outfile->Printf("    R_CONVERGENCE = %.2e\n\n", options_.get_double("R_CONVERGENCE"));
-    outfile->Printf("                         Corr. Energy    Delta E     Max R     Time (s)\n");
+    e_lmp2_non_trunc_ = e_sc_lmp2;
 
-    std::vector<SharedMatrix> R_iajb(n_lmo_pairs);
+    if (!options_.get_bool("APPROX_PAO_LMP2")) {
 
-    int iteration = 0, max_iteration = options_.get_int("DLPNO_MAXITER");
-    double e_curr = 0.0, e_prev = 0.0, r_curr = 0.0;
-    bool e_converged = false, r_converged = false;
+        // Compute PAO-LMP2 Pair Energies (For both strong AND weak pairs)
+        outfile->Printf("\n  ==> Iterative Local MP2 with Projected Atomic Orbitals (PAOs) <==\n\n");
+        outfile->Printf("    E_CONVERGENCE = %.2e\n", options_.get_double("E_CONVERGENCE"));
+        outfile->Printf("    R_CONVERGENCE = %.2e\n\n", options_.get_double("R_CONVERGENCE"));
+        outfile->Printf("                         Corr. Energy    Delta E     Max R     Time (s)\n");
 
-    // Calculate residuals from current amplitudes
-    while (!(e_converged && r_converged)) {
-        // RMS of residual per LMO pair, for assessing convergence
-        std::vector<double> R_iajb_rms(n_lmo_pairs, 0.0);
-        std::time_t time_start = std::time(nullptr);
+        std::vector<SharedMatrix> R_iajb(n_lmo_pairs);
+
+        int iteration = 0, max_iteration = options_.get_int("DLPNO_MAXITER");
+        double e_curr = 0.0, e_prev = 0.0, r_curr = 0.0;
+        bool e_converged = false, r_converged = false;
 
         // Calculate residuals from current amplitudes
-#pragma omp parallel for schedule(dynamic, 1)
-        for (int ij = 0; ij < n_lmo_pairs; ++ij) {
-            int i, j;
-            std::tie(i, j) = ij_to_i_j_[ij];
+        while (!(e_converged && r_converged)) {
+            // RMS of residual per LMO pair, for assessing convergence
+            std::vector<double> R_iajb_rms(n_lmo_pairs, 0.0);
+            std::time_t time_start = std::time(nullptr);
 
-            if (i > j) continue;
+            // Calculate residuals from current amplitudes
+    #pragma omp parallel for schedule(dynamic, 1)
+            for (int ij = 0; ij < n_lmo_pairs; ++ij) {
+                int i, j;
+                std::tie(i, j) = ij_to_i_j_[ij];
 
-            int npao_ij = e_paos[ij]->dim(0);
+                if (i > j) continue;
 
-            R_iajb[ij] = std::make_shared<Matrix>("Residual", npao_ij, npao_ij);
+                int npao_ij = e_paos[ij]->dim(0);
 
-            for (int a = 0; a < npao_ij; ++a) {
-                for (int b = 0; b < npao_ij; ++b) {
-                    R_iajb[ij]->set(a, b,
-                                    K_paos[ij]->get(a, b) +
-                                        (e_paos[ij]->get(a) + e_paos[ij]->get(b) - F_lmo_->get(i, i) - F_lmo_->get(j, j)) *
-                                            T_paos[ij]->get(a, b));
+                R_iajb[ij] = std::make_shared<Matrix>("Residual", npao_ij, npao_ij);
+
+                for (int a = 0; a < npao_ij; ++a) {
+                    for (int b = 0; b < npao_ij; ++b) {
+                        R_iajb[ij]->set(a, b,
+                                        K_paos[ij]->get(a, b) +
+                                            (e_paos[ij]->get(a) + e_paos[ij]->get(b) - F_lmo_->get(i, i) - F_lmo_->get(j, j)) *
+                                                T_paos[ij]->get(a, b));
+                    }
+                }
+
+                for (int k = 0; k < naocc; ++k) {
+                    int kj = i_j_to_ij_[k][j];
+                    int ik = i_j_to_ij_[i][k];
+
+                    if (kj != -1 && i != k && fabs(F_lmo_->get(i, k)) > options_.get_double("F_CUT")) {
+                        auto S_ij_kj = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[kj]);
+                        S_ij_kj = linalg::triplet(X_paos[ij], S_ij_kj, X_paos[kj], true, false, false);
+                        auto temp =
+                            linalg::triplet(S_ij_kj, T_paos[kj], S_ij_kj, false, false, true);
+                        temp->scale(-1.0 * F_lmo_->get(i, k));
+                        R_iajb[ij]->add(temp);
+                    }
+                    if (ik != -1 && j != k && fabs(F_lmo_->get(k, j)) > options_.get_double("F_CUT")) {
+                        auto S_ij_ik = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[ik]);
+                        S_ij_ik = linalg::triplet(X_paos[ij], S_ij_ik, X_paos[ik], true, false, false);
+                        auto temp =
+                            linalg::triplet(S_ij_ik, T_paos[ik], S_ij_ik, false, false, true);
+                        temp->scale(-1.0 * F_lmo_->get(k, j));
+                        R_iajb[ij]->add(temp);
+                    }
+                }
+
+                R_iajb_rms[ij] = R_iajb[ij]->rms();
+                
+                if (i < j) {
+                    int ji = ij_to_ji_[ij];
+                    R_iajb[ji] = R_iajb[ij]->transpose();
+                    R_iajb_rms[ji] = R_iajb_rms[ij];
                 }
             }
 
-            for (int k = 0; k < naocc; ++k) {
-                int kj = i_j_to_ij_[k][j];
-                int ik = i_j_to_ij_[i][k];
-
-                if (kj != -1 && i != k && fabs(F_lmo_->get(i, k)) > options_.get_double("F_CUT")) {
-                    auto S_ij_kj = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[kj]);
-                    S_ij_kj = linalg::triplet(X_paos[ij], S_ij_kj, X_paos[kj], true, false, false);
-                    auto temp =
-                        linalg::triplet(S_ij_kj, T_paos[kj], S_ij_kj, false, false, true);
-                    temp->scale(-1.0 * F_lmo_->get(i, k));
-                    R_iajb[ij]->add(temp);
-                }
-                if (ik != -1 && j != k && fabs(F_lmo_->get(k, j)) > options_.get_double("F_CUT")) {
-                    auto S_ij_ik = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[ik]);
-                    S_ij_ik = linalg::triplet(X_paos[ij], S_ij_ik, X_paos[ik], true, false, false);
-                    auto temp =
-                        linalg::triplet(S_ij_ik, T_paos[ik], S_ij_ik, false, false, true);
-                    temp->scale(-1.0 * F_lmo_->get(k, j));
-                    R_iajb[ij]->add(temp);
+            // use residuals to get next amplitudes
+    #pragma omp parallel for schedule(dynamic, 1)
+            for (int ij = 0; ij < n_lmo_pairs; ++ij) {
+                int i, j;
+                std::tie(i, j) = ij_to_i_j_[ij];
+                int npao_ij = e_paos[ij]->dim(0);
+                for (int a = 0; a < npao_ij; ++a) {
+                    for (int b = 0; b < npao_ij; ++b) {
+                        T_paos[ij]->add(a, b, -R_iajb[ij]->get(a, b) / ((e_paos[ij]->get(a) + e_paos[ij]->get(b)) -
+                                                                        (F_lmo_->get(i, i) + F_lmo_->get(j, j))));
+                    }
                 }
             }
 
-            R_iajb_rms[ij] = R_iajb[ij]->rms();
-            
-            if (i < j) {
-                int ji = ij_to_ji_[ij];
-                R_iajb[ji] = R_iajb[ij]->transpose();
-                R_iajb_rms[ji] = R_iajb_rms[ij];
+    #pragma omp parallel for schedule(dynamic, 1)
+            for (int ij = 0; ij < n_lmo_pairs; ++ij) {
+                Tt_paos[ij]->copy(T_paos[ij]);
+                Tt_paos[ij]->scale(2.0);
+                Tt_paos[ij]->subtract(T_paos[ij]->transpose());
+            }
+
+            // evaluate convergence using current amplitudes and residuals
+            e_prev = e_curr;
+            e_curr = 0.0;
+    #pragma omp parallel for schedule(dynamic, 1) reduction(+ : e_curr)
+            for (int ij = 0; ij < n_lmo_pairs; ++ij) {
+                int i, j;
+                std::tie(i, j) = ij_to_i_j_[ij];
+
+                e_ijs[ij] = K_paos[ij]->vector_dot(Tt_paos[ij]);
+                e_curr += e_ijs[ij];
+            }
+            r_curr = *max_element(R_iajb_rms.begin(), R_iajb_rms.end());
+
+            r_converged = (fabs(r_curr) < options_.get_double("R_CONVERGENCE"));
+            e_converged = (fabs(e_curr - e_prev) < options_.get_double("E_CONVERGENCE"));
+
+            std::time_t time_stop = std::time(nullptr);
+
+            outfile->Printf("  @PAO-LMP2 iter %3d: %16.12f %10.3e %10.3e %8d\n", iteration, e_curr, e_curr - e_prev, r_curr, (int)time_stop - (int)time_start);
+
+            iteration++;
+
+            if (iteration > max_iteration) {
+                throw PSIEXCEPTION("Maximum DLPNO iterations exceeded.");
             }
         }
+        e_lmp2_non_trunc_ = e_curr;
 
-        // use residuals to get next amplitudes
-#pragma omp parallel for schedule(dynamic, 1)
-        for (int ij = 0; ij < n_lmo_pairs; ++ij) {
-            int i, j;
-            std::tie(i, j) = ij_to_i_j_[ij];
-            int npao_ij = e_paos[ij]->dim(0);
-            for (int a = 0; a < npao_ij; ++a) {
-                for (int b = 0; b < npao_ij; ++b) {
-                    T_paos[ij]->add(a, b, -R_iajb[ij]->get(a, b) / ((e_paos[ij]->get(a) + e_paos[ij]->get(b)) -
-                                                                    (F_lmo_->get(i, i) + F_lmo_->get(j, j))));
-                }
-            }
-        }
+        outfile->Printf("\n    PAO-LMP2 Iteration Energy: %16.12f\n\n", e_lmp2_non_trunc_);
+    } // end if
 
-#pragma omp parallel for schedule(dynamic, 1)
-        for (int ij = 0; ij < n_lmo_pairs; ++ij) {
-            Tt_paos[ij]->copy(T_paos[ij]);
-            Tt_paos[ij]->scale(2.0);
-            Tt_paos[ij]->subtract(T_paos[ij]->transpose());
-        }
-
-        // evaluate convergence using current amplitudes and residuals
-        e_prev = e_curr;
-        e_curr = 0.0;
-#pragma omp parallel for schedule(dynamic, 1) reduction(+ : e_curr)
-        for (int ij = 0; ij < n_lmo_pairs; ++ij) {
-            int i, j;
-            std::tie(i, j) = ij_to_i_j_[ij];
-
-            e_ijs[ij] = K_paos[ij]->vector_dot(Tt_paos[ij]);
-            e_curr += e_ijs[ij];
-        }
-        r_curr = *max_element(R_iajb_rms.begin(), R_iajb_rms.end());
-
-        r_converged = (fabs(r_curr) < options_.get_double("R_CONVERGENCE"));
-        e_converged = (fabs(e_curr - e_prev) < options_.get_double("E_CONVERGENCE"));
-
-        std::time_t time_stop = std::time(nullptr);
-
-        outfile->Printf("  @PAO-LMP2 iter %3d: %16.12f %10.3e %10.3e %8d\n", iteration, e_curr, e_curr - e_prev, r_curr, (int)time_stop - (int)time_start);
-
-        iteration++;
-
-        if (iteration > max_iteration) {
-            throw PSIEXCEPTION("Maximum DLPNO iterations exceeded.");
-        }
-    }
-
-    e_lmp2_non_trunc_ = e_curr;
-    outfile->Printf("\n    PAO-LMP2 Iteration Energy: %16.12f\n\n", e_lmp2_non_trunc_);
-
-    outfile->Printf("\n  ==> Forming Pair Natural Orbitals (from converged LMP2 amplitudes) <==\n");
+    outfile->Printf("\n  ==> Forming Pair Natural Orbitals <==\n");
     
     K_iajb_.resize(n_lmo_pairs);   // exchange operators (i.e. (ia|jb) integrals)
     T_iajb_.resize(n_lmo_pairs);   // amplitudes
     Tt_iajb_.resize(n_lmo_pairs);  // antisymmetrized amplitudes
     X_pno_.resize(n_lmo_pairs);    // global PAOs -> canonical PNOs
     e_pno_.resize(n_lmo_pairs);    // PNO orbital energies
+    e_ij_mp2_scale_.resize(n_lmo_pairs); // MP2 scaling factor for pairs
 
     n_pno_.resize(n_lmo_pairs);   // number of pnos
     de_pno_.resize(n_lmo_pairs);  // PNO truncation error
@@ -556,6 +559,7 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
 
         // mp2 energy of this LMO pair after transformation to PNOs and truncation
         double e_ij_trunc = K_pno_ij->vector_dot(Tt_pno_ij);
+        e_ij_mp2_scale_[ij] = e_ijs[ij] / e_ij_trunc;
 
         // truncation error
         double de_pno_ij = e_ijs[ij] - e_ij_trunc;
@@ -579,6 +583,7 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
             e_pno_[ji] = e_pno_[ij];
             n_pno_[ji] = n_pno_[ij];
             de_pno_[ji] = de_pno_ij;
+            e_ij_mp2_scale_[ji] = e_ij_mp2_scale_[ij];
         } // end if (i < j)
     }
 
@@ -614,6 +619,8 @@ void DLPNOCCSD::pno_lmp2_iterations() {
     outfile->Printf("    R_CONVERGENCE = %.2e\n\n", options_.get_double("R_CONVERGENCE"));
     outfile->Printf("                         Corr. Energy    Delta E     Max R     Time (s)\n");
 
+    std::vector<double> e_ij_adj(n_lmo_pairs);
+    std::vector<double> e_ij_pno(n_lmo_pairs);
     std::vector<SharedMatrix> R_iajb(n_lmo_pairs);
 
     int iteration = 0, max_iteration = options_.get_int("DLPNO_MAXITER");
@@ -700,7 +707,9 @@ void DLPNOCCSD::pno_lmp2_iterations() {
             int i, j;
             std::tie(i, j) = ij_to_i_j_[ij];
 
-            e_curr += K_iajb_[ij]->vector_dot(Tt_iajb_[ij]);
+            e_ij_pno[ij] = K_iajb_[ij]->vector_dot(Tt_iajb_[ij]);
+            e_curr += e_ij_pno[ij];
+            e_ij_adj[ij] = e_ij_pno[ij] * e_ij_mp2_scale_[ij];
         }
         r_curr = *max_element(R_iajb_rms.begin(), R_iajb_rms.end());
 
@@ -717,6 +726,28 @@ void DLPNOCCSD::pno_lmp2_iterations() {
             throw PSIEXCEPTION("Maximum DLPNO iterations exceeded.");
         }
     }
+
+    // Recompute weak pair correction and pno truncation error (if using approximate PAO-LMP2 energy)
+    if (options_.get_bool("APPROX_PAO_LMP2")) {
+        double de_weak = 0.0, de_pno = 0.0;
+#pragma omp parallel for schedule(dynamic, 1) reduction(+ : de_weak, de_pno)
+        for (int ij = 0; ij < n_lmo_pairs; ++ij) {
+            int i, j;
+            std::tie(i, j) = ij_to_i_j_[ij];
+
+            if (i_j_to_ij_strong_[i][j] != -1) {
+                de_pno += (e_ij_adj[ij] - e_ij_pno[ij]);
+            } else {
+                de_weak += e_ij_adj[ij];
+            }
+        }
+        de_lmp2_weak_ = de_weak;
+        de_pno_total_ = de_pno;
+        outfile->Printf("\n    Using approximate PAO-LMP2 energies...\n\n");
+        outfile->Printf("    (Corrected) Weak pair energy      = %.12f\n", de_lmp2_weak_);
+        outfile->Printf("    (Corrected) PNO truncation energy = %.12f\n", de_pno_total_);
+    }
+
 }
 
 template<bool crude> std::pair<double, double> DLPNOCCSD::filter_pairs(const std::vector<double>& e_ijs) {
