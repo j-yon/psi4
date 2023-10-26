@@ -2507,7 +2507,7 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         /*- Which DLPNO Algorithm to run !expert*/
         options.add_str("DLPNO_ALGORITHM", "CCSD", "MP2 CCSD CCSD(T)");
         /*- Use PAO SCALE APPROXIMATION FOR PAO-LMP2 prescreening? !expert -*/
-        options.add_bool("APPROX_PAO_LMP2", true);
+        options.add_bool("APPROX_PAO_LMP2", false);
         /*- Use T0 approximation for DLPNO-CCSD(T)? !expert*/
         options.add_bool("T0_APPROXIMATION", false);
 
