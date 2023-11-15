@@ -2531,8 +2531,8 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_double("T_CUT_MKN", 1e-3);
         /*- Eigenvalue Tolerance for factoring (Q|u_t v_t) two electron integrals */
         options.add_double("T_CUT_EIG", 0.0);
-        /*- SVD Tolerance for factoring (Q_ij|a_ij b_ij) two electron integrals */
-        options.add_double("T_CUT_SVD", 0.0);
+        /*- SVD Tolerance for factoring the PAO overlap matrix */
+        options.add_double("T_CUT_SVD", 1e-3);
         /*- Basis set coefficient threshold for including basis function (m) in domain of LMO (i) !expert -*/
         options.add_double("T_CUT_CLMO", 1e-3);
         /*- Basis set coefficient threshold for including basis function (n) in domain of PAO (u) !expert -*/

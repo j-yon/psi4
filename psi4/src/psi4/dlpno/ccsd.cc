@@ -360,6 +360,16 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
 
     if (!options_.get_bool("APPROX_PAO_LMP2")) {
 
+        std::vector<SharedMatrix> S_uij_r(n_lmo_pairs);
+        
+#pragma omp parallel for schedule(dynamic, 1)
+        for (int ij = 0; ij < n_lmo_pairs; ++ij) {
+            const auto &[i, j] = ij_to_i_j_[ij];
+
+            if (i > j) continue;
+            S_uij_r[ij] = linalg::doublet(X_paos[ij], submatrix_rows(*S_pao_svd_, lmopair_to_paos_[ij]), true, false);
+        }
+
         // Compute PAO-LMP2 Pair Energies (For both strong AND weak pairs)
         outfile->Printf("\n  ==> Iterative Local MP2 with Projected Atomic Orbitals (PAOs) <==\n\n");
         outfile->Printf("    E_CONVERGENCE = %.2e\n", options_.get_double("E_CONVERGENCE"));
@@ -404,16 +414,24 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
                     int ik = i_j_to_ij_[i][k];
 
                     if (kj != -1 && i != k && fabs(F_lmo_->get(i, k)) > options_.get_double("F_CUT")) {
+                        /*
                         auto S_ij_kj = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[kj]);
                         S_ij_kj = linalg::triplet(X_paos[ij], S_ij_kj, X_paos[kj], true, false, false);
+                        */
+                        int kj_pair_idx = (k > j) ? ij_to_ji_[kj] : kj;
+                        auto S_ij_kj = linalg::doublet(S_uij_r[ij], S_uij_r[kj_pair_idx], false, true);
                         auto temp =
                             linalg::triplet(S_ij_kj, T_paos[kj], S_ij_kj, false, false, true);
                         temp->scale(-1.0 * F_lmo_->get(i, k));
                         R_iajb[ij]->add(temp);
                     }
                     if (ik != -1 && j != k && fabs(F_lmo_->get(k, j)) > options_.get_double("F_CUT")) {
+                        /*
                         auto S_ij_ik = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[ik]);
                         S_ij_ik = linalg::triplet(X_paos[ij], S_ij_ik, X_paos[ik], true, false, false);
+                        */
+                        int ik_pair_idx = (i > k) ? ij_to_ji_[ik] : ik;
+                        auto S_ij_ik = linalg::doublet(S_uij_r[ij], S_uij_r[ik_pair_idx], false, true);
                         auto temp =
                             linalg::triplet(S_ij_ik, T_paos[ik], S_ij_ik, false, false, true);
                         temp->scale(-1.0 * F_lmo_->get(k, j));
@@ -918,10 +936,6 @@ template<bool crude> void DLPNOCCSD::pair_prescreening() {
 void DLPNOCCSD::compute_cc_integrals() {
     outfile->Printf("    Computing CC integrals...\n\n");
 
-    if (T_CUT_SVD_ > 0.0) {
-        outfile->Printf("\n    Using SVD decomposition to optimize storage of (Q_ij|a_ij b_ij), with T_CUT_SVD: %6.3e\n", T_CUT_SVD_);
-    }
-
     int n_lmo_pairs = ij_to_i_j_.size();
     // 0 virtual
     K_mnij_.resize(n_lmo_pairs);
@@ -1171,11 +1185,6 @@ void DLPNOCCSD::compute_cc_integrals() {
         L_bar_[ij] = K_bar_[ij]->clone();
         L_bar_[ij]->scale(2.0);
         L_bar_[ij]->subtract(K_bar_[ji]);
-    }
-
-    if (T_CUT_SVD_ > 0.0) {
-        double memory_savings = 1.0 - static_cast<double>(qvv_svd_memory) / qvv_memory;
-        outfile->Printf("\n    Memory Savings from SVD of (Q_ij|a_ij b_ij): %6.2f %% \n\n", 100.0 * memory_savings);
     }
 }
 
