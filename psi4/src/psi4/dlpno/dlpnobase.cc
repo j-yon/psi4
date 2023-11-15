@@ -325,7 +325,8 @@ void DLPNOBase::setup_orbitals() {
 
     // Cholesky decomposition of S_pao
     // S_{uv} \approx L_{ur}L_{vr}, r < |u|
-    S_pao_svd_ = S_pao_->partial_cholesky_factorize(T_CUT_SVD_, false);
+    S_pao_svd_ = reference_wavefunction_->S()->partial_cholesky_factorize(T_CUT_SVD_, false);
+    S_pao_svd_ = linalg::doublet(C_pao_, S_pao_svd_, true, false);
 
     outfile->Printf("\n  Rank reduction of S_PAO...\n");
     outfile->Printf("    Initial Rank: %4d\n", S_pao_svd_->nrow());
