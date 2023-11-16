@@ -323,15 +323,6 @@ void DLPNOBase::setup_orbitals() {
     H_lmo_pao_ = linalg::triplet(C_lmo_, H_ao, C_pao_, true, false, false);
     F_lmo_pao_ = linalg::triplet(C_lmo_, reference_wavefunction_->Fa(), C_pao_, true, false, false);
 
-    // Cholesky decomposition of S_pao
-    // S_{uv} \approx L_{ur}L_{vr}, r < |u|
-    S_pao_svd_ = reference_wavefunction_->S()->partial_cholesky_factorize(T_CUT_SVD_, false);
-    S_pao_svd_ = linalg::doublet(C_pao_, S_pao_svd_, true, false);
-
-    outfile->Printf("\n  Rank reduction of S_PAO...\n");
-    outfile->Printf("    Initial Rank: %4d\n", S_pao_svd_->nrow());
-    outfile->Printf("    Final Rank:   %4d\n\n", S_pao_svd_->ncol());
-
     timer_off("Projected AOs");
 
     // map from atomic center to orbital/aux basis function/shell index

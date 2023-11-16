@@ -1194,14 +1194,6 @@ double DLPNOCCSD_T::lccsd_t_iterations() {
     double F_CUT = options_.get_double("F_CUT_T");
     double T_CUT_ITER = options_.get_double("T_CUT_ITER");
 
-    // Factorized overlaps per lmo triplet
-    std::vector<SharedMatrix> S_aijk_r(n_lmo_triplets);
-#pragma omp parallel for schedule(dynamic, 1)
-    for (int ijk = 0; ijk < n_lmo_triplets; ++ijk) {
-        const auto &[i, j, k] = ijk_to_i_j_k_[ijk];    
-        S_aijk_r[ijk] = linalg::doublet(X_tno_[ijk], submatrix_rows(*S_pao_svd_, lmotriplet_to_paos_[ijk]), true, false);
-    }
-
     std::vector<double> e_ijk_old(n_lmo_triplets, 0.0);
 
     while (!(e_converged && r_converged)) {
@@ -1259,12 +1251,9 @@ double DLPNOCCSD_T::lccsd_t_iterations() {
                         int ijl = i_j_k_to_ijk_[ijl_dense];
                         if (n_tno_[ijl] == 0 || std::fabs((*F_lmo_)(l, k)) < F_CUT) continue;
 
-                        /*
                         auto S_ijk_ijl =
                             submatrix_rows_and_cols(*S_pao_, lmotriplet_to_paos_[ijk], lmotriplet_to_paos_[ijl]);
                         S_ijk_ijl = linalg::triplet(X_tno_[ijk], S_ijk_ijl, X_tno_[ijl], true, false, false);
-                        */
-                        auto S_ijk_ijl = linalg::doublet(S_aijk_r[ijk], S_aijk_r[ijl], false, true);
 
                         SharedMatrix T_ijl;
                         if (write_amplitudes_) {
@@ -1288,12 +1277,9 @@ double DLPNOCCSD_T::lccsd_t_iterations() {
                         int ilk = i_j_k_to_ijk_[ilk_dense];
                         if (n_tno_[ilk] == 0 || std::fabs((*F_lmo_)(l, j)) < F_CUT) continue;
 
-                        /*
                         auto S_ijk_ilk =
                             submatrix_rows_and_cols(*S_pao_, lmotriplet_to_paos_[ijk], lmotriplet_to_paos_[ilk]);
                         S_ijk_ilk = linalg::triplet(X_tno_[ijk], S_ijk_ilk, X_tno_[ilk], true, false, false);
-                        */
-                        auto S_ijk_ilk = linalg::doublet(S_aijk_r[ijk], S_aijk_r[ilk], false, true);
 
                         SharedMatrix T_ilk;
                         if (write_amplitudes_) {
@@ -1317,12 +1303,9 @@ double DLPNOCCSD_T::lccsd_t_iterations() {
                         int ljk = i_j_k_to_ijk_[ljk_dense];
                         if (n_tno_[ljk] == 0 || std::fabs((*F_lmo_)(l, i)) < F_CUT) continue;
 
-                        /*
                         auto S_ijk_ljk =
                             submatrix_rows_and_cols(*S_pao_, lmotriplet_to_paos_[ijk], lmotriplet_to_paos_[ljk]);
                         S_ijk_ljk = linalg::triplet(X_tno_[ijk], S_ijk_ljk, X_tno_[ljk], true, false, false);
-                        */
-                        auto S_ijk_ljk = linalg::doublet(S_aijk_r[ijk], S_aijk_r[ljk], false, true);
 
                         SharedMatrix T_ljk;
                         if (write_amplitudes_) {

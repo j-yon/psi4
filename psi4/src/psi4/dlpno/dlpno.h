@@ -91,7 +91,6 @@ class DLPNOBase : public Wavefunction {
       SharedMatrix F_pao_;
       SharedMatrix S_pao_;
       SharedMatrix H_pao_;
-      SharedMatrix S_pao_svd_;
 
       // LMO/PAO Hamiltonian (Used in T1-Hamiltonian CCSD)
       SharedMatrix H_lmo_pao_;
