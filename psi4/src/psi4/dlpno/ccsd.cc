@@ -2114,59 +2114,84 @@ void DLPNOCCSD::t1_fock() {
         }
     }
 
+    // => Compute Fai <= //
+
+    // Thread and OMP Parallel info
+    int nthreads = 1;
+#ifdef _OPENMP
+    nthreads = Process::environment.get_n_threads();
+#endif
+
+    std::vector<std::vector<SharedMatrix>> Fai_buffer(nthreads);
+    for (int thread = 0; thread < nthreads; ++thread) {
+        Fai_buffer[thread].resize(naocc);
+        for (int i = 0; i < naocc; ++i) {
+            int ii = i_j_to_ij_[i][i];
+            Fai_buffer[thread][i] = std::make_shared<Matrix>(n_pno_[ii], 1);
+        }
+    }
+
 #pragma omp parallel for
     for (int i = 0; i < naocc; ++i) {
-        int ii = i_j_to_ij_[i][i];
-        int nlmo_ii = lmopair_to_lmos_[ii].size();
-        int npno_ii = n_pno_[ii];
-
+        int ii = i_j_to_ij_[i][i], npno_ii = n_pno_[ii];
         Fai_[i] = std::make_shared<Matrix>(npno_ii, 1);
+
         for (int a_ii = 0; a_ii < npno_ii; ++a_ii) {
             (*Fai_[i])(a_ii, 0) = (*T_ia_[i])(a_ii, 0) * (*e_pno_[ii])(a_ii);
         }
+    }
 
-        for (int j_ii = 0; j_ii < nlmo_ii; ++j_ii) {
-            int j = lmopair_to_lmos_[ii][j_ii];
-            int jj = i_j_to_ij_[j][j], ij = i_j_to_ij_[i][j];
+#pragma omp parallel for schedule(dynamic, 1)
+    for (int ij = 0; ij < n_lmo_pairs; ++ij) {
+        auto &[i, j] = ij_to_i_j_[ij];
 
-            int naux_ij = lmopair_to_ribfs_[ij].size();
-            int nlmo_ij = lmopair_to_lmos_[ij].size();
-            int npno_ij = n_pno_[ij];
+        int thread = 0;
+#ifdef _OPENMP
+        thread = omp_get_thread_num();
+#endif
 
-            auto T_j = linalg::doublet(S_PNO(ii, jj), T_ia_[j]);
+        int ii = i_j_to_ij_[i][i], jj = i_j_to_ij_[j][j];
+        int naux_ij = lmopair_to_ribfs_[ij].size();
+        int nlmo_ij = lmopair_to_lmos_[ij].size();
+        int npno_ij = n_pno_[ij];
 
-            auto T_j_clone = T_j->clone();
-            T_j_clone->scale((*F_lmo_)(i, j));
-            Fai_[i]->subtract(T_j_clone);
+        auto T_j = linalg::doublet(S_PNO(ii, jj), T_ia_[j]);
 
-            auto T_ij = linalg::doublet(S_PNO(ij, jj), T_ia_[j]);
-            Fai_[i]->add(linalg::triplet(S_PNO(ii, ij), M_iajb_[ij], T_ij));
+        auto T_j_clone = T_j->clone();
+        T_j_clone->scale((*F_lmo_)(i, j));
+        Fai_buffer[thread][i]->subtract(T_j_clone);
 
-            double fai_scale = 2.0 * K_bar_chem_[ij]->vector_dot(T_n_ij_[ij]);
-            fai_scale -= K_bar_[ij]->vector_dot(T_n_ij_[ij]);
+        auto T_ij = linalg::doublet(S_PNO(ij, jj), T_ia_[j]);
+        Fai_buffer[thread][i]->add(linalg::triplet(S_PNO(ii, ij), M_iajb_[ij], T_ij));
+
+        double fai_scale = 2.0 * K_bar_chem_[ij]->vector_dot(T_n_ij_[ij]);
+        fai_scale -= K_bar_[ij]->vector_dot(T_n_ij_[ij]);
+        T_j_clone = T_j->clone();
+        T_j_clone->scale(fai_scale);
+        Fai_buffer[thread][i]->subtract(T_j_clone);
+
+        auto T_i = linalg::doublet(S_PNO(jj, ii), T_ia_[i]);
+        auto L_temp = linalg::doublet(T_ia_[j], L_tilde_[jj], true, false);
+        L_temp->reshape(n_pno_[jj], n_pno_[jj]);
+        Fai_buffer[thread][i]->add(linalg::triplet(S_PNO(ii, jj), L_temp, T_i));
+
+        for (int k = 0; k < naocc; ++k) {
+            int jk = i_j_to_ij_[j][k], kk = i_j_to_ij_[k][k];
+            if (jk == -1) continue;
+
+            auto T_i = linalg::doublet(S_PNO(jk, ii), T_ia_[i]);
+            auto T_k = linalg::doublet(S_PNO(jk, kk), T_ia_[k]);
+
+            double triple_scale = (*linalg::triplet(T_i, L_iajb_[jk], T_k, true, false, false))(0, 0);
             T_j_clone = T_j->clone();
-            T_j_clone->scale(fai_scale);
-            Fai_[i]->subtract(T_j_clone);
+            T_j_clone->scale(triple_scale);
+            Fai_buffer[thread][i]->subtract(T_j_clone);
+        }
+    }
 
-            auto T_i = linalg::doublet(S_PNO(jj, ii), T_ia_[i]);
-            auto L_temp = linalg::doublet(T_ia_[j], L_tilde_[jj], true, false);
-            L_temp->reshape(n_pno_[jj], n_pno_[jj]);
-            Fai_[i]->add(linalg::triplet(S_PNO(ii, jj), L_temp, T_i));
-
-            for (int k_ii = 0; k_ii < nlmo_ii; ++k_ii) {
-                int k = lmopair_to_lmos_[ii][k_ii];
-                int jk = i_j_to_ij_[j][k], kk = i_j_to_ij_[k][k];
-
-                if (jk == -1) continue;
-
-                auto T_i = linalg::doublet(S_PNO(jk, ii), T_ia_[i]);
-                auto T_k = linalg::doublet(S_PNO(jk, kk), T_ia_[k]);
-
-                double triple_scale = (*linalg::triplet(T_i, L_iajb_[jk], T_k, true, false, false))(0, 0);
-                T_j_clone = T_j->clone();
-                T_j_clone->scale(triple_scale);
-                Fai_[i]->subtract(T_j_clone);
-            }
+    for (int thread = 0; thread < nthreads; ++thread) {
+        for (int i = 0; i < naocc; ++i) {
+            Fai_[i]->add(Fai_buffer[thread][i]);
         }
     }
 
