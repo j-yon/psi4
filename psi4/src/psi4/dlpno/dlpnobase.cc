@@ -67,6 +67,7 @@ void DLPNOBase::common_init() {
     debug_ = options_.get_int("DEBUG");
 
     T_CUT_PNO_ = options_.get_double("T_CUT_PNO");
+    T_CUT_PNO_MP2_ = options_.get_double("T_CUT_PNO_MP2");
     T_CUT_PNO_DIAG_SCALE_ = options_.get_double("T_CUT_PNO_DIAG_SCALE");
     T_CUT_DO_ = options_.get_double("T_CUT_DO");
     T_CUT_PAIRS_ = options_.get_double("T_CUT_PAIRS");
@@ -126,14 +127,14 @@ void DLPNOBase::common_init() {
         } else if (options_.get_str("PNO_CONVERGENCE") == "TIGHT") {
             if (!T_CUT_PNO_changed) T_CUT_PNO_ = 1e-8;
             if (!T_CUT_DO_changed) T_CUT_DO_ = 5e-3;
-            if (!DIAG_SCALE_changed) T_CUT_PNO_DIAG_SCALE_ = 1e-4;
+            if (!DIAG_SCALE_changed) T_CUT_PNO_DIAG_SCALE_ = 0.0;
             if (!T_CUT_PAIRS_changed) T_CUT_PAIRS_ = 1e-5;
             if (!T_CUT_MKN_changed) T_CUT_MKN_ = 1e-3;
             if (!PRESCREENING_changed) options_.set_str("DLPNO", "PRESCREENING_ALGORITHM", "FULL_LMP2");
         } else if (options_.get_str("PNO_CONVERGENCE") == "VERY_TIGHT") {
             if (!T_CUT_PNO_changed) T_CUT_PNO_ = 1e-8;
             if (!T_CUT_DO_changed) T_CUT_DO_ = 5e-3;
-            if (!DIAG_SCALE_changed) T_CUT_PNO_DIAG_SCALE_ = 1e-4;
+            if (!DIAG_SCALE_changed) T_CUT_PNO_DIAG_SCALE_ = 0.0;
             if (!T_CUT_PAIRS_changed) T_CUT_PAIRS_ = 1e-6;
             if (!T_CUT_MKN_changed) T_CUT_MKN_ = 1e-4;
             if (!PRESCREENING_changed) options_.set_str("DLPNO", "PRESCREENING_ALGORITHM", "FULL_LMP2");
@@ -143,7 +144,7 @@ void DLPNOBase::common_init() {
 
     // TODO: Is this reasonable?
     // Answer: Yes, this is what they do in ORCA
-    T_CUT_PNO_MP2_ = T_CUT_PNO_ * 0.01;
+    if (!options_["T_CUT_PNO_MP2"].has_changed()) T_CUT_PNO_MP2_ = T_CUT_PNO_ * 0.01;
     T_CUT_PAIRS_MP2_ = std::min(1.0e-6, T_CUT_PAIRS_ * 0.1);
 
     name_ = "DLPNO";
