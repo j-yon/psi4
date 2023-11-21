@@ -246,22 +246,31 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
     int n_lmo_pairs = ij_to_i_j_.size();
     std::vector<double> e_ijs(n_lmo_pairs);
 
-    outfile->Printf("\n  ==> Computing LMP2 Pair Energies <==\n\n");
+    outfile->Printf("\n  ==> Computing SC-LMP2 Pair Energies <==\n\n");
 
     outfile->Printf("    Starting semicanonical (non-iterative) LMP2 step...\n\n");
 
-    std::vector<SharedMatrix> X_paos(n_lmo_pairs);
-    std::vector<SharedMatrix> K_paos(n_lmo_pairs);
-    std::vector<SharedMatrix> T_paos(n_lmo_pairs);
-    std::vector<SharedVector> e_paos(n_lmo_pairs);
+    if constexpr (!crude) {
+        outfile->Printf("\n  ==> Forming Pair Natural Orbitals (for LMP2) <==\n");
+
+        K_iajb_.resize(n_lmo_pairs);
+        T_iajb_.resize(n_lmo_pairs);
+        Tt_iajb_.resize(n_lmo_pairs);
+        X_pno_.resize(n_lmo_pairs);
+        e_pno_.resize(n_lmo_pairs);
+
+        n_pno_.resize(n_lmo_pairs);
+        de_pno_.resize(n_lmo_pairs);
+        // de_pno_os_.resize(n_lmo_pairs);
+        // de_pno_ss_.resize(n_lmo_pairs);
+    }
 
     double e_sc_lmp2 = 0.0;
 
     // Step 1: compute SC-LMP2 pair energies
 #pragma omp parallel for schedule(dynamic, 1) reduction(+ : e_sc_lmp2)
     for (int ij = 0; ij < n_lmo_pairs; ++ij) {
-        int i, j;
-        std::tie(i, j) = ij_to_i_j_[ij];
+        auto &[i, j] = ij_to_i_j_[ij];
         int ji = ij_to_ji_[ij];
 
         if (i > j) continue;
@@ -305,14 +314,9 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
         SharedVector e_pao_ij;  // energies of the canonical PAOs
         std::tie(X_pao_ij, e_pao_ij) = orthocanonicalizer(S_pao_ij, F_pao_ij);
 
-        X_paos[ij] = X_pao_ij;
-        e_paos[ij] = e_pao_ij;
-
         // S_pao_ij = linalg::triplet(X_pao_ij, S_pao_ij, X_pao_ij, true, false, false);
         F_pao_ij = linalg::triplet(X_pao_ij, F_pao_ij, X_pao_ij, true, false, false);
         K_pao_ij = linalg::triplet(X_pao_ij, K_pao_ij, X_pao_ij, true, false, false);
-
-        K_paos[ij] = K_pao_ij;
 
         // number of PAOs in the domain after removing linear dependencies
         int npao_can_ij = X_pao_ij->colspi(0);
@@ -324,7 +328,7 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
             }
         }
 
-        T_paos[ij] = T_pao_ij;
+        // Compute SC-LMP2 pair energy using PAOs
 
         size_t nvir_ij = K_pao_ij->rowspi(0);
 
@@ -333,342 +337,187 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
         Tt_pao_ij->subtract(T_pao_ij->transpose());
 
         // mp2 energy of this LMO pair before transformation to PNOs
-        double e_ij_pao = K_pao_ij->vector_dot(Tt_pao_ij);
-
-        e_ijs[ij] = e_ij_pao;
+        double e_ij_initial = K_pao_ij->vector_dot(Tt_pao_ij);
+        // double e_ij_os_initial = K_pao_ij->vector_dot(T_pao_ij);
+        // double e_ij_ss_initial = e_ij_initial - e_ij_os_inital;
 
         double prefactor = (i == j) ? 1.0 : 2.0;
-        e_sc_lmp2 += prefactor * e_ij_pao;
+        e_sc_lmp2 += prefactor * e_ij_initial;
 
+        e_ijs[ij] = e_ij_initial;
         if (i < j) {
-            e_ijs[ji] = e_ij_pao;
+            e_ijs[ji] = e_ij_initial;
+        }
+
+        if constexpr (!crude) {
+            //                                           //
+            // ==> Canonical PAOs  to Canonical PNOs <== //
+            //                                           //
+
+            // PNOs defined in (DOI: 10.1063/1.3086717), EQ 17 through EQ 24
+
+            // Construct pair density from amplitudes
+            auto D_ij = linalg::doublet(Tt_pao_ij, T_pao_ij, false, true);
+            D_ij->add(linalg::doublet(Tt_pao_ij, T_pao_ij, true, false));
+
+            // Diagonalization of pair density gives PNOs (in basis of the LMO's virtual domain) and PNO occ numbers
+            auto X_pno_ij = std::make_shared<Matrix>("eigenvectors", nvir_ij, nvir_ij);
+            Vector pno_occ("eigenvalues", nvir_ij);
+            D_ij->diagonalize(*X_pno_ij, pno_occ, descending);
+
+            double t_cut_scale = (i == j) ? T_CUT_PNO_DIAG_SCALE_ : 1.0;
+
+            int nvir_ij_final = 0;
+            for (size_t a = 0; a < nvir_ij; ++a) {
+                if (fabs(pno_occ.get(a)) >= t_cut_scale * T_CUT_PNO_MP2_) {
+                    nvir_ij_final++;
+                }
+            }
+
+            // Make sure there is at least one PNO per pair :)
+            nvir_ij_final = std::max(1, nvir_ij_final);
+
+            Dimension zero(1);
+            Dimension dim_final(1);
+            dim_final.fill(nvir_ij_final);
+
+            // This transformation gives orbitals that are orthonormal but not canonical
+            X_pno_ij = X_pno_ij->get_block({zero, X_pno_ij->rowspi()}, {zero, dim_final});
+            pno_occ = pno_occ.get_block({zero, dim_final});
+
+            SharedMatrix pno_canon;
+            SharedVector e_pno_ij;
+            std::tie(pno_canon, e_pno_ij) = canonicalizer(X_pno_ij, F_pao_ij);
+
+            // This transformation gives orbitals that are orthonormal and canonical
+            X_pno_ij = linalg::doublet(X_pno_ij, pno_canon, false, false);
+
+            auto K_pno_ij = linalg::triplet(X_pno_ij, K_pao_ij, X_pno_ij, true, false, false);
+            auto T_pno_ij = linalg::triplet(X_pno_ij, T_pao_ij, X_pno_ij, true, false, false);
+            auto Tt_pno_ij = linalg::triplet(X_pno_ij, Tt_pao_ij, X_pno_ij, true, false, false);
+
+            // mp2 energy of this LMO pair after transformation to PNOs and truncation
+            double e_ij_trunc = K_pno_ij->vector_dot(Tt_pno_ij);
+            // double e_ij_os_trunc = K_pno_ij->vector_dot(T_pno_ij);
+            // double e_ij_ss_trunc = e_ij_trunc - e_ij_os_trunc;
+
+            // truncation error
+            double de_pno_ij = e_ij_initial - e_ij_trunc;
+            // double de_pno_ij_os = e_ij_os_initial - e_ij_os_trunc;
+            // double de_pno_ij_ss = e_ij_ss_initial - e_ij_ss_trunc;
+
+            X_pno_ij = linalg::doublet(X_pao_ij, X_pno_ij, false, false);
+
+            K_iajb_[ij] = K_pno_ij;
+            T_iajb_[ij] = T_pno_ij;
+            Tt_iajb_[ij] = Tt_pno_ij;
+            X_pno_[ij] = X_pno_ij;
+            e_pno_[ij] = e_pno_ij;
+            n_pno_[ij] = X_pno_ij->colspi(0);
+            de_pno_[ij] = de_pno_ij;
+            // de_pno_os_[ij] = de_pno_ij_os;
+            // de_pno_ss_[ij] = de_pno_ij_ss;
+
+            // account for symmetry
+            if (i < j) {
+                K_iajb_[ji] = K_iajb_[ij]->transpose();
+                T_iajb_[ji] = T_iajb_[ij]->transpose();
+                Tt_iajb_[ji] = Tt_iajb_[ij]->transpose();
+                X_pno_[ji] = X_pno_[ij];
+                e_pno_[ji] = e_pno_[ij];
+                n_pno_[ji] = n_pno_[ij];
+                de_pno_[ji] = de_pno_ij;
+                // de_pno_os_[ji] = de_pno_ij_os;
+                // de_pno_ss_[ji] = de_pno_ij_ss;
+            }
         }
     } // end for (ij pairs)
 
-    outfile->Printf("    SC-LMP2 Energy (Using PAOs): %16.12f\n\n", e_sc_lmp2);
+    outfile->Printf("    PAO-SC-LMP2 Energy: %16.12f\n\n", e_sc_lmp2);
 
-    if constexpr (crude) return e_ijs;
-
-    e_lmp2_non_trunc_ = e_sc_lmp2;
-
-    if (!options_.get_bool("APPROX_PAO_LMP2")) {
-
-        outfile->Printf("  ==> PAO-LMP2 Memory Estimate <== \n\n");
-
-        double F_CUT_PAIR = options_.get_double("F_CUT");
-
-        size_t x_pao = 0, k_pao = 0, t_pao = 0, pao_pao_overlaps = 0;
-
-#pragma omp parallel for schedule(dynamic, 1) reduction(+ : x_pao, k_pao, t_pao, pao_pao_overlaps)
+    if constexpr (!crude) {
+        // Print out PNO domain information
+        int pno_count_total = 0, pno_count_min = nbf, pno_count_max = 0;
+        de_pno_total_ = 0.0, de_pno_total_os_ = 0.0, de_pno_total_ss_ = 0.0;
         for (int ij = 0; ij < n_lmo_pairs; ++ij) {
-            auto &[i, j] = ij_to_i_j_[ij];
-
-            if (i > j) continue;
-
-            int npaos_ij = X_paos[ij]->nrow();
-            int npaos_ij_canon = X_paos[ij]->ncol();
-
-            x_pao += X_paos[ij]->size();
-            k_pao += K_paos[ij]->size();
-            t_pao += T_paos[ij]->size();
-
-            for (int k = 0; k < naocc; ++k) {
-                int kj = i_j_to_ij_[k][j];
-                int ik = i_j_to_ij_[i][k];
-                int kj_idx = (k > j) ? ij_to_ji_[kj] : kj;
-                int ik_idx = (i > k) ? ij_to_ji_[ik] : ik;
-
-                if (kj != -1 && i != k && fabs(F_lmo_->get(i, k)) > F_CUT_PAIR) {
-                    pao_pao_overlaps += npaos_ij_canon * X_paos[kj_idx]->ncol();
-                }
-                if (ik != -1 && j != k && fabs(F_lmo_->get(k, j)) > F_CUT_PAIR) {
-                    pao_pao_overlaps += npaos_ij_canon * X_paos[ik_idx]->ncol();
-                }
-            }
+            pno_count_total += n_pno_[ij];
+            pno_count_min = std::min(pno_count_min, n_pno_[ij]);
+            pno_count_max = std::max(pno_count_max, n_pno_[ij]);
+            de_pno_total_ += de_pno_[ij];
         }
 
-        const size_t total_memory = x_pao + k_pao + t_pao + pao_pao_overlaps;
-        // 2^30 bytes per GiB
-        outfile->Printf("    X_PAO                  : %.3f [GiB]\n", x_pao * pow(2.0, -30) * sizeof(double));
-        outfile->Printf("    T_PAO                  : %.3f [GiB]\n", t_pao * pow(2.0, -30) * sizeof(double));
-        outfile->Printf("    (iu|jv)                : %.3f [GiB]\n", k_pao * pow(2.0, -30) * sizeof(double));
-        outfile->Printf("    PAO/PAO overlaps       : %.3f [GiB]\n", pao_pao_overlaps * pow(2.0, -30) * sizeof(double));
-        outfile->Printf("    Total Memory Given     : %.3f [GiB]\n", memory_ * pow(2.0, -30));
-        outfile->Printf("    Total Memory Required  : %.3f [GiB]\n\n", total_memory * pow(2.0, -30) * sizeof(double));
-
-        std::vector<std::vector<SharedMatrix>> S_pao_ij_ik(n_lmo_pairs);
-        std::vector<std::vector<SharedMatrix>> S_pao_ij_kj(n_lmo_pairs);
-
-        // PAO-LMP2 can go to Dante's Inferno
-
-#pragma omp parallel for schedule(dynamic, 1)
-        for (int ij = 0; ij < n_lmo_pairs; ++ij) {
-            auto &[i, j] = ij_to_i_j_[ij];
-
-            if (i > j) continue;
-
-            S_pao_ij_ik[ij].resize(naocc);
-            S_pao_ij_kj[ij].resize(naocc);
-
-            for (int k = 0; k < naocc; ++k) {
-                int kj = i_j_to_ij_[k][j];
-                int ik = i_j_to_ij_[i][k];
-                int kj_idx = (k > j) ? ij_to_ji_[kj] : kj;
-                int ik_idx = (i > k) ? ij_to_ji_[ik] : ik;
-
-                if (kj != -1 && i != k && fabs(F_lmo_->get(i, k)) > F_CUT_PAIR) {
-                    S_pao_ij_kj[ij][k] = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[kj]);
-                    S_pao_ij_kj[ij][k] = linalg::triplet(X_paos[ij], S_pao_ij_kj[ij][k], X_paos[kj_idx], true, false, false);
-                }
-                if (ik != -1 && j != k && fabs(F_lmo_->get(k, j)) > F_CUT_PAIR) {
-                    S_pao_ij_ik[ij][k] = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[ik]);
-                    S_pao_ij_ik[ij][k] = linalg::triplet(X_paos[ij], S_pao_ij_ik[ij][k], X_paos[ik_idx], true, false, false);
-                }
-            } // end k
-        } // end ij
-
-        // Compute PAO-LMP2 Pair Energies (For both strong AND weak pairs)
-        outfile->Printf("\n  ==> Iterative Local MP2 with Projected Atomic Orbitals (PAOs) <==\n\n");
-        outfile->Printf("    E_CONVERGENCE = %.2e\n", options_.get_double("E_CONVERGENCE"));
-        outfile->Printf("    R_CONVERGENCE = %.2e\n\n", options_.get_double("R_CONVERGENCE"));
-        outfile->Printf("                         Corr. Energy    Delta E     Max R     Time (s)\n");
-
-        int iteration = 0, max_iteration = options_.get_int("DLPNO_MAXITER");
-        double e_curr = 0.0, e_prev = 0.0, r_curr = 0.0;
-        bool e_converged = false, r_converged = false;
-
-        // Calculate residuals from current amplitudes
-        while (!(e_converged && r_converged)) {
-            // RMS of residual per LMO pair, for assessing convergence
-            std::vector<double> R_iajb_rms(n_lmo_pairs, 0.0);
-            std::time_t time_start = std::time(nullptr);
-
-            // Calculate residuals from current amplitudes
-    #pragma omp parallel for schedule(dynamic, 1)
-            for (int ij = 0; ij < n_lmo_pairs; ++ij) {
-                int i, j;
-                std::tie(i, j) = ij_to_i_j_[ij];
-
-                if (i > j) continue;
-
-                int npao_ij = e_paos[ij]->dim(0);
-
-                auto R_ij = std::make_shared<Matrix>("Residual", npao_ij, npao_ij);
-
-                for (int a = 0; a < npao_ij; ++a) {
-                    for (int b = 0; b < npao_ij; ++b) {
-                        R_ij->set(a, b, K_paos[ij]->get(a, b) + (e_paos[ij]->get(a) + e_paos[ij]->get(b) - F_lmo_->get(i, i) - F_lmo_->get(j, j)) *
-                                                T_paos[ij]->get(a, b));
-                    }
-                }
-
-                for (int k = 0; k < naocc; ++k) {
-                    int kj = i_j_to_ij_[k][j];
-                    int ik = i_j_to_ij_[i][k];
-                    int kj_idx = (k > j) ? ij_to_ji_[kj] : kj;
-                    int ik_idx = (i > k) ? ij_to_ji_[ik] : ik;
-
-                    if (kj != -1 && i != k && fabs(F_lmo_->get(i, k)) > F_CUT_PAIR) {
-                        auto S_ij_kj = S_pao_ij_kj[ij][k];
-                        SharedMatrix T_pao_kj = (k > j) ? T_paos[kj_idx]->transpose() : T_paos[kj];
-                        auto temp = linalg::triplet(S_ij_kj, T_pao_kj, S_ij_kj, false, false, true);
-                        temp->scale(-1.0 * F_lmo_->get(i, k));
-                        R_ij->add(temp);
-                    }
-                    if (ik != -1 && j != k && fabs(F_lmo_->get(k, j)) > F_CUT_PAIR) {
-                        auto S_ij_ik = S_pao_ij_ik[ij][k];
-                        SharedMatrix T_pao_ik = (i > k) ? T_paos[ik_idx]->transpose() : T_paos[ik];
-                        auto temp = linalg::triplet(S_ij_ik, T_pao_ik, S_ij_ik, false, false, true);
-                        temp->scale(-1.0 * F_lmo_->get(k, j));
-                        R_ij->add(temp);
-                    }
-                }
-
-                // use residuals to get next amplitudes
-                for (int a = 0; a < npao_ij; ++a) {
-                    for (int b = 0; b < npao_ij; ++b) {
-                        T_paos[ij]->add(a, b, -R_ij->get(a, b) / ((e_paos[ij]->get(a) + e_paos[ij]->get(b)) -
-                                            (F_lmo_->get(i, i) + F_lmo_->get(j, j))));
-                    }
-                }
-
-                R_iajb_rms[ij] = R_ij->rms();
-            }
-
-            // evaluate convergence using current amplitudes and residuals
-            e_prev = e_curr;
-            e_curr = 0.0;
-    #pragma omp parallel for schedule(dynamic, 1) reduction(+ : e_curr)
-            for (int ij = 0; ij < n_lmo_pairs; ++ij) {
-                auto &[i, j] = ij_to_i_j_[ij];
-
-                if (i > j) continue;
-
-                auto Tt_pao_ij = T_paos[ij]->clone();
-                Tt_pao_ij->scale(2.0);
-                Tt_pao_ij->subtract(T_paos[ij]->transpose());
-
-                e_ijs[ij] = K_paos[ij]->vector_dot(Tt_pao_ij);
-                double prefactor = (i == j) ? 1.0 : 2.0;
-                e_curr += prefactor * e_ijs[ij];
-
-                if (i != j) {
-                    int ji = ij_to_ji_[ij];
-                    e_ijs[ji] = e_ijs[ij];
-                }
-            }
-            r_curr = *max_element(R_iajb_rms.begin(), R_iajb_rms.end());
-
-            r_converged = (fabs(r_curr) < options_.get_double("R_CONVERGENCE"));
-            e_converged = (fabs(e_curr - e_prev) < options_.get_double("E_CONVERGENCE"));
-
-            std::time_t time_stop = std::time(nullptr);
-
-            outfile->Printf("  @PAO-LMP2 iter %3d: %16.12f %10.3e %10.3e %8d\n", iteration, e_curr, e_curr - e_prev, r_curr, (int)time_stop - (int)time_start);
-
-            iteration++;
-
-            if (iteration > max_iteration) {
-                throw PSIEXCEPTION("Maximum DLPNO iterations exceeded.");
-            }
-        }
-        e_lmp2_non_trunc_ = e_curr;
-
-        outfile->Printf("\n    PAO-LMP2 Iteration Energy: %16.12f\n\n", e_lmp2_non_trunc_);
-    } // end if
-
-    outfile->Printf("\n  ==> Forming Pair Natural Orbitals <==\n");
-    
-    K_iajb_.resize(n_lmo_pairs);   // exchange operators (i.e. (ia|jb) integrals)
-    T_iajb_.resize(n_lmo_pairs);   // amplitudes
-    Tt_iajb_.resize(n_lmo_pairs);  // antisymmetrized amplitudes
-    X_pno_.resize(n_lmo_pairs);    // global PAOs -> canonical PNOs
-    e_pno_.resize(n_lmo_pairs);    // PNO orbital energies
-    e_ij_mp2_scale_.resize(n_lmo_pairs); // MP2 scaling factor for pairs
-
-    n_pno_.resize(n_lmo_pairs);   // number of pnos
-    de_pno_.resize(n_lmo_pairs);  // PNO truncation error
-
-#pragma omp parallel for schedule(dynamic, 1)
-    for (int ij = 0; ij < n_lmo_pairs; ++ij) {
-        int i, j;
-        std::tie(i, j) = ij_to_i_j_[ij];
-        int ji = ij_to_ji_[ij];
-
-        if (i > j) continue;
-
-        // number of PAOs in the pair domain (before removing linear dependencies)
-        int npao_ij = lmopair_to_paos_[ij].size();
-
-        // Read in previously saved information
-        SharedMatrix X_pao_ij = X_paos[ij];
-        SharedVector e_pao_ij = e_paos[ij];
-        SharedMatrix K_pao_ij = K_paos[ij];
-        SharedMatrix T_pao_ij = T_paos[ij];
-        SharedMatrix Tt_pao_ij = T_paos[ij]->clone();
-        Tt_pao_ij->scale(2.0);
-        Tt_pao_ij->subtract(T_paos[ij]->transpose());
-
-        // Compute orthocanonical PAO Fock matrix
-        auto F_pao_ij = submatrix_rows_and_cols(*F_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[ij]);
-        F_pao_ij = linalg::triplet(X_pao_ij, F_pao_ij, X_pao_ij, true, false, false);
-
-        // Construct pair density from amplitudes
-        auto D_ij = linalg::doublet(Tt_pao_ij, T_pao_ij, false, true);
-        D_ij->add(linalg::doublet(Tt_pao_ij, T_pao_ij, true, false));
-
-        int nvir_ij = F_pao_ij->rowspi(0);
-
-        // Diagonalization of pair density gives PNOs (in basis of the LMO's virtual domain) and PNO occ numbers
-        auto X_pno_ij = std::make_shared<Matrix>("eigenvectors", nvir_ij, nvir_ij);
-        Vector pno_occ("eigenvalues", nvir_ij);
-        D_ij->diagonalize(*X_pno_ij, pno_occ, descending);
-
-        double t_cut_scale = (i == j) ? T_CUT_PNO_DIAG_SCALE_ : 1.0;
-
-        int nvir_ij_final = 0;
-        for (size_t a = 0; a < nvir_ij; ++a) {
-            if (fabs(pno_occ.get(a)) >= t_cut_scale * T_CUT_PNO_) {
-                nvir_ij_final++;
-            }
-        }
-        // Make sure there is at least one PNO per pair :)
-        nvir_ij_final = std::max(1, nvir_ij_final);
-
-        Dimension zero(1);
-        Dimension dim_final(1);
-        dim_final.fill(nvir_ij_final);
-
-        // This transformation gives orbitals that are orthonormal but not canonical
-        X_pno_ij = X_pno_ij->get_block({zero, X_pno_ij->rowspi()}, {zero, dim_final});
-        pno_occ = pno_occ.get_block({zero, dim_final});
-
-        SharedMatrix pno_canon;
-        SharedVector e_pno_ij;
-        std::tie(pno_canon, e_pno_ij) = canonicalizer(X_pno_ij, F_pao_ij);
-
-        // This transformation gives orbitals that are orthonormal and canonical
-        X_pno_ij = linalg::doublet(X_pno_ij, pno_canon, false, false);
-
-        auto K_pno_ij = linalg::triplet(X_pno_ij, K_pao_ij, X_pno_ij, true, false, false);
-        auto T_pno_ij = linalg::triplet(X_pno_ij, T_pao_ij, X_pno_ij, true, false, false);
-        auto Tt_pno_ij = linalg::triplet(X_pno_ij, Tt_pao_ij, X_pno_ij, true, false, false);
-
-        // mp2 energy of this LMO pair after transformation to PNOs and truncation
-        double e_ij_trunc = K_pno_ij->vector_dot(Tt_pno_ij);
-        e_ij_mp2_scale_[ij] = e_ijs[ij] / e_ij_trunc;
-
-        // truncation error
-        double de_pno_ij = e_ijs[ij] - e_ij_trunc;
-
-        X_pno_ij = linalg::doublet(X_pao_ij, X_pno_ij, false, false);
-
-        K_iajb_[ij] = K_pno_ij;
-        T_iajb_[ij] = T_pno_ij;
-        Tt_iajb_[ij] = Tt_pno_ij;
-        X_pno_[ij] = X_pno_ij;
-        e_pno_[ij] = e_pno_ij;
-        n_pno_[ij] = X_pno_ij->colspi(0);
-        de_pno_[ij] = de_pno_ij;
-
-        // account for symmetry
-        if (i < j) {
-            K_iajb_[ji] = K_iajb_[ij]->transpose();
-            T_iajb_[ji] = T_iajb_[ij]->transpose();
-            Tt_iajb_[ji] = Tt_iajb_[ij]->transpose();
-            X_pno_[ji] = X_pno_[ij];
-            e_pno_[ji] = e_pno_[ij];
-            n_pno_[ji] = n_pno_[ij];
-            de_pno_[ji] = de_pno_ij;
-            e_ij_mp2_scale_[ji] = e_ij_mp2_scale_[ij];
-        } // end if (i < j)
+        outfile->Printf("  \n");
+        outfile->Printf("    Natural Orbitals per Local MO pair:\n");
+        outfile->Printf("      Avg: %3d NOs \n", pno_count_total / n_lmo_pairs);
+        outfile->Printf("      Min: %3d NOs \n", pno_count_min);
+        outfile->Printf("      Max: %3d NOs \n", pno_count_max);
+        outfile->Printf("  \n");
+        outfile->Printf("    PNO truncation energy = %.12f\n", de_pno_total_);
     }
-
-    // Print out PNO domain information
-    int pno_count_total = 0, pno_count_min = nbf, pno_count_max = 0;
-    de_pno_total_ = 0.0, de_pno_total_os_ = 0.0, de_pno_total_ss_ = 0.0;
-    for (int ij = 0; ij < n_lmo_pairs; ++ij) {
-        pno_count_total += n_pno_[ij];
-        pno_count_min = std::min(pno_count_min, n_pno_[ij]);
-        pno_count_max = std::max(pno_count_max, n_pno_[ij]);
-        de_pno_total_ += de_pno_[ij];
-    }
-
-    outfile->Printf("  \n");
-    outfile->Printf("    Natural Orbitals per Local MO pair:\n");
-    outfile->Printf("      Avg: %3d NOs \n", pno_count_total / n_lmo_pairs);
-    outfile->Printf("      Min: %3d NOs \n", pno_count_min);
-    outfile->Printf("      Max: %3d NOs \n", pno_count_max);
-    outfile->Printf("  \n");
-    outfile->Printf("    PNO truncation energy = %.12f\n", de_pno_total_);
 
     return e_ijs;
 }
 
 void DLPNOCCSD::pno_lmp2_iterations() {
 
+    int nbf = basisset_->nbf();
     int naocc = i_j_to_ij_.size();
     int n_lmo_pairs = ij_to_i_j_.size();
+
+    outfile->Printf("  ==> PNO-LMP2 Memory Estimate <== \n\n");
+
+    double F_CUT_PAIR = options_.get_double("F_CUT");
+
+    size_t pno_overlap_memory = 0;
+#pragma omp parallel for schedule(dynamic, 1) reduction(+ : pno_overlap_memory)
+    for (int ij = 0; ij < n_lmo_pairs; ++ij) {
+        auto &[i, j] = ij_to_i_j_[ij];
+
+        if (i > j) continue;
+
+        for (int k = 0; k < naocc; ++k) {
+            int kj = i_j_to_ij_[k][j];
+            int ik = i_j_to_ij_[i][k];
+
+            if (kj != -1 && i != k && fabs(F_lmo_->get(i, k)) > F_CUT_PAIR) {
+                pno_overlap_memory += n_pno_[ij] * n_pno_[kj];
+            }
+            if (ik != -1 && j != k && fabs(F_lmo_->get(k, j)) > F_CUT_PAIR) {
+                pno_overlap_memory += n_pno_[ij] * n_pno_[ik];
+            }
+        }
+    }
+        
+    // 2^30 bytes per GiB
+    outfile->Printf("    PNO/PNO overlaps       : %.3f [GiB]\n", pno_overlap_memory * pow(2.0, -30) * sizeof(double));
+    outfile->Printf("    Total Memory Given     : %.3f [GiB]\n\n", memory_ * pow(2.0, -30));
+
+    std::vector<std::vector<SharedMatrix>> S_pno_ij_ik(n_lmo_pairs);
+    std::vector<std::vector<SharedMatrix>> S_pno_ij_kj(n_lmo_pairs);
+
+#pragma omp parallel for schedule(dynamic, 1)
+    for (int ij = 0; ij < n_lmo_pairs; ++ij) {
+        auto &[i, j] = ij_to_i_j_[ij];
+
+        if (i > j) continue;
+
+        S_pno_ij_ik[ij].resize(naocc);
+        S_pno_ij_kj[ij].resize(naocc);
+
+        for (int k = 0; k < naocc; ++k) {
+            int kj = i_j_to_ij_[k][j];
+            int ik = i_j_to_ij_[i][k];
+
+            if (kj != -1 && i != k && fabs(F_lmo_->get(i, k)) > F_CUT_PAIR) {
+                S_pno_ij_kj[ij][k] = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[kj]);
+                S_pno_ij_kj[ij][k] = linalg::triplet(X_pno_[ij], S_pno_ij_kj[ij][k], X_pno_[kj], true, false, false);
+            }
+            if (ik != -1 && j != k && fabs(F_lmo_->get(k, j)) > F_CUT_PAIR) {
+                S_pno_ij_ik[ij][k] = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[ik]);
+                S_pno_ij_ik[ij][k] = linalg::triplet(X_pno_[ij], S_pno_ij_ik[ij][k], X_pno_[ik], true, false, false);
+            }
+        } // end k
+    } // end ij
 
     // => Computing Truncated LMP2 energies (basically running DLPNO-MP2 here)
     outfile->Printf("\n  ==> Iterative Local MP2 with Pair Natural Orbitals (PNOs) <==\n\n");
@@ -676,8 +525,6 @@ void DLPNOCCSD::pno_lmp2_iterations() {
     outfile->Printf("    R_CONVERGENCE = %.2e\n\n", options_.get_double("R_CONVERGENCE"));
     outfile->Printf("                         Corr. Energy    Delta E     Max R     Time (s)\n");
 
-    std::vector<double> e_ij_adj(n_lmo_pairs);
-    std::vector<double> e_ij_pno(n_lmo_pairs);
     std::vector<SharedMatrix> R_iajb(n_lmo_pairs);
 
     int iteration = 0, max_iteration = options_.get_int("DLPNO_MAXITER");
@@ -716,12 +563,14 @@ void DLPNOCCSD::pno_lmp2_iterations() {
                 int ik = i_j_to_ij_[i][k];
 
                 if (kj != -1 && i != k && fabs(F_lmo_->get(i, k)) > options_.get_double("F_CUT") && n_pno_[kj] > 0) {
-                    auto temp = linalg::triplet(S_PNO(ij, kj), T_iajb_[kj], S_PNO(kj, ij));
+                    auto S_ij_kj = S_pno_ij_kj[ij][k];
+                    auto temp = linalg::triplet(S_ij_kj, T_iajb_[kj], S_ij_kj, false, false, true);
                     temp->scale(-1.0 * F_lmo_->get(i, k));
                     R_iajb[ij]->add(temp);
                 }
                 if (ik != -1 && j != k && fabs(F_lmo_->get(k, j)) > options_.get_double("F_CUT") && n_pno_[ik] > 0) {
-                    auto temp = linalg::triplet(S_PNO(ij, ik), T_iajb_[ik], S_PNO(ik, ij));
+                    auto S_ij_ik = S_pno_ij_ik[ij][k];
+                    auto temp = linalg::triplet(S_ij_ik, T_iajb_[ik], S_ij_ik, false, false, true);
                     temp->scale(-1.0 * F_lmo_->get(k, j));
                     R_iajb[ij]->add(temp);
                 }
@@ -764,9 +613,7 @@ void DLPNOCCSD::pno_lmp2_iterations() {
             int i, j;
             std::tie(i, j) = ij_to_i_j_[ij];
 
-            e_ij_pno[ij] = K_iajb_[ij]->vector_dot(Tt_iajb_[ij]);
-            e_curr += e_ij_pno[ij];
-            e_ij_adj[ij] = e_ij_pno[ij] * e_ij_mp2_scale_[ij];
+            e_curr += K_iajb_[ij]->vector_dot(Tt_iajb_[ij]);
         }
         r_curr = *max_element(R_iajb_rms.begin(), R_iajb_rms.end());
 
@@ -784,26 +631,110 @@ void DLPNOCCSD::pno_lmp2_iterations() {
         }
     }
 
-    // Recompute weak pair correction and pno truncation error (if using approximate PAO-LMP2 energy)
-    if (options_.get_bool("APPROX_PAO_LMP2")) {
-        double de_weak = 0.0, de_pno = 0.0;
-#pragma omp parallel for schedule(dynamic, 1) reduction(+ : de_weak, de_pno)
-        for (int ij = 0; ij < n_lmo_pairs; ++ij) {
-            int i, j;
-            std::tie(i, j) = ij_to_i_j_[ij];
+    // Recompute Pair Natural Orbitals for LCCSD iterations
 
-            if (i_j_to_ij_strong_[i][j] != -1) {
-                de_pno += (e_ij_adj[ij] - e_ij_pno[ij]);
-            } else {
-                de_weak += e_ij_adj[ij];
+    outfile->Printf("\n  ==> Forming Pair Natural Orbitals (for LCCSD) <==\n");
+
+#pragma omp parallel for schedule(dynamic, 1)
+    for (int ij = 0; ij < n_lmo_pairs; ++ij) {
+        auto &[i, j] = ij_to_i_j_[ij];
+        int ji = ij_to_ji_[ij];
+
+        if (i > j) continue;
+
+        auto F_pao_ij = submatrix_rows_and_cols(*F_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[ij]);
+        auto F_pno_ij_init = linalg::triplet(X_pno_[ij], F_pao_ij, X_pno_[ij], true, false, false);
+
+        // Construct pair density from amplitudes
+        auto D_ij = linalg::doublet(Tt_iajb_[ij], T_iajb_[ij], false, true);
+        D_ij->add(linalg::doublet(Tt_iajb_[ij], T_iajb_[ij], true, false));
+
+        int nvir_ij = F_pno_ij_init->rowspi(0);
+
+        // Diagonalization of pair density gives PNOs (in basis of the LMO's virtual domain) and PNO occ numbers
+        auto X_pno_ij = std::make_shared<Matrix>("eigenvectors", nvir_ij, nvir_ij);
+        Vector pno_occ("eigenvalues", nvir_ij);
+        D_ij->diagonalize(*X_pno_ij, pno_occ, descending);
+
+        double t_cut_scale = (i == j) ? T_CUT_PNO_DIAG_SCALE_ : 1.0;
+        // For weak pairs, DO NOT TRUNCATE from original PNO space
+        double tolerance = (i_j_to_ij_strong_[i][j] == -1) ? 0.0 : t_cut_scale * T_CUT_PNO_;
+
+        int nvir_ij_final = 0;
+        for (size_t a = 0; a < nvir_ij; ++a) {
+            if (fabs(pno_occ.get(a)) >= tolerance) {
+                nvir_ij_final++;
             }
         }
-        de_lmp2_weak_ = de_weak;
-        de_pno_total_ = de_pno;
-        outfile->Printf("\n    Using approximate PAO-LMP2 energies...\n\n");
-        outfile->Printf("    (Corrected) Weak pair energy      = %.12f\n", de_lmp2_weak_);
-        outfile->Printf("    (Corrected) PNO truncation energy = %.12f\n", de_pno_total_);
+        // Make sure there is at least one PNO per pair :)
+        nvir_ij_final = std::max(1, nvir_ij_final);
+
+        Dimension zero(1);
+        Dimension dim_final(1);
+        dim_final.fill(nvir_ij_final);
+
+        // This transformation gives orbitals that are orthonormal but not canonical
+        X_pno_ij = X_pno_ij->get_block({zero, X_pno_ij->rowspi()}, {zero, dim_final});
+        pno_occ = pno_occ.get_block({zero, dim_final});
+
+        SharedMatrix pno_canon;
+        SharedVector e_pno_ij;
+        std::tie(pno_canon, e_pno_ij) = canonicalizer(X_pno_ij, F_pno_ij_init);
+
+        // This transformation gives orbitals that are orthonormal and canonical
+        X_pno_ij = linalg::doublet(X_pno_ij, pno_canon, false, false);
+
+        auto K_pno_ij = linalg::triplet(X_pno_ij, K_iajb_[ij], X_pno_ij, true, false, false);
+        auto T_pno_ij = linalg::triplet(X_pno_ij, T_iajb_[ij], X_pno_ij, true, false, false);
+        auto Tt_pno_ij = linalg::triplet(X_pno_ij, Tt_iajb_[ij], X_pno_ij, true, false, false);
+
+        // (additional) truncation error
+        double de_pno_ij = K_iajb_[ij]->vector_dot(Tt_iajb_[ij]) - K_pno_ij->vector_dot(Tt_pno_ij);
+
+        // New PNO transformation matrix
+        X_pno_ij = linalg::doublet(X_pno_[ij], X_pno_ij, false, false);
+
+        K_iajb_[ij] = K_pno_ij;
+        T_iajb_[ij] = T_pno_ij;
+        Tt_iajb_[ij] = Tt_pno_ij;
+        X_pno_[ij] = X_pno_ij;
+        e_pno_[ij] = e_pno_ij;
+        n_pno_[ij] = X_pno_ij->colspi(0);
+        de_pno_[ij] += de_pno_ij;
+
+        // account for symmetry
+        if (i < j) {
+            K_iajb_[ji] = K_iajb_[ij]->transpose();
+            T_iajb_[ji] = T_iajb_[ij]->transpose();
+            Tt_iajb_[ji] = Tt_iajb_[ij]->transpose();
+            X_pno_[ji] = X_pno_[ij];
+            e_pno_[ji] = e_pno_[ij];
+            n_pno_[ji] = n_pno_[ij];
+            de_pno_[ji] += de_pno_ij;
+        } // end if (i < j)
     }
+
+    // Print out PNO domain information
+    int pno_count_total = 0, pno_count_min = nbf, pno_count_max = 0;
+    de_lmp2_weak_ = 0.0, de_pno_total_ = 0.0, de_pno_total_os_ = 0.0, de_pno_total_ss_ = 0.0;
+    for (int ij = 0; ij < n_lmo_pairs; ++ij) {
+        auto &[i, j] = ij_to_i_j_[ij];
+        if (i_j_to_ij_strong_[i][j] == -1) de_lmp2_weak_ += K_iajb_[ij]->vector_dot(Tt_iajb_[ij]);
+
+        pno_count_total += n_pno_[ij];
+        pno_count_min = std::min(pno_count_min, n_pno_[ij]);
+        pno_count_max = std::max(pno_count_max, n_pno_[ij]);
+        de_pno_total_ += de_pno_[ij];
+    }
+
+    outfile->Printf("  \n");
+    outfile->Printf("    Natural Orbitals per Local MO pair:\n");
+    outfile->Printf("      Avg: %3d NOs \n", pno_count_total / n_lmo_pairs);
+    outfile->Printf("      Min: %3d NOs \n", pno_count_min);
+    outfile->Printf("      Max: %3d NOs \n", pno_count_max);
+    outfile->Printf("  \n");
+    outfile->Printf("    Weak pair energy      = %.12f\n", de_lmp2_weak_);
+    outfile->Printf("    PNO truncation energy = %.12f\n", de_pno_total_);
 
 }
 
@@ -908,21 +839,6 @@ template<bool crude> std::pair<double, double> DLPNOCCSD::filter_pairs(const std
         ij_to_ji_.push_back(i_j_to_ij_[j][i]);
     }
 
-    if constexpr (!crude) {
-        // Compute PNO truncation energy
-        // TODO: Move this somewhere else?
-        double de_pno_total = 0.0;
-    #pragma omp parallel for schedule(dynamic, 1) reduction(+ : de_pno_total)
-        for (int ij = 0; ij < ij_to_i_j_.size(); ++ij) {
-            auto &[i, j] = ij_to_i_j_[ij];
-            if (i_j_to_ij_strong_[i][j] != -1) {
-                de_pno_total += de_pno_[ij];
-            }
-        }
-        de_pno_total_ = de_pno_total;
-        outfile->Printf("    PNO truncation energy (adj for weak pairs) = %.12f\n\n", de_pno_total_);
-    }
-
     return std::make_pair(delta_e_crude, delta_e_weak);
 }
 
@@ -931,7 +847,7 @@ template<bool crude> void DLPNOCCSD::pair_prescreening() {
     int naocc = i_j_to_ij_.size();
 
     if constexpr (crude) {
-        outfile->Printf("\n  ==> Determining Strong and Weak Pairs (Crude Prescreening Step)   <==\n");
+        outfile->Printf("\n  ==> Determining Strong and Weak Pairs (Crude Prescreening Step) <==\n");
 
         int n_lmo_pairs_init = ij_to_i_j_.size();
 
@@ -2953,13 +2869,13 @@ double DLPNOCCSD::compute_energy() {
     prep_sparsity(false, true);
     timer_off("Sparsity");
 
-    timer_on("PNO Overlaps");
-    compute_pno_overlaps();
-    timer_off("PNO Overlaps");
-
     timer_on("PNO-LMP2 Iterations");
     pno_lmp2_iterations();
     timer_off("PNO-LMP2 Iterations");
+
+    timer_on("PNO Overlaps");
+    compute_pno_overlaps();
+    timer_off("PNO Overlaps");
 
     timer_on("DF Ints");
     print_integral_sparsity();

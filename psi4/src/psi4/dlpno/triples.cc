@@ -116,7 +116,7 @@ void DLPNOCCSD_T::recompute_pnos() {
     int n_lmo_pairs = ij_to_i_j_.size();
     int npao = C_pao_->colspi(0);
 
-#pragma omp parallel for schedule(guided, 1)
+#pragma omp parallel for schedule(dynamic, 1)
     for (int ij = 0; ij < n_lmo_pairs; ++ij) {
         int i, j;
         std::tie(i, j) = ij_to_i_j_[ij];
