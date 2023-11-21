@@ -116,110 +116,67 @@ void DLPNOCCSD_T::recompute_pnos() {
     int n_lmo_pairs = ij_to_i_j_.size();
     int npao = C_pao_->colspi(0);
 
+    // Recompute Pair Natural Orbitals using CCSD densities
+    outfile->Printf("\n  ==> Recomputing Pair Natural Orbitals for (T) <==\n");
+
 #pragma omp parallel for schedule(dynamic, 1)
     for (int ij = 0; ij < n_lmo_pairs; ++ij) {
         int i, j;
         std::tie(i, j) = ij_to_i_j_[ij];
         int ji = ij_to_ji_[ij];
 
-        if (i > j || n_pno_[ij] == 0) continue;
+        if (i > j) continue;
 
-        // number of PAOs in the pair domain (before removing linear dependencies)
-        int npao_ij = lmopair_to_paos_[ij].size();
-
-        //                                      //
-        // ==> Canonicalize PAOs of pair ij <== //
-        //                                      //
-
-        auto S_pao_ij = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[ij]);
         auto F_pao_ij = submatrix_rows_and_cols(*F_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[ij]);
+        auto F_pno_ij_init = linalg::triplet(X_pno_[ij], F_pao_ij, X_pno_[ij], true, false, false);
 
-        SharedMatrix X_pao_ij;  // canonical transformation of this domain's PAOs to
-        SharedVector e_pao_ij;  // energies of the canonical PAOs
-        std::tie(X_pao_ij, e_pao_ij) = orthocanonicalizer(S_pao_ij, F_pao_ij);
+        // Construct pair density from amplitudes
+        auto D_ij = linalg::doublet(Tt_iajb_[ij], T_iajb_[ij], false, true);
+        D_ij->add(linalg::doublet(Tt_iajb_[ij], T_iajb_[ij], true, false));
 
-        F_pao_ij = linalg::triplet(X_pao_ij, F_pao_ij, X_pao_ij, true, false, false);
+        int nvir_ij = F_pno_ij_init->rowspi(0);
 
-        int npao_can_ij = X_pao_ij->colspi(0);
-
-        auto T_pao_ij = T_iajb_[ij]->clone();
-        for (int a = 0; a < n_pno_[ij]; ++a) {
-            for (int b = 0; b < n_pno_[ij]; ++b) {
-                (*T_pao_ij)(a, b) =
-                    (*T_pao_ij)(a, b) * (-(*e_pno_[ij])(a) - (*e_pno_[ij])(b) + (*F_lmo_)(i, i) + (*F_lmo_)(j, j));
-            }
-        }
-        auto S_ij = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[ij]);
-        S_ij = linalg::triplet(X_pno_[ij], S_ij, X_pao_ij, true, false, false);
-        T_pao_ij = linalg::triplet(S_ij, T_pao_ij, S_ij, true, false, false);
-        for (int a = 0; a < npao_can_ij; ++a) {
-            for (int b = 0; b < npao_can_ij; ++b) {
-                (*T_pao_ij)(a, b) =
-                    (*T_pao_ij)(a, b) / (-(*e_pao_ij)(a) - (*e_pao_ij)(b) + (*F_lmo_)(i, i) + (*F_lmo_)(j, j));
-            }
-        }
-
-        size_t nvir_ij = X_pao_ij->colspi(0);
-
-        auto Tt_pao_ij = T_pao_ij->clone();
-        Tt_pao_ij->scale(2.0);
-        Tt_pao_ij->subtract(T_pao_ij->transpose());
-
-        auto D_ij = linalg::doublet(Tt_pao_ij, T_pao_ij, false, true);
-        D_ij->add(linalg::doublet(Tt_pao_ij, T_pao_ij, true, false));
-
+        // Diagonalization of pair density gives PNOs (in basis of the LMO's virtual domain) and PNO occ numbers
         auto X_pno_ij = std::make_shared<Matrix>("eigenvectors", nvir_ij, nvir_ij);
         Vector pno_occ("eigenvalues", nvir_ij);
         D_ij->diagonalize(*X_pno_ij, pno_occ, descending);
 
-        double t_cut_scale = (i == j) ? T_CUT_PNO_DIAG_SCALE_ : 1.0;
-
-        int nvir_ij_final = 0;
-        for (size_t a = 0; a < nvir_ij; ++a) {
-            if (fabs(pno_occ.get(a)) >= t_cut_scale * T_CUT_TNO_) {
-                nvir_ij_final++;
-            }
-        }
-
-        Dimension zero(1);
-        Dimension dim_final(1);
-        dim_final.fill(nvir_ij_final);
-
-        // This transformation gives orbitals that are orthonormal but not canonical
-        X_pno_ij = X_pno_ij->get_block({zero, X_pno_ij->rowspi()}, {zero, dim_final});
-        pno_occ = pno_occ.get_block({zero, dim_final});
-
+        // No PNOs are truncated, the PNO space is rotated to make the natural orbitals more amenable to the CCSD virtual space
         SharedMatrix pno_canon;
         SharedVector e_pno_ij;
-        std::tie(pno_canon, e_pno_ij) = canonicalizer(X_pno_ij, F_pao_ij);
+        std::tie(pno_canon, e_pno_ij) = canonicalizer(X_pno_ij, F_pno_ij_init);
 
+        // This transformation gives orbitals that are orthonormal and canonical
         X_pno_ij = linalg::doublet(X_pno_ij, pno_canon, false, false);
 
-        auto T_pno_ij = linalg::triplet(X_pno_ij, T_pao_ij, X_pno_ij, true, false, false);
-        auto Tt_pno_ij = linalg::triplet(X_pno_ij, Tt_pao_ij, X_pno_ij, true, false, false);
-
-        X_pno_ij = linalg::doublet(X_pao_ij, X_pno_ij, false, false);
+        auto K_pno_ij = linalg::triplet(X_pno_ij, K_iajb_[ij], X_pno_ij, true, false, false);
+        auto T_pno_ij = linalg::triplet(X_pno_ij, T_iajb_[ij], X_pno_ij, true, false, false);
+        auto Tt_pno_ij = linalg::triplet(X_pno_ij, Tt_iajb_[ij], X_pno_ij, true, false, false);
 
         // Recompute singles amplitudes
         if (i == j) {
-            auto S_ii = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[ij]);
-            S_ii = linalg::triplet(X_pno_ij, S_ii, X_pno_[ij], true, false, false);
-            T_ia_[i] = linalg::doublet(S_ii, T_ia_[i], false, false);
+            T_ia_[i] = linalg::doublet(X_pno_ij, T_ia_[i], true, false);
         }
 
+        // New PNO transformation matrix
+        X_pno_ij = linalg::doublet(X_pno_[ij], X_pno_ij, false, false);
+
+        K_iajb_[ij] = K_pno_ij;
         T_iajb_[ij] = T_pno_ij;
         Tt_iajb_[ij] = Tt_pno_ij;
         X_pno_[ij] = X_pno_ij;
         e_pno_[ij] = e_pno_ij;
         n_pno_[ij] = X_pno_ij->colspi(0);
 
+        // account for symmetry
         if (i < j) {
-            T_iajb_[ji] = T_pno_ij->transpose();
-            Tt_iajb_[ji] = Tt_pno_ij->transpose();
-            X_pno_[ji] = X_pno_ij;
-            e_pno_[ji] = e_pno_ij;
-            n_pno_[ji] = X_pno_ij->colspi(0);
-        }
+            K_iajb_[ji] = K_iajb_[ij]->transpose();
+            T_iajb_[ji] = T_iajb_[ij]->transpose();
+            Tt_iajb_[ji] = Tt_iajb_[ij]->transpose();
+            X_pno_[ji] = X_pno_[ij];
+            e_pno_[ji] = e_pno_[ij];
+            n_pno_[ji] = n_pno_[ij];
+        } // end if (i < j)
     }
 
     timer_off("Recompute PNOs");
