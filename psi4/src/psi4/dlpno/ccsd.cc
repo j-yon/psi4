@@ -675,7 +675,7 @@ void DLPNOCCSD::pno_lmp2_iterations() {
 
         int nvir_ij_final = 0;
         for (size_t a = 0; a < nvir_ij; ++a) {
-            if (fabs(pno_occ.get(a)) >= tolerance) {
+            if (fabs(pno_occ.get(a)) >= t_cut_scale * T_CUT_PNO_) {
                 nvir_ij_final++;
             }
         }
