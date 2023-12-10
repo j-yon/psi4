@@ -672,8 +672,6 @@ void DLPNOCCSD::pno_lmp2_iterations() {
         D_ij->diagonalize(*X_pno_ij, pno_occ, descending);
 
         double t_cut_scale = (i == j) ? T_CUT_PNO_DIAG_SCALE_ : 1.0;
-        // For weak pairs, DO NOT TRUNCATE from original PNO space
-        double tolerance = (i_j_to_ij_strong_[i][j] == -1) ? 0.0 : t_cut_scale * T_CUT_PNO_;
 
         int nvir_ij_final = 0;
         for (size_t a = 0; a < nvir_ij; ++a) {
