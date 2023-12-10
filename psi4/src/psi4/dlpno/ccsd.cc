@@ -365,7 +365,7 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
             Vector pno_occ("eigenvalues", nvir_ij);
             D_ij->diagonalize(*X_pno_ij, pno_occ, descending);
 
-            double t_cut_scale = (i == j) ? T_CUT_PNO_DIAG_SCALE_ : 1.0;
+            double t_cut_scale = (i == j) ? 0.0 : 1.0;
 
             int nvir_ij_final = 0;
             for (size_t a = 0; a < nvir_ij; ++a) {
