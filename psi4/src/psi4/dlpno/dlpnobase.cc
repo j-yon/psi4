@@ -67,7 +67,9 @@ void DLPNOBase::common_init() {
     debug_ = options_.get_int("DEBUG");
 
     T_CUT_PNO_ = options_.get_double("T_CUT_PNO");
+    T_CUT_TRACE_ = options_.get_double("T_CUT_TRACE");
     T_CUT_PNO_MP2_ = options_.get_double("T_CUT_PNO_MP2");
+    T_CUT_TRACE_MP2_ = options_.get_double("T_CUT_TRACE_MP2");
     T_CUT_PNO_DIAG_SCALE_ = options_.get_double("T_CUT_PNO_DIAG_SCALE");
     T_CUT_DO_ = options_.get_double("T_CUT_DO");
     T_CUT_PAIRS_ = options_.get_double("T_CUT_PAIRS");

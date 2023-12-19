@@ -60,8 +60,12 @@ class DLPNOBase : public Wavefunction {
       double T_CUT_DO_;
       /// threshold for PNO truncation
       double T_CUT_PNO_;
+      /// trace threshold for PNO truncation
+      double T_CUT_TRACE_;
       /// threshold for PNO truncation for MP2 pairs (for DLPNO-CC methods)
       double T_CUT_PNO_MP2_;
+      /// trace threshold for PNO truncation for MP2 pairs (for DLPNO-CC methods)
+      double T_CUT_TRACE_MP2_;
       /// tolerance to separate pairs into CCSD and MP2 pairs
       double T_CUT_PAIRS_;
       /// tolerance to separate MP2 pairs in between crude and refined prescreening
@@ -127,10 +131,12 @@ class DLPNOBase : public Wavefunction {
       std::vector<SharedMatrix> Tt_iajb_; ///< antisymmetrized amplitudes
       std::vector<SharedMatrix> X_pno_;   ///< global PAO -> canonical PNO transforms
       std::vector<SharedVector> e_pno_;   ///< PNO orbital energies
-      std::vector<int> n_pno_;       ///< number of pnos
-      std::vector<double> de_pno_;   ///< PNO truncation energy error
-      std::vector<double> de_pno_os_;   ///< opposite-spin contributions to de_pno_
-      std::vector<double> de_pno_ss_;   ///< same-spin contributions to de_pno_
+      std::vector<int> n_pno_;            ///< number of pnos
+      std::vector<double> occ_pno_;       ///< lowest PNO occupation number per PNO
+      std::vector<double> trace_pno_;     ///< total trace(Dij) recovered per PNO
+      std::vector<double> de_pno_;        ///< PNO truncation energy error
+      std::vector<double> de_pno_os_;     ///< opposite-spin contributions to de_pno_
+      std::vector<double> de_pno_ss_;     ///< same-spin contributions to de_pno_
 
       /// pre-screening energies
       double de_dipole_; ///< energy correction for distant (LMO, LMO) pairs

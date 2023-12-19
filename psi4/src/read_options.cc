@@ -2515,8 +2515,12 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
 
         /*- Occupation number threshold for removing PNOs !expert -*/
         options.add_double("T_CUT_PNO", 1e-8);
+        /*- Occupation trace sum threshold for removing PNOs !expert -*/
+        options.add_double("T_CUT_TRACE", 0.999);
         /*- Occupation number threshold for removing PNOs (for MP2 prescreening) !expert -*/
         options.add_double("T_CUT_PNO_MP2", 1e-10);
+        /*- Occupation trace sum threshold for removing PNOs (for MP2 prescreening) !expert -*/
+        options.add_double("T_CUT_TRACE_MP2", 0.9999);
         /*- How much to scale T_CUT_PNO by for diagonal PNOs !expert */
         options.add_double("T_CUT_PNO_DIAG_SCALE", 3e-2);
         /*- DOI threshold for including PAO (u) in domain of LMO (i) !expert -*/

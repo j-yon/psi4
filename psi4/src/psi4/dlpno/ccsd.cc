@@ -260,6 +260,8 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
         e_pno_.resize(n_lmo_pairs);
 
         n_pno_.resize(n_lmo_pairs);
+        occ_pno_.resize(n_lmo_pairs);
+        trace_pno_.resize(n_lmo_pairs);
         de_pno_.resize(n_lmo_pairs);
         // de_pno_os_.resize(n_lmo_pairs);
         // de_pno_ss_.resize(n_lmo_pairs);
@@ -367,9 +369,16 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
 
             double t_cut_scale = (i == j) ? 0.0 : 1.0;
 
+            double occ_total = 0.0;
+            for (size_t a = 0; a < nvir_ij; ++a) {
+                occ_total += pno_occ.get(a);
+            }
+
+            double occ_pno = 0.0;
             int nvir_ij_final = 0;
             for (size_t a = 0; a < nvir_ij; ++a) {
-                if (fabs(pno_occ.get(a)) >= t_cut_scale * T_CUT_PNO_MP2_) {
+                if (fabs(pno_occ.get(a)) >= t_cut_scale * T_CUT_PNO_MP2_ || occ_pno / occ_total < T_CUT_TRACE_MP2_) {
+                    occ_pno += pno_occ.get(a);
                     nvir_ij_final++;
                 }
             }
@@ -414,6 +423,8 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
             X_pno_[ij] = X_pno_ij;
             e_pno_[ij] = e_pno_ij;
             n_pno_[ij] = X_pno_ij->colspi(0);
+            occ_pno_[ij] = pno_occ.get(n_pno_[ij] - 1);
+            trace_pno_[ij] = occ_pno / occ_total;
             de_pno_[ij] = de_pno_ij;
             // de_pno_os_[ij] = de_pno_ij_os;
             // de_pno_ss_[ij] = de_pno_ij_ss;
@@ -426,6 +437,8 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
                 X_pno_[ji] = X_pno_[ij];
                 e_pno_[ji] = e_pno_[ij];
                 n_pno_[ji] = n_pno_[ij];
+                occ_pno_[ji] = occ_pno_[ij];
+                trace_pno_[ji] = trace_pno_[ij];
                 de_pno_[ji] = de_pno_ij;
                 // de_pno_os_[ji] = de_pno_ij_os;
                 // de_pno_ss_[ji] = de_pno_ij_ss;
@@ -438,11 +451,19 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
     if constexpr (!crude) {
         // Print out PNO domain information
         int pno_count_total = 0, pno_count_min = nbf, pno_count_max = 0;
+        double occ_number_total = 0.0, occ_number_min = 2.0, occ_number_max = 0.0;
+        double trace_total = 0.0, trace_min = 1.0, trace_max = 0.0;
         de_pno_total_ = 0.0, de_pno_total_os_ = 0.0, de_pno_total_ss_ = 0.0;
         for (int ij = 0; ij < n_lmo_pairs; ++ij) {
             pno_count_total += n_pno_[ij];
             pno_count_min = std::min(pno_count_min, n_pno_[ij]);
             pno_count_max = std::max(pno_count_max, n_pno_[ij]);
+            occ_number_total += occ_pno_[ij];
+            occ_number_min = std::min(occ_number_min, occ_pno_[ij]);
+            occ_number_max = std::max(occ_number_max, occ_pno_[ij]);
+            trace_total += trace_pno_[ij];
+            trace_min = std::min(trace_min, trace_pno_[ij]);
+            trace_max = std::max(trace_max, trace_pno_[ij]);
             de_pno_total_ += de_pno_[ij];
         }
 
@@ -451,6 +472,12 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
         outfile->Printf("      Avg: %3d NOs \n", pno_count_total / n_lmo_pairs);
         outfile->Printf("      Min: %3d NOs \n", pno_count_min);
         outfile->Printf("      Max: %3d NOs \n", pno_count_max);
+        outfile->Printf("      Avg Occ Number Tol: %.3e \n", occ_number_total / n_lmo_pairs);
+        outfile->Printf("      Min Occ Number Tol: %.3e \n", occ_number_min);
+        outfile->Printf("      Max Occ Number Tol: %.3e \n", occ_number_max);
+        outfile->Printf("      Avg Trace Sum: %.6f \n", trace_total / n_lmo_pairs);
+        outfile->Printf("      Min Trace Sum: %.6f \n", trace_min);
+        outfile->Printf("      Max Trace Sum: %.6f \n", trace_max);
         outfile->Printf("  \n");
         outfile->Printf("    PNO truncation energy = %.12f\n", de_pno_total_);
     }
@@ -673,9 +700,16 @@ void DLPNOCCSD::pno_lmp2_iterations() {
 
         double t_cut_scale = (i == j) ? T_CUT_PNO_DIAG_SCALE_ : 1.0;
 
+        double occ_total = 0.0;
+        for (size_t a = 0; a < nvir_ij; ++a) {
+            occ_total += pno_occ.get(a);
+        }
+
+        double occ_pno = 0.0;
         int nvir_ij_final = 0;
         for (size_t a = 0; a < nvir_ij; ++a) {
-            if (fabs(pno_occ.get(a)) >= t_cut_scale * T_CUT_PNO_) {
+            if (fabs(pno_occ.get(a)) >= t_cut_scale * T_CUT_PNO_ || occ_pno / occ_total < T_CUT_TRACE_) {
+                occ_pno += pno_occ.get(a);
                 nvir_ij_final++;
             }
         }
@@ -713,6 +747,8 @@ void DLPNOCCSD::pno_lmp2_iterations() {
         X_pno_[ij] = X_pno_ij;
         e_pno_[ij] = e_pno_ij;
         n_pno_[ij] = X_pno_ij->colspi(0);
+        occ_pno_[ij] = pno_occ.get(n_pno_[ij] - 1);
+        trace_pno_[ij] = occ_pno / occ_total;
         de_pno_[ij] += de_pno_ij;
 
         // account for symmetry
@@ -723,12 +759,16 @@ void DLPNOCCSD::pno_lmp2_iterations() {
             X_pno_[ji] = X_pno_[ij];
             e_pno_[ji] = e_pno_[ij];
             n_pno_[ji] = n_pno_[ij];
+            occ_pno_[ji] = occ_pno_[ij];
+            trace_pno_[ji] = trace_pno_[ij];
             de_pno_[ji] += de_pno_ij;
         } // end if (i < j)
     }
 
     // Print out PNO domain information
     int pno_count_total = 0, pno_count_min = nbf, pno_count_max = 0;
+    double occ_number_total = 0.0, occ_number_min = 2.0, occ_number_max = 0.0;
+        double trace_total = 0.0, trace_min = 1.0, trace_max = 0.0;
     de_lmp2_weak_ = 0.0, de_pno_total_ = 0.0, de_pno_total_os_ = 0.0, de_pno_total_ss_ = 0.0;
     for (int ij = 0; ij < n_lmo_pairs; ++ij) {
         auto &[i, j] = ij_to_i_j_[ij];
@@ -737,6 +777,12 @@ void DLPNOCCSD::pno_lmp2_iterations() {
         pno_count_total += n_pno_[ij];
         pno_count_min = std::min(pno_count_min, n_pno_[ij]);
         pno_count_max = std::max(pno_count_max, n_pno_[ij]);
+        occ_number_total += occ_pno_[ij];
+        occ_number_min = std::min(occ_number_min, occ_pno_[ij]);
+        occ_number_max = std::max(occ_number_max, occ_pno_[ij]);
+        trace_total += trace_pno_[ij];
+        trace_min = std::min(trace_min, trace_pno_[ij]);
+        trace_max = std::max(trace_max, trace_pno_[ij]);
         de_pno_total_ += de_pno_[ij];
     }
 
@@ -745,6 +791,12 @@ void DLPNOCCSD::pno_lmp2_iterations() {
     outfile->Printf("      Avg: %3d NOs \n", pno_count_total / n_lmo_pairs);
     outfile->Printf("      Min: %3d NOs \n", pno_count_min);
     outfile->Printf("      Max: %3d NOs \n", pno_count_max);
+    outfile->Printf("      Avg Occ Number Tol: %.3e \n", occ_number_total / n_lmo_pairs);
+    outfile->Printf("      Min Occ Number Tol: %.3e \n", occ_number_min);
+    outfile->Printf("      Max Occ Number Tol: %.3e \n", occ_number_max);
+    outfile->Printf("      Avg Trace Sum: %.6f \n", trace_total / n_lmo_pairs);
+    outfile->Printf("      Min Trace Sum: %.6f \n", trace_min);
+    outfile->Printf("      Max Trace Sum: %.6f \n", trace_max);
     outfile->Printf("  \n");
     outfile->Printf("    Weak pair energy      = %.12f\n", de_lmp2_weak_);
     outfile->Printf("    PNO truncation energy = %.12f\n", de_pno_total_);
