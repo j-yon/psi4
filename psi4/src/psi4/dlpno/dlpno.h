@@ -335,6 +335,7 @@ class DLPNOCCSD : public DLPNOBase {
     /// (0 occupied, 4 virtual)
 
     // DF Integrals (Used in DLPNO-T1-CCSD)
+    std::vector<std::vector<SharedMatrix>> Qmn_ij_; // (q_ij | m_ij n_ij)
     std::vector<std::vector<SharedMatrix>> Qma_ij_; // (q_ij | m_ij a_ij)
     std::vector<std::vector<SharedMatrix>> Qab_ij_; // (q_ij | a_ij b_ij)
 
@@ -347,6 +348,7 @@ class DLPNOCCSD : public DLPNOBase {
     SharedMatrix Fkj_;
     std::vector<SharedMatrix> Fkc_;
     std::vector<SharedMatrix> Fai_;
+    std::vector<SharedMatrix> Fab_;
 
     double e_lccsd_; ///< raw (uncorrected) local CCSD correlation energy
 
