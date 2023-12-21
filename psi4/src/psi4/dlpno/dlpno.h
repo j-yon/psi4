@@ -62,10 +62,14 @@ class DLPNOBase : public Wavefunction {
       double T_CUT_PNO_;
       /// trace threshold for PNO truncation
       double T_CUT_TRACE_;
+      /// pair energy threshold for PNO truncation
+      double T_CUT_ENERGY_;
       /// threshold for PNO truncation for MP2 pairs (for DLPNO-CC methods)
       double T_CUT_PNO_MP2_;
       /// trace threshold for PNO truncation for MP2 pairs (for DLPNO-CC methods)
       double T_CUT_TRACE_MP2_;
+      /// pair energy threshold for PNO truncation for MP2 pairs (for DLPNO-CC methods)
+      double T_CUT_ENERGY_MP2_;
       /// tolerance to separate pairs into CCSD and MP2 pairs
       double T_CUT_PAIRS_;
       /// tolerance to separate MP2 pairs in between crude and refined prescreening
@@ -335,7 +339,6 @@ class DLPNOCCSD : public DLPNOBase {
     /// (0 occupied, 4 virtual)
 
     // DF Integrals (Used in DLPNO-T1-CCSD)
-    std::vector<std::vector<SharedMatrix>> Qmn_ij_; // (q_ij | m_ij n_ij)
     std::vector<std::vector<SharedMatrix>> Qma_ij_; // (q_ij | m_ij a_ij)
     std::vector<std::vector<SharedMatrix>> Qab_ij_; // (q_ij | a_ij b_ij)
 

@@ -181,11 +181,10 @@ void DLPNOCCSD::estimate_memory() {
     size_t ooov = 0;
     size_t oovv = 0;
     size_t ovvv = 0;
-    size_t qoo = 0;
     size_t qov = 0;
     size_t qvv = 0;
 
-#pragma omp parallel for schedule(dynamic) reduction(+ : oooo, ooov, oovv, ovvv, qoo, qov, qvv)
+#pragma omp parallel for schedule(dynamic) reduction(+ : oooo, ooov, oovv, ovvv, qov, qvv)
     for (int ij = 0; ij < n_lmo_pairs; ij++) {
         int i, j;
         std::tie(i, j) = ij_to_i_j_[ij];
@@ -199,7 +198,6 @@ void DLPNOCCSD::estimate_memory() {
         oovv += 4 * npno_ij * npno_ij;
         ovvv += 3 * npno_ij * npno_ij * npno_ij;
         if (i >= j && i_j_to_ij_strong_[i][j] != -1) {
-            qoo += naux_ij * nlmo_ij * nlmo_ij;
             qov += naux_ij * nlmo_ij * npno_ij;
             qvv += naux_ij * npno_ij * npno_ij;
         }
@@ -218,7 +216,7 @@ void DLPNOCCSD::estimate_memory() {
     if (write_qab_pno_) qvv  = 0;
 
     const size_t total_df_memory = qij_memory_ + qia_memory_ + qab_memory_;
-    const size_t total_pno_int_memory = oooo + ooov + oovv + ovvv + qoo + qov + qvv;
+    const size_t total_pno_int_memory = oooo + ooov + oovv + ovvv + qov + qvv;
     const size_t total_memory = total_df_memory + pno_overlap_memory + total_pno_int_memory;
 
     // 2^30 bytes per GiB
@@ -229,7 +227,6 @@ void DLPNOCCSD::estimate_memory() {
     outfile->Printf("    1-virtual PNO integrals: %.3f [GiB]\n", ooov * pow(2.0, -30) * sizeof(double));
     outfile->Printf("    2-virtual PNO integrals: %.3f [GiB]\n", oovv * pow(2.0, -30) * sizeof(double));
     outfile->Printf("    3-virtual PNO integrals: %.3f [GiB]\n", ovvv * pow(2.0, -30) * sizeof(double));
-    outfile->Printf("    (Q_{ij}|m_{ij} n_{ij}) : %.3f [GiB]\n", qoo * pow(2.0, -30) * sizeof(double));
     outfile->Printf("    (Q_{ij}|m_{ij} a_{ij}) : %.3f [GiB]\n", qov * pow(2.0, -30) * sizeof(double));
     outfile->Printf("    (Q_{ij}|a_{ij} b_{ij}) : %.3f [GiB]\n", qvv * pow(2.0, -30) * sizeof(double));
     outfile->Printf("    PNO/PNO overlaps       : %.3f [GiB]\n\n", pno_overlap_memory * pow(2.0, -30) * sizeof(double));
@@ -378,10 +375,17 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
                 occ_total += pno_occ.get(a);
             }
 
+            double e_pno = 0.0;
             double occ_pno = 0.0;
             int nvir_ij_final = 0;
+            std::vector<int> a_curr;
+            auto K_pno_init = linalg::triplet(X_pno_ij, K_pao_ij, X_pno_ij, true, false, false);
+            auto Tt_pno_init = linalg::triplet(X_pno_ij, Tt_pao_ij, X_pno_ij, true, false, false);
             for (size_t a = 0; a < nvir_ij; ++a) {
-                if (fabs(pno_occ.get(a)) >= t_cut_scale * T_CUT_PNO_MP2_ || occ_pno / occ_total < T_CUT_TRACE_MP2_) {
+                a_curr.push_back(a);
+                if (fabs(pno_occ.get(a)) >= t_cut_scale * T_CUT_PNO_MP2_ || occ_pno / occ_total < T_CUT_TRACE_MP2_ ||
+                        std::fabs(e_pno) < T_CUT_ENERGY_MP2_ * std::fabs(e_ij_initial)) {
+                    e_pno = submatrix_rows_and_cols(*K_pno_init, a_curr, a_curr)->vector_dot(submatrix_rows_and_cols(*Tt_pno_init, a_curr, a_curr));
                     occ_pno += pno_occ.get(a);
                     nvir_ij_final++;
                 }
@@ -710,10 +714,18 @@ void DLPNOCCSD::pno_lmp2_iterations() {
             occ_total += pno_occ.get(a);
         }
 
+        double e_pno = 0.0;
+        double e_ij_total = K_iajb_[ij]->vector_dot(Tt_iajb_[ij]);
         double occ_pno = 0.0;
         int nvir_ij_final = 0;
+        std::vector<int> a_curr;
+        auto K_pno_init = linalg::triplet(X_pno_ij, K_iajb_[ij], X_pno_ij, true, false, false);
+        auto Tt_pno_init = linalg::triplet(X_pno_ij, Tt_iajb_[ij], X_pno_ij, true, false, false);
         for (size_t a = 0; a < nvir_ij; ++a) {
-            if (fabs(pno_occ.get(a)) >= t_cut_scale * T_CUT_PNO_ || occ_pno / occ_total < T_CUT_TRACE_) {
+            a_curr.push_back(a);
+            if (fabs(pno_occ.get(a)) >= t_cut_scale * T_CUT_PNO_ || occ_pno / occ_total < T_CUT_TRACE_ ||
+                    std::fabs(e_pno) < T_CUT_ENERGY_ * std::fabs(e_ij_total)) {
+                e_pno = submatrix_rows_and_cols(*K_pno_init, a_curr, a_curr)->vector_dot(submatrix_rows_and_cols(*Tt_pno_init, a_curr, a_curr));
                 occ_pno += pno_occ.get(a);
                 nvir_ij_final++;
             }
@@ -979,7 +991,6 @@ void DLPNOCCSD::compute_cc_integrals() {
     // 4 virtual
 
     // DF integrals (used in DLPNO-CCSD with T1 Transformed Hamiltonian)
-    Qmn_ij_.resize(n_lmo_pairs);
     Qma_ij_.resize(n_lmo_pairs);
     Qab_ij_.resize(n_lmo_pairs);
 
@@ -1179,14 +1190,9 @@ void DLPNOCCSD::compute_cc_integrals() {
 
         // Save DF integrals (only for strong pairs)
         if (i <= j && i_j_to_ij_strong_[i][j] != -1) {
-            Qmn_ij_[ij].resize(naux_ij);
             Qma_ij_[ij].resize(naux_ij);
             Qab_ij_[ij].resize(naux_ij);
             for (int q_ij = 0; q_ij < naux_ij; ++q_ij) {
-                // Save (Q_ij | m_ij n_ij) integrals
-                Qmn_ij_[ij][q_ij] = std::make_shared<Matrix>(nlmo_ij, nlmo_ij);
-                C_DCOPY(nlmo_ij * nlmo_ij, &(*q_oo)(q_ij, 0), 1, &(*Qmn_ij_[ij][q_ij])(0, 0), 1);
-
                 // Save transformed (Q_ij | m_ij a_ij) integrals
                 Qma_ij_[ij][q_ij] = std::make_shared<Matrix>(nlmo_ij, npno_ij);
                 C_DCOPY(nlmo_ij * npno_ij, &(*q_ov)(q_ij, 0), 1, &(*Qma_ij_[ij][q_ij])(0, 0), 1);
@@ -2100,8 +2106,6 @@ void DLPNOCCSD::t1_fock() {
 
         // Partially dress Fia and Fab
         Fia_bar[ij] = std::make_shared<Matrix>(nlmo_ij, npno_ij);
-        Fab_bar[ij] = std::make_shared<Matrix>(npno_ij, npno_ij);
-        Fab_bar[ij]->set_diagonal(e_pno_[ij]);
 
         for (int q_ij = 0; q_ij < naux_ij; ++q_ij) {
             auto Qma = Qma_ij_[pair_idx][q_ij]->clone();
@@ -2113,16 +2117,28 @@ void DLPNOCCSD::t1_fock() {
             Jcont->scale(2.0 * gamma);
             Fia_bar[ij]->add(Jcont);
 
-            Jcont = Qab->clone();
-            Jcont->scale(2.0 * gamma);
-            Fab_bar[ij]->add(Jcont);
+            // Jcont = Qab->clone();
+            // Jcont->scale(2.0 * gamma);
+            // Fab_bar[ij]->add(Jcont);
 
             // K like contributions
             auto Kcont = linalg::triplet(Qma, T_n_ij_[ij], Qma, false, true, false);
             Fia_bar[ij]->subtract(Kcont);
 
-            Kcont = linalg::triplet(Qab, T_n_ij_[ij], Qma, false, true, false);
-            Fab_bar[ij]->subtract(Kcont);
+            // Kcont = linalg::triplet(Qab, T_n_ij_[ij], Qma, false, true, false);
+            // Fab_bar[ij]->subtract(Kcont);
+        }
+
+        Fab_bar[ij] = std::make_shared<Matrix>(npno_ij, npno_ij);
+        Fab_bar[ij]->set_diagonal(e_pno_[ij]);
+
+        for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
+            int k = lmopair_to_lmos_[ij][k_ij];
+            int kk = i_j_to_ij_[k][k];
+
+            auto L_temp = linalg::doublet(T_ia_[k], L_tilde_[kk], true, false);
+            L_temp->reshape(n_pno_[kk], n_pno_[kk]);
+            Fab_bar[ij]->add(linalg::triplet(S_PNO(ij, kk), L_temp, S_PNO(kk, ij)));
         }
 
         // Partially dress Fai
@@ -2176,12 +2192,19 @@ void DLPNOCCSD::t1_fock() {
             (*Fkj_)(i, j) += (*Fia_bar[jj])(i_jj, a_jj) * (*T_ia_[j])(a_jj, 0);
         }
 
-        if (i_j_to_ij_strong_[i][j] == -1) continue;
+        // Fkc matrices (built separately since Fia intermediate not built for weak pairs)
+        Fkc_[ij] = std::make_shared<Matrix>(1, npno_ij);
 
-        // Fkc matrices (no more dressing is required)
-        Fkc_[ij] = submatrix_rows(*Fia_bar[pair_idx], std::vector<int>(1, i_ij));
+        for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
+            int k = lmopair_to_lmos_[ij][k_ij];
+            int ik = i_j_to_ij_[i][k], kk = i_j_to_ij_[k][k];
 
-        if (i > j) continue;
+            // Fkc contributions
+            auto T_k = linalg::doublet(S_PNO(ik, kk), T_ia_[k]);
+            Fkc_[ij]->add(linalg::triplet(S_PNO(ij, ik), L_iajb_[ik], T_k)->transpose());
+        }
+
+        if (i_j_to_ij_strong_[i][j] == -1 || i > j) continue;
 
         // Fully dress Fab matrices
         Fab_[ij] = Fab_bar[ij]->clone();
@@ -2562,7 +2585,6 @@ void DLPNOCCSD::t1_lccsd_iterations() {
             thread = omp_get_thread_num();
 #endif
 
-            if (npno_ik == 0 || i_j_to_ij_strong_[i][k] == -1) continue;
             int pair_idx = (i > k) ? ki : ik;
 
             int i_ik = lmopair_to_lmos_dense_[ik][i], k_ik = lmopair_to_lmos_dense_[ik][k];
@@ -2769,7 +2791,8 @@ void DLPNOCCSD::t1_lccsd_iterations() {
             int ii = i_j_to_ij_[i][i];
             int i_ii = lmopair_to_lmos_dense_[ii][i];
             for (int a_ii = 0; a_ii < n_pno_[ii]; ++a_ii) {
-                (*T_ia_[i])(a_ii, 0) -= (*R_ia[i])(a_ii, 0) / (e_pno_[ii]->get(a_ii) - F_lmo_->get(i,i));
+                (*T_ia_[i])(a_ii, 0) -= (*R_ia[i])(a_ii, 0) / ((*Fab_[ii])(a_ii, a_ii) - (*Fkj_)(i,i));
+                // (e_pno_[ii]->get(a_ii) - F_lmo_->get(i,i));
             }
         }
 
@@ -2786,7 +2809,8 @@ void DLPNOCCSD::t1_lccsd_iterations() {
             for (int a_ij = 0; a_ij < n_pno_[ij]; ++a_ij) {
                 for (int b_ij = 0; b_ij < n_pno_[ij]; ++b_ij) {
                     (*T_iajb_[ij])(a_ij, b_ij) -= (*R_iajb[ij])(a_ij, b_ij) / 
-                                    (e_pno_[ij]->get(a_ij) + e_pno_[ij]->get(b_ij) - F_lmo_->get(i,i) - F_lmo_->get(j,j));
+                                    ((*Fab_[pair_idx])(a_ij, a_ij) + (*Fab_[pair_idx])(b_ij, b_ij) - (*Fkj_)(i,i) - (*Fkj_)(j,j));
+                                    // (e_pno_[ij]->get(a_ij) + e_pno_[ij]->get(b_ij) - F_lmo_->get(i,i) - F_lmo_->get(j,j));
                 }
             }
             R_iajb_rms[ij] = R_iajb[ij]->rms();
