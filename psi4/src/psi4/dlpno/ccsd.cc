@@ -368,7 +368,7 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
             Vector pno_occ("eigenvalues", nvir_ij);
             D_ij->diagonalize(*X_pno_ij, pno_occ, descending);
 
-            double t_cut_scale = (i == j) ? 0.0 : 1.0;
+            double t_cut_scale = (i == j) ? T_CUT_PNO_DIAG_SCALE_ : 1.0;
 
             double occ_total = 0.0;
             for (size_t a = 0; a < nvir_ij; ++a) {
@@ -984,6 +984,8 @@ void DLPNOCCSD::compute_cc_integrals() {
     J_ijab_.resize(n_lmo_pairs);
     L_iajb_.resize(n_lmo_pairs);
     M_iajb_.resize(n_lmo_pairs);
+    J_ij_k_.resize(n_lmo_pairs);
+    K_ij_k_.resize(n_lmo_pairs);
     // 3 virtual
     K_tilde_chem_.resize(n_lmo_pairs);
     K_tilde_phys_.resize(n_lmo_pairs);
@@ -1038,6 +1040,21 @@ void DLPNOCCSD::compute_cc_integrals() {
         auto q_ov = std::make_shared<Matrix>(naux_ij, nlmo_ij * npno_ij);
         auto q_vv = std::make_shared<Matrix>(naux_ij, npno_ij * npno_ij);
 
+        J_ij_k_[ij].resize(nlmo_ij);
+        K_ij_k_[ij].resize(nlmo_ij);
+
+        std::vector<SharedMatrix> q_ic(nlmo_ij);
+        std::vector<SharedMatrix> q_jc(nlmo_ij);
+        std::vector<SharedMatrix> q_cd(nlmo_ij);
+
+        for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
+            int k = lmopair_to_lmos_[ij][k_ij];
+            int ik = i_j_to_ij_[i][k], jk = i_j_to_ij_[j][k];
+            q_ic[k_ij] = std::make_shared<Matrix>(naux_ij, n_pno_[ik]);
+            q_jc[k_ij] = std::make_shared<Matrix>(naux_ij, n_pno_[jk]);
+            q_cd[k_ij] = std::make_shared<Matrix>(naux_ij, n_pno_[ik] * n_pno_[jk]);
+        }
+
         for (int q_ij = 0; q_ij < naux_ij; q_ij++) {
             const int q = lmopair_to_ribfs_[ij][q_ij];
             const int centerq = ribasis_->function_to_center(q);
@@ -1065,6 +1082,39 @@ void DLPNOCCSD::compute_cc_integrals() {
                                 lmopair_pao_to_riatom_pao_[ij][q_ij]);
             q_jv_tmp = linalg::doublet(q_jv_tmp, X_pno_[ij], false, false);
             C_DCOPY(npno_ij, &(*q_jv_tmp)(0,0), 1, &(*q_jv)(q_ij, 0), 1);
+
+            for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
+                int k = lmopair_to_lmos_[ij][k_ij];
+                int ik = i_j_to_ij_[i][k], jk = i_j_to_ij_[j][k];
+                int npao_ik = lmopair_to_paos_[ik].size();
+                int npao_jk = lmopair_to_paos_[jk].size();
+
+                auto q_ic_tmp = std::make_shared<Matrix>(npao_ik, 1);
+                auto q_jc_tmp = std::make_shared<Matrix>(npao_jk, 1);
+                for (int a_ik = 0; a_ik < npao_ik; ++a_ik) {
+                    int a = lmopair_to_paos_[ik][a_ik];
+                    (*q_ic_tmp)(a_ik, 0) = qia_[q]->get(riatom_to_lmos_ext_dense_[centerq][i], riatom_to_paos_ext_dense_[centerq][a]);
+                }
+                q_ic_tmp = linalg::doublet(X_pno_[ik], q_ic_tmp, true, false);
+                C_DCOPY(n_pno_[ik], &(*q_ic_tmp)(0, 0), 1, &(*q_ic[k_ij])(q_ij, 0), 1);
+                for (int a_jk = 0; a_jk < npao_jk; ++a_jk) {
+                    int a = lmopair_to_paos_[jk][a_jk];
+                    (*q_jc_tmp)(a_jk, 0) = qia_[q]->get(riatom_to_lmos_ext_dense_[centerq][j], riatom_to_paos_ext_dense_[centerq][a]);
+                }
+                q_jc_tmp = linalg::doublet(X_pno_[jk], q_jc_tmp, true, false);
+                C_DCOPY(n_pno_[jk], &(*q_jc_tmp)(0, 0), 1, &(*q_jc[k_ij])(q_ij, 0), 1);
+
+                auto q_cd_tmp = std::make_shared<Matrix>(npao_ik, npao_jk);
+                for (int a_ik = 0; a_ik < npao_ik; ++a_ik) {
+                    int a = lmopair_to_paos_[ik][a_ik];
+                    for (int b_jk = 0; b_jk < npao_jk; ++b_jk) {
+                        int b = lmopair_to_paos_[jk][b_jk];
+                        (*q_cd_tmp)(a_ik, b_jk) = qab_[q]->get(riatom_to_paos_ext_dense_[centerq][a], riatom_to_paos_ext_dense_[centerq][b]);
+                    } // end b_jk
+                } // end a_ik
+                q_cd_tmp = linalg::triplet(X_pno_[ik], q_cd_tmp, X_pno_[jk], true, false, false);
+                C_DCOPY(n_pno_[ik] * n_pno_[jk], &(*q_cd_tmp)(0, 0), 1, &(*q_cd[k_ij])(q_ij, 0), 1);
+            }
 
             std::vector<int> m_ij_indices;
             for (const int &m : lmopair_to_lmos_[ij]) {
@@ -1104,7 +1154,19 @@ void DLPNOCCSD::compute_cc_integrals() {
         C_DGESV_wrapper(A_solve->clone(), q_jv);
         C_DGESV_wrapper(A_solve->clone(), q_oo);
         C_DGESV_wrapper(A_solve->clone(), q_ov);
-        C_DGESV_wrapper(A_solve, q_vv);
+        C_DGESV_wrapper(A_solve->clone(), q_vv);
+
+        for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
+            int k = lmopair_to_lmos_[ij][k_ij];
+            int ik = i_j_to_ij_[i][k], jk = i_j_to_ij_[j][k];
+            C_DGESV_wrapper(A_solve->clone(), q_cd[k_ij]);
+            J_ij_k_[ij][k_ij] = linalg::doublet(q_pair, q_cd[k_ij], true, false);
+            J_ij_k_[ij][k_ij]->reshape(n_pno_[ik], n_pno_[jk]);
+
+            C_DGESV_wrapper(A_solve->clone(), q_ic[k_ij]);
+            C_DGESV_wrapper(A_solve->clone(), q_jc[k_ij]);
+            K_ij_k_[ij][k_ij] = linalg::doublet(q_ic[k_ij], q_jc[k_ij], true, false);
+        }
 
         K_mnij_[ij] = linalg::doublet(q_io, q_jo, true, false);
         K_bar_[ij] = linalg::doublet(q_io, q_jv, true, false);
@@ -2282,7 +2344,8 @@ std::vector<SharedMatrix> DLPNOCCSD::compute_C_tilde() {
         int pair_idx = (k > i) ? ij_to_ji_[ki] : ki;
 
         // First term of C_tilde is the dressing of J_ijab
-        C_tilde[ki] = J_ijab_[ki]->clone();
+        C_tilde[ki] = std::make_shared<Matrix>(npno_ki, npno_ki);
+        // J_ijab_[ki]->clone();
 
         auto T_i = linalg::doublet(S_PNO(ki, ii), T_ia_[i]);
         auto K_temp = linalg::doublet(T_i, K_tilde_chem_[ki], true, false);
@@ -2340,7 +2403,8 @@ std::vector<SharedMatrix> DLPNOCCSD::compute_D_tilde() {
         int i_ik = lmopair_to_lmos_dense_[ik][i], k_ik = lmopair_to_lmos_dense_[ik][k];
         int pair_idx = (i > k) ? ki : ik;
 
-        D_tilde[ik] = M_iajb_[ik]->clone();
+        D_tilde[ik] = std::make_shared<Matrix>(npno_ik, npno_ik);
+        // M_iajb_[ik]->clone();
         auto T_i = linalg::doublet(S_PNO(ik, ii), T_ia_[i]);
         auto L_temp = L_tilde_[ki]->clone();
         L_temp->reshape(npno_ik * npno_ik, npno_ik);
@@ -2724,10 +2788,12 @@ void DLPNOCCSD::t1_lccsd_iterations() {
             auto C_ij = std::make_shared<Matrix>(npno_ij, npno_ij);
             for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
                 int k = lmopair_to_lmos_[ij][k_ij];
-                int ki = i_j_to_ij_[k][i], kj = i_j_to_ij_[k][j];
+                int ik = i_j_to_ij_[i][k], ki = i_j_to_ij_[k][i], kj = i_j_to_ij_[k][j];
+                int j_ik = lmopair_to_lmos_dense_[ik][j];
 
-                auto T_kj = linalg::triplet(S_PNO(ij, kj), T_iajb_[kj], S_PNO(kj, ki));
-                C_ij->subtract(linalg::triplet(S_PNO(ij, ki), C_tilde[ki], T_kj, false, false, true));
+                auto gamma_total = J_ij_k_[ik][j_ik]->clone();
+                gamma_total->add(linalg::triplet(S_PNO(ij, ik), C_tilde[ki], S_PNO(ik, kj)));
+                C_ij->subtract(linalg::triplet(gamma_total, T_iajb_[kj], S_PNO(kj, ij), false, true, false));
             }
             // Add all the C terms to the non-symmetrized R buffer
             auto C_ij_total = C_ij->clone();
@@ -2741,8 +2807,14 @@ void DLPNOCCSD::t1_lccsd_iterations() {
             for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
                 int k = lmopair_to_lmos_[ij][k_ij];
                 int ik = i_j_to_ij_[i][k], jk = i_j_to_ij_[j][k];
+                int j_ik = lmopair_to_lmos_dense_[ik][j];
+
                 auto U_jk = linalg::triplet(S_PNO(ij, jk), Tt_iajb_[jk], S_PNO(jk, ik));
                 auto D_temp = linalg::triplet(S_PNO(ij, ik), D_tilde[ik], U_jk, false, false, true);
+                auto L_aikc = K_ij_k_[ik][j_ik]->clone();
+                L_aikc->scale(2.0);
+                L_aikc->subtract(J_ij_k_[ik][j_ik]);
+                D_temp->add(linalg::triplet(L_aikc, Tt_iajb_[jk], S_PNO(jk, ij), false, true, false));
                 D_temp->scale(0.5);
                 D_ij->add(D_temp);
             }
