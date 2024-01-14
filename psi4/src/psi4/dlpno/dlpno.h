@@ -296,6 +296,10 @@ class DLPNOCCSD : public DLPNOBase {
    protected:
     /// Write (Q_ij | a_ij b_ij) integrals to disk?
     bool write_qab_pno_;
+    /// NOT [form (i j | a_ik b_jk)]
+    bool project_j_;
+    /// NOT [form (i a_ik | j b_jk)]
+    bool project_k_;
 
     /// Number of svd functions for PNO pair ij in rank-reduced (Q_ij |a_ij b_ij)
     std::vector<int> n_svd_;

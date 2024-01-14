@@ -2519,6 +2519,11 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_double("T_CUT_TRACE", 0.999);
         /*- Pair energy tolerance for removing PNOs !expert -*/
         options.add_double("T_CUT_ENERGY", 0.997);
+        /*- Use projection approximation for linear (i a | j b) integrals in LCCSD? !expert -*/
+        options.add_bool("PROJECT_K", false);
+        /*- Use projection approximation for linear (i j | a b) integrals in LCCSD?
+            [This is HIGHLY not recommended] !expert -*/
+        options.add_bool("PROJECT_J", false);
         /*- Occupation number threshold for removing PNOs (for MP2 prescreening) !expert -*/
         options.add_double("T_CUT_PNO_MP2", 1e-10);
         /*- Occupation trace sum threshold for removing PNOs (for MP2 prescreening) !expert -*/
