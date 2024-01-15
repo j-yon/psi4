@@ -64,6 +64,24 @@ std::vector<int> merge_lists(const std::vector<int> &l1, const std::vector<int> 
 
 }
 
+std::vector<int> index_list(const std::vector<int> &l1, const std::vector<int> &l2) {
+
+    std::vector<int> lsub;
+    
+    int i1 = 0, i2 = 0;
+    while(i2 < l2.size()) {
+        if (l1[i1] == l2[i2]) {
+            lsub.push_back(i1);
+            i1++;
+            i2++;
+        } else {
+            i1++;
+        }
+    }
+
+    return lsub;
+}
+
 std::vector<int> contract_lists(const std::vector<int> &y, const std::vector<std::vector<int>> &A_to_y) {
 
     // TODO: runtime is proportional to A_to_y size (system size, O(N))
