@@ -1280,14 +1280,22 @@ double DLPNOCCSD_T::compute_energy() {
     // Clear CCSD integrals
     K_mnij_.clear();
     K_bar_.clear();
+    K_bar_chem_.clear();
     L_bar_.clear();
     J_ijab_.clear();
     L_iajb_.clear();
     M_iajb_.clear();
+    J_ij_k_.clear();
+    K_ij_k_.clear();
     K_tilde_chem_.clear();
     K_tilde_phys_.clear();
     L_tilde_.clear();
+    Qma_ij_.clear();
     Qab_ij_.clear();
+    i_Qk_ij_.clear();
+    i_Qa_ij_.clear();
+    i_Qa_ij_.clear();
+    i_Qa_t1_.clear();
     S_pno_ij_kj_.clear();
 
     bool scale_triples = options_.get_bool("SCALE_T0");
