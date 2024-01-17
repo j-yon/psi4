@@ -1071,11 +1071,6 @@ void DLPNOCCSD::compute_cc_integrals() {
 
         SharedMatrix q_ic;
         SharedMatrix q_jc;
-        SharedMatrix q_cd;
-
-        if (!project_j_) {
-            q_cd = std::make_shared<Matrix>(naux_ij, npao_ext_ij * npao_ext_ij);
-        }
 
         if (!project_k_) {
             q_ic = std::make_shared<Matrix>(naux_ij, npao_ext_ij);
@@ -1110,22 +1105,14 @@ void DLPNOCCSD::compute_cc_integrals() {
             q_jv_tmp = linalg::doublet(q_jv_tmp, X_pno_[ij], false, false);
             C_DCOPY(npno_ij, &(*q_jv_tmp)(0,0), 1, &(*q_jv)(q_ij, 0), 1);
 
-            std::vector<int> extended_pao_idx;
-            if (!project_j_ || !project_k_) {
-                extended_pao_idx = index_list(riatom_to_paos_ext_[centerq], extended_pao_domain);
-            }
-            if (!project_j_) {
-                auto q_cd_temp = submatrix_rows_and_cols(*qab_[q], extended_pao_idx, extended_pao_idx);
-                C_DCOPY(npao_ext_ij * npao_ext_ij, &(*q_cd_temp)(0, 0), 1, &(*q_cd)(q_ij, 0), 1);
-            }
             if (!project_k_) {
+                std::vector<int> extended_pao_idx = index_list(riatom_to_paos_ext_[centerq], extended_pao_domain);
                 auto q_ic_temp = submatrix_rows_and_cols(*qia_[q], i_slice, extended_pao_idx);
                 C_DCOPY(npao_ext_ij, &(*q_ic_temp)(0, 0), 1, &(*q_ic)(q_ij, 0), 1);
                 auto q_jc_temp = submatrix_rows_and_cols(*qia_[q], j_slice, extended_pao_idx);
                 C_DCOPY(npao_ext_ij, &(*q_jc_temp)(0, 0), 1, &(*q_jc)(q_ij, 0), 1);
             }
             
-
             std::vector<int> m_ij_indices;
             for (const int &m : lmopair_to_lmos_[ij]) {
                 const int m_sparse = riatom_to_lmos_ext_dense_[centerq][m];
@@ -1177,8 +1164,15 @@ void DLPNOCCSD::compute_cc_integrals() {
 
         SharedMatrix J_ij_k_temp;
         if (!project_j_) {
-            J_ij_k_temp = linalg::doublet(q_pair_clone, q_cd, true, false);
-            J_ij_k_temp->reshape(npao_ext_ij, npao_ext_ij);
+            J_ij_k_temp = std::make_shared<Matrix>(npao_ext_ij, npao_ext_ij);
+            for (int q_ij = 0; q_ij < naux_ij; q_ij++) {
+                const int q = lmopair_to_ribfs_[ij][q_ij];
+                const int centerq = ribasis_->function_to_center(q);
+                
+                std::vector<int> extended_pao_idx = index_list(riatom_to_paos_ext_[centerq], extended_pao_domain);
+                auto q_cd_temp = submatrix_rows_and_cols(*qab_[q], extended_pao_idx, extended_pao_idx);
+                C_DAXPY(npao_ext_ij * npao_ext_ij, (*q_pair_clone)(q_ij, 0), &(*q_cd_temp)(0, 0), 1, &(*J_ij_k_temp)(0, 0), 1);
+            }
         }
         SharedMatrix K_ij_k_temp;
         if (!project_k_) {
