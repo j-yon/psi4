@@ -294,6 +294,10 @@ class DLPNOMP2 : public DLPNOBase {
 
 class DLPNOCCSD : public DLPNOBase {
    protected:
+    /// Use low memory algorithm to store PNO overlaps?
+    bool low_memory_overlap_;
+    /// Write (Q_ij | m_ij a_ij) integrals to disk?
+    bool write_qia_pno_;
     /// Write (Q_ij | a_ij b_ij) integrals to disk?
     bool write_qab_pno_;
     /// NOT [form (i j | a_ik b_jk)]
@@ -363,6 +367,10 @@ class DLPNOCCSD : public DLPNOBase {
 
     /// Returns the appropriate overlap matrix given two LMO pairs
     inline SharedMatrix S_PNO(const int ij, const int mn);
+    /// Encapsulates the reading in of (Q_{ij}|m_{ij} a_{ij}) integrals (regardless of core or disk)
+    inline std::vector<SharedMatrix> QIA_PNO(const int ij);
+    /// Encapsulates the reading in of (Q_{ij}|a_{ij} b_{ij}) integrals (regardless of core or disk)
+    inline std::vector<SharedMatrix> QAB_PNO(const int ij);
 
     /// Determine which pairs are strong and weak pairs
     template<bool crude> void pair_prescreening(); // Encapsulates crude/refined prescreening step in Riplinger 2016

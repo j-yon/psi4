@@ -2524,6 +2524,12 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         /*- Use projection approximation for linear (i j | a b) integrals in LCCSD?
             [This is HIGHLY not recommended] !expert -*/
         options.add_bool("PROJECT_J", false);
+        /*- Use low memory PNO overlap algorithm? !expert -*/
+        options.add_bool("LOW_MEMORY_OVERLAP", false);
+        /*- Write (Q_{ij} | m_{ij} a_{ij}) integrals to disk? !expert -*/
+        options.add_bool("WRITE_QIA_PNO", false);
+        /*- Write (Q_{ij} | a_{ij} b_{ij}) integrals to disk? !expert -*/
+        options.add_bool("WRITE_QAB_PNO", false);
         /*- Occupation number threshold for removing PNOs (for MP2 prescreening) !expert -*/
         options.add_double("T_CUT_PNO_MP2", 1e-10);
         /*- Occupation trace sum threshold for removing PNOs (for MP2 prescreening) !expert -*/
@@ -2582,6 +2588,8 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_double("F_CUT_T", 1e-3);
         /*- Energy difference in which to stop considering triples in iterative (T) */
         options.add_double("T_CUT_ITER", 1e-3);
+        /*- Write triples amplitudes to disk? !expert -*/
+        options.add_bool("WRITE_TRIPLES", false);
 
         /*- Number of spherical points in DOI grid !expert -*/
         options.add_int("DOI_SPHERICAL_POINTS", 50);

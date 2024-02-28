@@ -609,7 +609,7 @@ void DLPNOCCSD_T::tno_transform(bool scale_triples, double t_cut_tno) {
         tno_count_max = std::max(tno_count_max, n_tno_[ijk]);
     }
 
-    int n_total_possible = (naocc + 2) * (naocc + 1) * (naocc) / 6 - naocc;
+    size_t n_total_possible = (naocc + 2) * (naocc + 1) * (naocc) / 6 - naocc;
 
     outfile->Printf("  \n");
     outfile->Printf("    Number of (Unique) Local MO triplets: %d\n", n_lmo_triplets);
@@ -645,12 +645,12 @@ void DLPNOCCSD_T::estimate_memory() {
     outfile->Printf("    Total Memory Given     : %.3f [GiB]\n", memory_ * pow(2.0, -30));
     outfile->Printf("    Total Memory Required  : %.3f [GiB]\n\n", total_memory * pow(2.0, -30) * sizeof(double));
 
-    if (3 * tno_total_memory * sizeof(double) > 0.8 * (memory_ - qab_memory_ * sizeof(double))) {
-        write_amplitudes_ = true;
+    write_amplitudes_ = options_.get_bool("WRITE_TRIPLES");
+
+    if (write_amplitudes_) {
         outfile->Printf("    Writing all X_{ijk}^{abc} quantities to disk...\n\n");
     } else {
-        write_amplitudes_ = false;
-        outfile->Printf("    Keeping all X_{ijk}^{abc} quantities in core...\n\n");
+        outfile->Printf("    Storing all X_{ijk}^{abc} quantities in RAM...\n\n");
     }
 }
 
@@ -1297,6 +1297,7 @@ double DLPNOCCSD_T::compute_energy() {
     i_Qa_ij_.clear();
     i_Qa_t1_.clear();
     S_pno_ij_kj_.clear();
+    S_pno_ij_mn_.clear();
 
     bool scale_triples = options_.get_bool("SCALE_T0");
 
@@ -1309,12 +1310,17 @@ double DLPNOCCSD_T::compute_energy() {
     recompute_pnos();
 
     // Step 2: Perform the prescreening
+    outfile->Printf("\n   Starting Triplet Prescreening...\n");
+
     triples_sparsity(true);
     tno_transform(scale_triples, t_cut_tno_pre);
     double E_T0_pre = compute_lccsd_t0();
 
     // Step 3: Compute DLPNO-CCSD(T0) energy with surviving triplets
+    outfile->Printf("\n   Continuing computation with surviving triplets...\n");
     triples_sparsity(false);
+    outfile->Printf("    * Energy Contribution From Screened Triplets: %.12f \n", de_lccsd_t_screened_);
+    
     tno_transform(scale_triples, t_cut_tno);
     double E_T0 = compute_lccsd_t0();
     e_lccsd_t_ = e_lccsd_ + E_T0 + de_lccsd_t_screened_;
@@ -1351,6 +1357,9 @@ double DLPNOCCSD_T::compute_energy() {
     if (write_qab_pao_) {
         // Bye bye, you won't be missed
         psio_->close(PSIF_DLPNO_QAB_PAO, 0);
+    }
+
+    if (write_amplitudes_) {
         psio_->close(PSIF_DLPNO_TRIPLES, 0);
     }
 

@@ -1128,13 +1128,8 @@ void DLPNOBase::compute_qab() {
 
     outfile->Printf("\n  ==> Transforming 3-Index Integrals to PAO/PAO basis <==\n");
 
-    if (qab_memory_ * sizeof(double) > 0.5 * memory_) {
-        write_qab_pao_ = true;
-        outfile->Printf("\n    Writing (aux | pao * pao) integrals to disk...\n");
-    } else {
-        write_qab_pao_ = false;
-        outfile->Printf("\n    Keeping (aux | pao * pao) integrals in core...\n");
-    }
+    // TODO: Writing (Q|ab) pao integrals to disk is currently NOT supported. Add this capability later
+    write_qab_pao_ = false;
 
     if (write_qab_pao_) {
         psio_->open(PSIF_DLPNO_QAB_PAO, PSIO_OPEN_NEW);
