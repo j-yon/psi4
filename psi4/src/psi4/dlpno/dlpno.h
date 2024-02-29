@@ -90,6 +90,7 @@ class DLPNOBase : public Wavefunction {
       /// auxiliary basis
       std::shared_ptr<BasisSet> ribasis_;
       SharedMatrix full_metric_;
+      std::vector<double> J_metric_shell_diag_; ///< used in AO ERI screening
 
       /// localized molecular orbitals (LMOs)
       SharedMatrix C_lmo_;
@@ -109,6 +110,7 @@ class DLPNOBase : public Wavefunction {
       /// differential overlap integrals (EQ 4)
       SharedMatrix DOI_ij_; // LMO/LMO
       SharedMatrix DOI_iu_; // LMO/PAO
+      SharedMatrix DOI_uv_; // PAO/PAO
 
       // approximate LMO/LMO pair energies from dipole integrals (EQ 17)
       // used to screen out and estimate weakly interacting LMO/LMO pairs
@@ -204,6 +206,8 @@ class DLPNOBase : public Wavefunction {
       /// Useful for generating DF integrals
       std::vector<std::vector<std::vector<int>>> lmopair_lmo_to_riatom_lmo_;
       std::vector<std::vector<std::vector<int>>> lmopair_pao_to_riatom_pao_;
+      std::vector<std::vector<std::pair<int,int>>> riatom_to_pao_pairs_; ///< Which (u,v) pao pairs belong to an riatom
+      std::vector<std::vector<std::vector<int>>> riatom_to_pao_pairs_dense_; ///< For each riatom, returns the index of the element in qab tensor
 
       /// PSIO object (to help with reading/writing large tensors)
       std::shared_ptr<PSIO> psio_;

@@ -2526,6 +2526,8 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_bool("PROJECT_J", false);
         /*- Use low memory PNO overlap algorithm? !expert -*/
         options.add_bool("LOW_MEMORY_OVERLAP", false);
+        /*- AO ERI Schwarz Screening tolerance for building DF ints in DLPNO !expert -*/
+        options.add_double("DLPNO_AO_INTS_TOL", 1.0e-10);
         /*- Write (Q_{ij} | m_{ij} a_{ij}) integrals to disk? !expert -*/
         options.add_bool("WRITE_QIA_PNO", false);
         /*- Write (Q_{ij} | a_{ij} b_{ij}) integrals to disk? !expert -*/
@@ -2542,6 +2544,8 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_double("T_CUT_DO", 1e-2);
         /*- DOI threshold for treating LMOs (i,j) as interacting !expert -*/
         options.add_double("T_CUT_DO_ij", 1e-5);
+        /*- DOI threshold for treating PAOs (u,v) as interacting !expert -*/
+        options.add_double("T_CUT_DO_uv", 1e-5);
         /*- Pair energy threshold (dipole approximation) for treating LMOs (i, j) as interacting !expert -*/
         options.add_double("T_CUT_PRE", 1e-6); 
         /*- DOI threshold for including PAO (u) in domain of LMO (i) during pre-screening !expert -*/

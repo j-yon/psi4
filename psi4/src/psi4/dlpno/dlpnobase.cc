@@ -393,10 +393,12 @@ void DLPNOBase::compute_overlap_ints() {
     std::vector<std::shared_ptr<BasisFunctions>> point_funcs(nthread);
     std::vector<Matrix> DOI_ij_temps(nthread);
     std::vector<Matrix> DOI_iu_temps(nthread);
+    std::vector<Matrix> DOI_uv_temps(nthread);
     for (size_t thread = 0; thread < nthread; thread++) {
         point_funcs[thread] = std::make_shared<BasisFunctions>(basisset_, grid.max_points(), nbf);
         DOI_ij_temps[thread] = Matrix("(i,j) Differential Overlap Integrals", naocc, naocc);
         DOI_iu_temps[thread] = Matrix("(i,u) Differential Overlap Integrals", naocc, nbf);
+        DOI_uv_temps[thread] = Matrix("(u,v) Differential Overlap Integrals", nbf, nbf);
     }
 
     timer_on("Integration");
@@ -449,21 +451,30 @@ void DLPNOBase::compute_overlap_ints() {
             C_lmo_slice_w->scale_row(0, p, block->w()[p]);
         }
 
+        auto C_pao_slice_w = std::make_shared<Matrix>(C_pao_slice);  // points x npao
+        for (size_t p = 0; p < npoints_block; p++) {
+            C_pao_slice_w->scale_row(0, p, block->w()[p]);
+        }
+
         DOI_ij_temps[thread].add(linalg::doublet(C_lmo_slice_w, C_lmo_slice, true, false));  // naocc x naocc
         DOI_iu_temps[thread].add(linalg::doublet(C_lmo_slice_w, C_pao_slice, true, false));  // naocc x npao
+        DOI_uv_temps[thread].add(linalg::doublet(C_pao_slice_w, C_pao_slice, true, false));  // npao x npao
     }
     timer_off("Integration");
 
     DOI_ij_ = std::make_shared<Matrix>("(i,j) Differential Overlap Integrals", naocc, naocc);
     DOI_iu_ = std::make_shared<Matrix>("(i,u) Differential Overlap Integrals", naocc, nbf);
+    DOI_uv_ = std::make_shared<Matrix>("(u,v) Differential Overlap Integrals", nbf, nbf);
 
     for (size_t thread = 0; thread < nthread; thread++) {
         DOI_ij_->add(DOI_ij_temps[thread]);
         DOI_iu_->add(DOI_iu_temps[thread]);
+        DOI_uv_->add(DOI_uv_temps[thread]);
     }
 
     DOI_ij_->sqrt_this();
     DOI_iu_->sqrt_this();
+    DOI_uv_->sqrt_this();
 }
 
 void DLPNOBase::compute_dipole_ints() {
@@ -898,6 +909,7 @@ void DLPNOBase::compute_qij() {
 
     int nbf = basisset_->nbf();
     int naux = ribasis_->nbf();
+    double ints_tolerance = options_.get_double("DLPNO_AO_INTS_TOL");
 
     size_t nthread = 1;
 #ifdef _OPENMP
@@ -954,17 +966,39 @@ void DLPNOBase::compute_qij() {
                 int nstart = basisset_->shell(N).function_index();
                 int centerN = basisset_->shell_to_center(N);
 
-                // TODO: Permutational Symmetry
+                // is (N in the list of M's) and (M in the list of N's)?
+                // This is (probably) not needed here, but this is copied from the qia integral code for DLPNO-MP2
+                bool MN_symmetry =
+                    (riatom_to_atoms1_dense_[centerQ][centerN] && riatom_to_atoms1_dense_[centerQ][centerM]);
+
+                // if so, we want to exploit (MN|Q) <-> (NM|Q) symmetry
+                if (N < M && MN_symmetry) continue;
+
+                // AO ERI Screening
+                if (J_metric_shell_diag_[Q] * eris[thread]->shell_pair_value(M, N) < ints_tolerance * ints_tolerance) continue;
+                
                 eris[thread]->compute_shell(Q, 0, M, N);
                 const double* buffer = eris[thread]->buffer();
 
-                for (int q = 0; q < nq; q++) {
+                for (int q = 0, index = 0; q < nq; q++) {
                     for (int m = 0; m < nm; m++) {
-                        for (int n = 0; n < nn; n++) {
+                        for (int n = 0; n < nn; n++, index++) {
                             int index_m = bf_map_lmo_inv[mstart + m];
                             int index_n = bf_map_lmo_inv[nstart + n];
-                            qij_[qstart + q]->set(index_m, index_n, *(buffer));
-                            buffer++;
+                            qij_[qstart + q]->set(index_m, index_n, buffer[index]);
+                        }
+                    }
+                }
+
+                // (MN|Q) <-> (NM|Q) symmetry
+                if (N > M && MN_symmetry) {
+                    for (int q = 0, index = 0; q < nq; q++) {
+                        for (int m = 0; m < nm; m++) {
+                            for (int n = 0; n < nn; n++, index++) {
+                                int index_m = bf_map_lmo_inv[mstart + m];
+                                int index_n = bf_map_lmo_inv[nstart + n];
+                                qij_[qstart + q]->set(index_n, index_m, buffer[index]);
+                            }
                         }
                     }
                 }
@@ -990,6 +1024,7 @@ void DLPNOBase::compute_qia() {
 
     int nbf = basisset_->nbf();
     int naux = ribasis_->nbf();
+    double ints_tolerance = options_.get_double("DLPNO_AO_INTS_TOL");
 
     size_t nthread = 1;
 #ifdef _OPENMP
@@ -1057,6 +1092,9 @@ void DLPNOBase::compute_qia() {
                 // if so, we want to exploit (MN|Q) <-> (NM|Q) symmetry
                 if (N < M && MN_symmetry) continue;
 
+                // AO ERI Screening
+                if (J_metric_shell_diag_[Q] * eris[thread]->shell_pair_value(M, N) < ints_tolerance * ints_tolerance) continue;
+
                 eris[thread]->compute_shell(Q, 0, M, N);
                 const double* buffer = eris[thread]->buffer();
 
@@ -1111,6 +1149,40 @@ void DLPNOBase::compute_qab() {
     int nbf = basisset_->nbf();
     int naux = ribasis_->nbf();
     int natom = molecule_->natom();
+    double ints_tolerance = options_.get_double("DLPNO_AO_INTS_TOL");
+    double T_CUT_DO_uv = options_.get_double("T_CUT_DO_uv");
+
+    // Prepare Sparsity info for QAB intergrals
+    riatom_to_pao_pairs_.resize(natom);
+    riatom_to_pao_pairs_dense_.resize(natom);
+
+    for (int Qatom = 0; Qatom < natom; ++Qatom) {
+        int npao_Q = riatom_to_paos_ext_[Qatom].size();
+        riatom_to_pao_pairs_dense_[Qatom].resize(nbf);
+
+        for (int u = 0; u < nbf; ++u) {
+            riatom_to_pao_pairs_dense_[Qatom][u].resize(nbf, -1);
+        }
+
+        int uv_idx = 0;
+        for (int u = 0; u < nbf; ++u) {
+            int u_idx = riatom_to_paos_ext_dense_[Qatom][u];
+            if (u_idx == -1) continue;
+
+            for (int v = 0; v < nbf; ++v) {
+                int v_idx = riatom_to_paos_ext_dense_[Qatom][v];
+                if (v_idx == -1 || u > v) continue;
+                
+                if (fabs(DOI_uv_->get(u,v)) > T_CUT_DO_uv) {
+                    riatom_to_pao_pairs_[Qatom].push_back(std::make_pair(u,v));
+                    riatom_to_pao_pairs_dense_[Qatom][u][v] = uv_idx;
+                    riatom_to_pao_pairs_dense_[Qatom][v][u] = uv_idx;
+                    ++uv_idx;
+                }
+
+            }
+        }
+    }
 
     size_t nthread = 1;
 #ifdef _OPENMP
@@ -1137,8 +1209,10 @@ void DLPNOBase::compute_qab() {
 
     qab_.resize(naux);
 
+    size_t qab_doubles = 0L;
+
     // PAO-PAO DF ints
-#pragma omp parallel for schedule(dynamic, 1)
+#pragma omp parallel for schedule(dynamic, 1) reduction(+ : qab_doubles)
     for (int Q = 0; Q < ribasis_->nshell(); Q++) {
         int nq = ribasis_->shell(Q).nfunction();
         int qstart = ribasis_->shell(Q).function_index();
@@ -1172,17 +1246,39 @@ void DLPNOBase::compute_qab() {
                 int nstart = basisset_->shell(N).function_index();
                 int centerN = basisset_->shell_to_center(N);
 
-                // TODO: Permutational Symmetry
+                // is (N in the list of M's) and (M in the list of N's)?
+                // This is (probably) not needed here, but this is copied from the qia integral code for DLPNO-MP2
+                bool MN_symmetry =
+                    (riatom_to_atoms2_dense_[centerQ][centerN] && riatom_to_atoms2_dense_[centerQ][centerM]);
+
+                // if so, we want to exploit (MN|Q) <-> (NM|Q) symmetry
+                if (N < M && MN_symmetry) continue;
+
+                // AO ERI Screening
+                if (J_metric_shell_diag_[Q] * eris[thread]->shell_pair_value(M, N) < ints_tolerance * ints_tolerance) continue;
+                
                 eris[thread]->compute_shell(Q, 0, M, N);
                 const double* buffer = eris[thread]->buffer();
 
-                for (int q = 0; q < nq; q++) {
+                for (int q = 0, index = 0; q < nq; q++) {
                     for (int m = 0; m < nm; m++) {
-                        for (int n = 0; n < nn; n++) {
+                        for (int n = 0; n < nn; n++, index++) {
                             int index_m = bf_map_pao_inv[mstart + m];
                             int index_n = bf_map_pao_inv[nstart + n];
-                            qab_[qstart + q]->set(index_m, index_n, *(buffer));
-                            buffer++;
+                            qab_[qstart + q]->set(index_m, index_n, buffer[index]);
+                        }
+                    }
+                }
+
+                // (MN|Q) <-> (NM|Q) symmetry
+                if (N > M && MN_symmetry) {
+                    for (int q = 0, index = 0; q < nq; q++) {
+                        for (int m = 0; m < nm; m++) {
+                            for (int n = 0; n < nn; n++, index++) {
+                                int index_m = bf_map_pao_inv[mstart + m];
+                                int index_n = bf_map_pao_inv[nstart + n];
+                                qab_[qstart + q]->set(index_n, index_m, buffer[index]);
+                            }
                         }
                     }
                 }
@@ -1195,6 +1291,15 @@ void DLPNOBase::compute_qab() {
         // (mn|Q) C_mi C_nj ->(ij|Q)
         for (size_t q = 0; q < nq; q++) {
             qab_[qstart + q] = linalg::triplet(C_pao_slice, qab_[qstart + q], C_pao_slice, true, false, false);
+            SharedMatrix qab_temp = std::make_shared<Matrix>(riatom_to_pao_pairs_[centerQ].size(), 1);
+
+            for (int uv = 0; uv < riatom_to_pao_pairs_[centerQ].size(); ++uv) {
+                auto &[u, v] = riatom_to_pao_pairs_[centerQ][uv];
+                int u_idx = riatom_to_paos_ext_dense_[centerQ][u], v_idx = riatom_to_paos_ext_dense_[centerQ][v];
+                qab_temp->set(uv, 0, qab_[qstart + q]->get(u_idx, v_idx));
+                ++qab_doubles;
+            }
+            qab_[qstart + q] = qab_temp;
 
             if (write_qab_pao_) { // Write to disk
                 std::stringstream toc_entry;
@@ -1206,6 +1311,9 @@ void DLPNOBase::compute_qab() {
             }
         }
     }
+
+    qab_memory_ = qab_doubles;
+    outfile->Printf("    PAO/PAO Integral Memory After Screening: %.3f [GiB]\n\n", qab_doubles * pow(2.0, -30) * sizeof(double));
 
     if (write_qab_pao_) {
         psio_->close(PSIF_DLPNO_QAB_PAO, 1);
@@ -1221,6 +1329,18 @@ void DLPNOBase::compute_metric() {
     auto metric = FittingMetric(ribasis_, true);
     metric.form_fitting_metric();
     full_metric_ = std::make_shared<Matrix>(metric.get_metric());
+
+    // Compute max value of diagonal metric element (used in integral screening)
+    J_metric_shell_diag_.resize(ribasis_->nshell(), 0.0);
+
+#pragma omp parallel for
+    for (size_t Qshell = 0; Qshell < ribasis_->nshell(); ++Qshell) {
+        int bf_start = ribasis_->shell(Qshell).function_index();
+        int bf_end = bf_start + ribasis_->shell(Qshell).nfunction();
+        for (size_t bf = bf_start; bf < bf_end; bf++) {
+            J_metric_shell_diag_[Qshell] = std::max(J_metric_shell_diag_[Qshell], full_metric_->get(bf, bf));
+        }
+    }
 
     timer_off("(K|L)");
 }

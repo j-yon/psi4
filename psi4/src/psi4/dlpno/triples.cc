@@ -749,8 +749,16 @@ double DLPNOCCSD_T::compute_lccsd_t0(bool store_amplitudes) {
                 q_vv_tmp = submatrix_rows_and_cols(*q_vv_tmp, lmotriplet_pao_to_riatom_pao_[ijk][q_ijk],
                                                 lmotriplet_pao_to_riatom_pao_[ijk][q_ijk]);
             } else {
-                q_vv_tmp = submatrix_rows_and_cols(*qab_[q], lmotriplet_pao_to_riatom_pao_[ijk][q_ijk],
-                                                lmotriplet_pao_to_riatom_pao_[ijk][q_ijk]);
+                q_vv_tmp = std::make_shared<Matrix>(npao_ijk, npao_ijk);
+                for (int u_ijk = 0; u_ijk < npao_ijk; ++u_ijk) {
+                    int u = lmotriplet_to_paos_[ijk][u_ijk];
+                    for (int v_ijk = 0; v_ijk < npao_ijk; ++v_ijk) {
+                        int v = lmotriplet_to_paos_[ijk][v_ijk];
+                        int uv_idx = riatom_to_pao_pairs_dense_[centerq][u][v];
+                        if (uv_idx == -1) continue;
+                        q_vv_tmp->set(u_ijk, v_ijk, qab_[q]->get(uv_idx, 0));
+                    }
+                }
             }
             q_vv_tmp = linalg::triplet(X_tno_[ijk], q_vv_tmp, X_tno_[ijk], true, false, false);
                 

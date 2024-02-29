@@ -1221,8 +1221,16 @@ void DLPNOCCSD::compute_cc_integrals() {
                 q_vv_tmp = submatrix_rows_and_cols(*q_vv_tmp, lmopair_pao_to_riatom_pao_[ij][q_ij],
                                 lmopair_pao_to_riatom_pao_[ij][q_ij]);
             } else {
-                q_vv_tmp = submatrix_rows_and_cols(*qab_[q], lmopair_pao_to_riatom_pao_[ij][q_ij],
-                                lmopair_pao_to_riatom_pao_[ij][q_ij]);
+                q_vv_tmp = std::make_shared<Matrix>(npao_ij, npao_ij);
+                for (int u_ij = 0; u_ij < npao_ij; ++u_ij) {
+                    int u = lmopair_to_paos_[ij][u_ij];
+                    for (int v_ij = 0; v_ij < npao_ij; ++v_ij) {
+                        int v = lmopair_to_paos_[ij][v_ij];
+                        int uv_idx = riatom_to_pao_pairs_dense_[centerq][u][v];
+                        if (uv_idx == -1) continue;
+                        q_vv_tmp->set(u_ij, v_ij, qab_[q]->get(uv_idx, 0));
+                    }
+                }
             }
             q_vv_tmp = linalg::triplet(X_pno_[ij], q_vv_tmp, X_pno_[ij], true, false, false);
             
@@ -1257,7 +1265,17 @@ void DLPNOCCSD::compute_cc_integrals() {
                 const int centerq = ribasis_->function_to_center(q);
                 
                 std::vector<int> extended_pao_idx = index_list(riatom_to_paos_ext_[centerq], extended_pao_domain);
-                auto q_cd_temp = submatrix_rows_and_cols(*qab_[q], extended_pao_idx, extended_pao_idx);
+                
+                auto q_cd_temp = std::make_shared<Matrix>(npao_ext_ij, npao_ext_ij);
+                for (int u_ij = 0; u_ij < npao_ext_ij; ++u_ij) {
+                    int u = extended_pao_domain[u_ij];
+                    for (int v_ij = 0; v_ij < npao_ext_ij; ++v_ij) {
+                        int v = extended_pao_domain[v_ij];
+                        int uv_idx = riatom_to_pao_pairs_dense_[centerq][u][v];
+                        if (uv_idx == -1) continue;
+                        q_cd_temp->set(u_ij, v_ij, qab_[q]->get(uv_idx, 0));
+                    }
+                }
                 C_DAXPY(npao_ext_ij * npao_ext_ij, (*q_pair_clone)(q_ij, 0), &(*q_cd_temp)(0, 0), 1, &(*J_ij_k_temp)(0, 0), 1);
             }
         }
