@@ -1293,8 +1293,8 @@ double DLPNOCCSD_T::compute_energy() {
     J_ijab_.clear();
     L_iajb_.clear();
     M_iajb_.clear();
-    J_ij_k_.clear();
-    K_ij_k_.clear();
+    J_ij_kj_.clear();
+    K_ij_kj_.clear();
     K_tilde_chem_.clear();
     K_tilde_phys_.clear();
     L_tilde_.clear();

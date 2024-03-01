@@ -709,7 +709,7 @@ void DLPNOBase::prep_sparsity(bool initial, bool last) {
 
     print_aux_domains();
     print_pao_domains();
-    if (initial) print_lmo_domains();
+    print_lmo_domains(initial);
 
     int n_lmo_pairs = ij_to_i_j_.size();
 
@@ -779,6 +779,7 @@ void DLPNOBase::prep_sparsity(bool initial, bool last) {
     }
 
     print_aux_pair_domains();
+    print_lmo_pair_domains();
     print_pao_pair_domains();
 
     if (initial) {
@@ -1597,7 +1598,7 @@ void DLPNOBase::print_pao_domains() {
     outfile->Printf("      Max     = %4zu PAOs (%zu atoms)\n", max_paos, max_atoms);
 }
 
-void DLPNOBase::print_lmo_domains() {
+void DLPNOBase::print_lmo_domains(bool initial) {
     int naocc = i_j_to_ij_.size();
 
     int exclude_pairs_overlap = 0;
@@ -1625,12 +1626,14 @@ void DLPNOBase::print_lmo_domains() {
     outfile->Printf("      Min     = %4d LMOs\n", min_lmos);
     outfile->Printf("      Max     = %4d LMOs\n", max_lmos);
     outfile->Printf(" \n");
-    outfile->Printf("    Screened %d of %d LMO pairs (%.2f %%)\n", naocc * naocc - total_lmos, naocc * naocc,
-                    100.0 - (total_lmos * 100.0) / (naocc * naocc));
-    outfile->Printf("             %d pairs met overlap criteria\n", exclude_pairs_overlap);
-    outfile->Printf("             %d pairs met energy criteria\n", exclude_pairs_energy);
-    outfile->Printf(" \n");
-    outfile->Printf("    Screened LMO pair energy =  %.12f \n", de_dipole_);
+    if (initial) {
+        outfile->Printf("    Screened %d of %d LMO pairs (%.2f %%)\n", naocc * naocc - total_lmos, naocc * naocc,
+                        100.0 - (total_lmos * 100.0) / (naocc * naocc));
+        outfile->Printf("             %d pairs met overlap criteria\n", exclude_pairs_overlap);
+        outfile->Printf("             %d pairs met energy criteria\n", exclude_pairs_energy);
+        outfile->Printf(" \n");
+        outfile->Printf("    Screened LMO pair energy =  %.12f \n", de_dipole_);
+    }
 }
 
 void DLPNOBase::print_aux_pair_domains() {
@@ -1657,6 +1660,30 @@ void DLPNOBase::print_aux_pair_domains() {
                     total_domain_ri_atom / n_lmo_pairs);
     outfile->Printf("      Min     = %4d AUX BFs (%d atoms)\n", min_domain_ri, min_domain_ri_atom);
     outfile->Printf("      Max     = %4d AUX BFs (%d atoms)\n", max_domain_ri, max_domain_ri_atom);
+}
+
+void DLPNOBase::print_lmo_pair_domains() {
+    int n_lmo_pairs = lmopair_to_lmos_.size();
+    int min_domain_lmo = lmopair_to_lmos_[0].size(), max_domain_lmo = 0, total_domain_lmo = 0;
+    for (size_t ij = 0; ij < n_lmo_pairs; ij++) {
+        int pair_domain_size_lmo = lmopair_to_lmos_[ij].size();
+        // int pair_domain_size_atom = lmopair_to_paoatoms_[ij].size();
+
+        total_domain_lmo += pair_domain_size_lmo;
+        // total_domain_atom += pair_domain_size_atom;
+
+        min_domain_lmo = std::min(min_domain_lmo, pair_domain_size_lmo);
+        // min_domain_atom = std::min(min_domain_atom, pair_domain_size_atom);
+
+        max_domain_lmo = std::max(max_domain_lmo, pair_domain_size_lmo);
+        // max_domain_atom = std::max(max_domain_atom, pair_domain_size_atom);
+    }
+
+    outfile->Printf("  \n");
+    outfile->Printf("    Local MOs per Local MO pair:\n");
+    outfile->Printf("      Average = %4d LMOs\n", total_domain_lmo / n_lmo_pairs);
+    outfile->Printf("      Min     = %4d LMOs\n", min_domain_lmo);
+    outfile->Printf("      Max     = %4d LMOs\n", max_domain_lmo);
 }
 
 void DLPNOBase::print_pao_pair_domains() {

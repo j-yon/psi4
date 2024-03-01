@@ -255,8 +255,9 @@ class DLPNOBase : public Wavefunction {
       /// Printing
       void print_aux_domains();
       void print_pao_domains();
-      void print_lmo_domains();
+      void print_lmo_domains(bool initial);
       void print_aux_pair_domains();
+      void print_lmo_pair_domains();
       void print_pao_pair_domains();
 
     public:
@@ -344,8 +345,8 @@ class DLPNOCCSD : public DLPNOBase {
     std::vector<SharedMatrix> J_ijab_; /// (i j | a_ij b_ij)
     std::vector<SharedMatrix> L_iajb_; /// 2.0 * (i a_ij | j b_ij) - (i b_ij | j a_ij)
     std::vector<SharedMatrix> M_iajb_; /// 2.0 * (i a_ij | j b_ij) - (i j | b_ij a_ij)
-    std::vector<std::vector<SharedMatrix>> J_ij_k_; /// (i j | a_ik b_jk)
-    std::vector<std::vector<SharedMatrix>> K_ij_k_; /// (i a_ik | j b_jk)
+    std::vector<std::vector<SharedMatrix>> J_ij_kj_; /// (i k | a_ij b_jk)
+    std::vector<std::vector<SharedMatrix>> K_ij_kj_; /// (i a_ij | k b_kj)
     /// (1 occupied, 3 virtual)
     std::vector<SharedMatrix> K_tilde_chem_; /// (i e_ij | a_ij f_ij) [aka K_tilde] (stored as (e, a*f)) [Chemist's Notation]
     std::vector<SharedMatrix> K_tilde_phys_; /// (i e_ij | a_ij f_ij) [aka K_tilde] (stored as (a, e*f)) [Physicist's Notation]
