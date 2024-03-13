@@ -91,6 +91,11 @@ void DLPNOBase::common_init() {
 
     // did the user manually change expert level options?
     const bool T_CUT_PNO_changed = options_["T_CUT_PNO"].has_changed();
+    const bool T_CUT_TRACE_changed = options_["T_CUT_TRACE"].has_changed();
+    const bool T_CUT_ENERGY_changed = options_["T_CUT_ENERGY"].has_changed();
+    const bool T_CUT_PNO_MP2_changed = options_["T_CUT_PNO_MP2"].has_changed();
+    const bool T_CUT_TRACE_MP2_changed = options_["T_CUT_TRACE_MP2"].has_changed();
+    const bool T_CUT_ENERGY_MP2_changed = options_["T_CUT_ENERGY_MP2"].has_changed();
     const bool DIAG_SCALE_changed = options_["T_CUT_PNO_DIAG_SCALE"].has_changed();
     const bool T_CUT_DO_changed = options_["T_CUT_DO"].has_changed();
     const bool T_CUT_PAIRS_changed = options_["T_CUT_PAIRS"].has_changed();
@@ -116,6 +121,10 @@ void DLPNOBase::common_init() {
     } else {
         if (options_.get_str("PNO_CONVERGENCE") == "LOOSE") {
             if (!T_CUT_PNO_changed) T_CUT_PNO_ = 1e-6;
+            if (!T_CUT_TRACE_changed) T_CUT_TRACE_ = 0.9;
+            if (!T_CUT_ENERGY_changed) T_CUT_ENERGY_ = 0.9;
+            if (!T_CUT_TRACE_MP2_changed) T_CUT_TRACE_MP2_ = 0.99;
+            if (!T_CUT_ENERGY_MP2_changed) T_CUT_ENERGY_MP2_ = 0.99;
             if (!T_CUT_DO_changed) T_CUT_DO_ = 2e-2;
             if (!DIAG_SCALE_changed) T_CUT_PNO_DIAG_SCALE_ = 3e-2;
             if (!T_CUT_PAIRS_changed) T_CUT_PAIRS_ = 1e-3;
@@ -123,6 +132,10 @@ void DLPNOBase::common_init() {
             if (!PRESCREENING_changed) options_.set_str("DLPNO", "PRESCREENING_ALGORITHM", "SC_LMP2");
         } else if (options_.get_str("PNO_CONVERGENCE") == "NORMAL") {
             if (!T_CUT_PNO_changed) T_CUT_PNO_ = 3.33e-7;
+            if (!T_CUT_TRACE_changed) T_CUT_TRACE_ = 0.99;
+            if (!T_CUT_ENERGY_changed) T_CUT_ENERGY_ = 0.99;
+            if (!T_CUT_TRACE_MP2_changed) T_CUT_TRACE_MP2_ = 0.999;
+            if (!T_CUT_ENERGY_MP2_changed) T_CUT_ENERGY_MP2_ = 0.997;
             if (!T_CUT_DO_changed) T_CUT_DO_ = 1e-2;
             if (!DIAG_SCALE_changed) T_CUT_PNO_DIAG_SCALE_ = 3e-2;
             if (!T_CUT_PAIRS_changed) T_CUT_PAIRS_ = 1e-4;
@@ -130,6 +143,10 @@ void DLPNOBase::common_init() {
             if (!PRESCREENING_changed) options_.set_str("DLPNO", "PRESCREENING_ALGORITHM", "SC_LMP2");
         } else if (options_.get_str("PNO_CONVERGENCE") == "TIGHT") {
             if (!T_CUT_PNO_changed) T_CUT_PNO_ = 1e-7;
+            if (!T_CUT_TRACE_changed) T_CUT_TRACE_ = 0.999;
+            if (!T_CUT_ENERGY_changed) T_CUT_ENERGY_ = 0.997;
+            if (!T_CUT_TRACE_MP2_changed) T_CUT_TRACE_MP2_ = 0.9999;
+            if (!T_CUT_ENERGY_MP2_changed) T_CUT_ENERGY_MP2_ = 0.999;
             if (!T_CUT_DO_changed) T_CUT_DO_ = 5e-3;
             if (!DIAG_SCALE_changed) T_CUT_PNO_DIAG_SCALE_ = 1e-3;
             if (!T_CUT_PAIRS_changed) T_CUT_PAIRS_ = 1e-5;
@@ -137,6 +154,10 @@ void DLPNOBase::common_init() {
             if (!PRESCREENING_changed) options_.set_str("DLPNO", "PRESCREENING_ALGORITHM", "FULL_LMP2");
         } else if (options_.get_str("PNO_CONVERGENCE") == "VERY_TIGHT") {
             if (!T_CUT_PNO_changed) T_CUT_PNO_ = 1e-8;
+            if (!T_CUT_TRACE_changed) T_CUT_TRACE_ = 0.999;
+            if (!T_CUT_ENERGY_changed) T_CUT_ENERGY_ = 0.997;
+            if (!T_CUT_TRACE_MP2_changed) T_CUT_TRACE_MP2_ = 0.9999;
+            if (!T_CUT_ENERGY_MP2_changed) T_CUT_ENERGY_MP2_ = 0.999;
             if (!T_CUT_DO_changed) T_CUT_DO_ = 5e-3;
             if (!DIAG_SCALE_changed) T_CUT_PNO_DIAG_SCALE_ = 1e-3;
             if (!T_CUT_PAIRS_changed) T_CUT_PAIRS_ = 1e-6;
