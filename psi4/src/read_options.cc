@@ -2524,6 +2524,8 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         /*- Use projection approximation for linear (i j | a b) integrals in LCCSD?
             [This is HIGHLY not recommended] !expert -*/
         options.add_bool("PROJECT_J", false);
+        /*- Perform "dispersion correction" for neglected weak pairs? !expert -*/
+        options.add_bool("DISPERSION_CORRECTION", false);
         /*- Use low memory PNO overlap algorithm? !expert -*/
         options.add_bool("LOW_MEMORY_OVERLAP", false);
         /*- AO ERI Schwarz Screening tolerance for building DF ints in DLPNO !expert -*/

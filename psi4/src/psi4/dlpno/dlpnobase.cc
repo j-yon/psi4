@@ -137,7 +137,7 @@ void DLPNOBase::common_init() {
             if (!T_CUT_TRACE_MP2_changed) T_CUT_TRACE_MP2_ = 0.999;
             if (!T_CUT_ENERGY_MP2_changed) T_CUT_ENERGY_MP2_ = 0.997;
             if (!T_CUT_DO_changed) T_CUT_DO_ = 1e-2;
-            if (!DIAG_SCALE_changed) T_CUT_PNO_DIAG_SCALE_ = 3e-2;
+            if (!DIAG_SCALE_changed) T_CUT_PNO_DIAG_SCALE_ = 1e-3;
             if (!T_CUT_PAIRS_changed) T_CUT_PAIRS_ = 1e-4;
             if (!T_CUT_MKN_changed) T_CUT_MKN_ = 1e-3;
             if (!PRESCREENING_changed) options_.set_str("DLPNO", "PRESCREENING_ALGORITHM", "SC_LMP2");

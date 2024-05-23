@@ -1266,7 +1266,7 @@ void DLPNOCCSD::compute_cc_integrals() {
         C_DGESV_wrapper(A_solve->clone(), q_ov);
         C_DGESV_wrapper(A_solve->clone(), q_vv);
 
-        if (!project_j_ && i_j_to_ij_strong_[i][j] != -1) {
+        if (!project_j_ && (i_j_to_ij_strong_[i][j] != -1 || disp_correct_)) {
             for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
                 int k = lmopair_to_lmos_[ij][k_ij];
                 int ik = i_j_to_ij_[i][k], kj = i_j_to_ij_[k][j];
@@ -1310,7 +1310,7 @@ void DLPNOCCSD::compute_cc_integrals() {
             }
         }
 
-        if (!project_k_ && i_j_to_ij_strong_[i][j] != -1) {
+        if (!project_k_ && (i_j_to_ij_strong_[i][j] != -1 || disp_correct_)) {
             for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
                 int k = lmopair_to_lmos_[ij][k_ij];
                 int ik = i_j_to_ij_[i][k], kj = i_j_to_ij_[k][j];
@@ -3148,12 +3148,133 @@ void DLPNOCCSD::t1_lccsd_iterations() {
     e_lccsd_ = e_curr;
 }
 
+void DLPNOCCSD::dispersion_correction() {
+
+    int naocc = i_j_to_ij_.size();
+    int n_weak_pairs = ij_to_i_j_weak_.size();
+
+    double de_disp_weak = 0.0;
+
+    bool tight = options_.get_str("PNO_CONVERGENCE") == "TIGHT" || options_.get_str("PNO_CONVERGENCE") == "VERY_TIGHT";
+
+#pragma omp parallel for schedule(dynamic, 1) reduction(+ : de_disp_weak)
+    for (int ij_weak = 0; ij_weak < n_weak_pairs; ++ij_weak) {
+        auto &[i, j] = ij_to_i_j_weak_[ij_weak];
+        int ij = i_j_to_ij_[i][j];
+        int ji = ij_to_ji_[ij];
+
+        if (i > j) continue;
+
+        int nlmo_ij = lmopair_to_lmos_[ij].size();
+        int naux_ij = lmopair_to_ribfs_[ij].size();
+
+        auto R_ij = std::make_shared<Matrix>(n_pno_[ij], n_pno_[ij]);
+
+        /*
+        // Expensive term A
+        auto qab_ij = QAB_PNO(ij);
+        for (int q_ij = 0; q_ij < naux_ij; ++q_ij) {
+            R_ij->add(linalg::triplet(qab_ij[q_ij], T_iajb_[ij], qab_ij[q_ij], false, false, true));
+        } // end q_ij
+        */
+
+        for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
+            int k = lmopair_to_lmos_[ij][k_ij];
+            int ik = i_j_to_ij_[i][k], kj = i_j_to_ij_[k][j];
+
+            // Old Version
+
+            R_ij->add(linalg::triplet(K_ij_kj_[ij][k_ij], Tt_iajb_[kj], S_PNO(kj, ij), false, false, false));
+            R_ij->add(linalg::triplet(S_PNO(ij, ik), Tt_iajb_[ik], K_ij_kj_[ji][k_ij], false, false, true));
+
+            auto temp_a = linalg::triplet(J_ij_kj_[ij][k_ij], Tt_iajb_[kj], S_PNO(kj, ij), false, false, false);
+            temp_a->add(linalg::triplet(S_PNO(ij, ik), Tt_iajb_[ik], J_ij_kj_[ji][k_ij], false, false, true));
+            temp_a->scale(-0.5);
+            R_ij->add(temp_a);
+
+            if (tight) {
+                R_ij->subtract(linalg::triplet(S_PNO(ij, kj), T_iajb_[kj], J_ij_kj_[ij][k_ij], false, false, true));
+                R_ij->subtract(linalg::triplet(J_ij_kj_[ji][k_ij], T_iajb_[ik], S_PNO(ik, ij), false, false, false));
+
+                temp_a = linalg::triplet(J_ij_kj_[ij][k_ij], T_iajb_[kj], S_PNO(kj, ij), false, true, false);
+                temp_a->add(linalg::triplet(S_PNO(ij, ik), T_iajb_[ik], J_ij_kj_[ji][k_ij], false, true, true));
+                temp_a->scale(-0.5);
+                R_ij->add(temp_a);
+
+                /*
+                for (int l_ij = 0; l_ij < nlmo_ij; ++l_ij) {
+                    int l = lmopair_to_lmos_[ij][l_ij];
+                    int kl = i_j_to_ij_[k][l], il = i_j_to_ij_[i][l], lj = i_j_to_ij_[l][j];
+                    if (kl == -1) continue;
+
+                    auto U_ik = linalg::triplet(S_PNO(ij, ik), Tt_iajb_[ik], S_PNO(ik, kl));
+                    auto U_il = linalg::triplet(S_PNO(ij, il), Tt_iajb_[il], S_PNO(il, kl));
+                    auto U_kj = linalg::triplet(S_PNO(kl, kj), Tt_iajb_[kj], S_PNO(kj, ij));
+                    auto U_lj = linalg::triplet(S_PNO(kl, lj), Tt_iajb_[lj], S_PNO(lj, ij));
+
+                    temp_a = linalg::triplet(U_il, L_iajb_[kl], U_kj, false, true, false);
+                    temp_a->add(linalg::triplet(U_ik, L_iajb_[kl], U_lj, false, false, false));
+                    temp_a->scale(0.25);
+                    R_ij->add(temp_a);
+                }
+                */
+            }
+
+            // New Version (MP3)
+            /*
+            auto temp_a = linalg::triplet(S_PNO(ij, ik), T_iajb_[ik], K_ij_kj_[ji][k_ij], false, false, true);
+            temp_a->scale(4.0);
+            R_ij->add(temp_a);
+
+            temp_a = linalg::triplet(S_PNO(ij, ik), T_iajb_[ik], J_ij_kj_[ji][k_ij], false, false, true);
+            temp_a->scale(-2.0);
+            R_ij->add(temp_a);
+
+            temp_a = linalg::triplet(S_PNO(ij, ik), T_iajb_[ik], K_ij_kj_[ji][k_ij], false, true, true);
+            temp_a->scale(-2.0);
+            R_ij->add(temp_a);
+
+            temp_a = linalg::triplet(J_ij_kj_[ji][k_ij], T_iajb_[ik], S_PNO(ik, ij), false, true, false);
+            temp_a->scale(-2.0);
+            R_ij->add(temp_a);
+            */
+
+            /*
+            // Expensive term B
+            for (int l_ij = 0; l_ij < nlmo_ij; ++l_ij) {
+                int l = lmopair_to_lmos_[ij][l_ij];
+                int kl = i_j_to_ij_[k][l];
+
+                if (kl == -1) continue;
+
+                auto T_kl = linalg::triplet(S_PNO(ij, kl), T_iajb_[kl], S_PNO(kl, ij));
+                T_kl->scale((*K_mnij_[ij])(k_ij, l_ij));
+                R_ij->add(T_kl);
+            }
+            */
+        }
+
+        for (int a_ij = 0; a_ij < n_pno_[ij]; ++a_ij) {
+            for (int b_ij = 0; b_ij < n_pno_[ij]; ++b_ij) {
+                (*R_ij)(a_ij, b_ij) /= (-(*e_pno_[ij])(a_ij) - (*e_pno_[ij])(b_ij) + (*F_lmo_)(i, i) + (*F_lmo_)(j, j));
+            }
+        }
+
+        double prefactor = (i == j) ? 1.0 : 2.0;
+        de_disp_weak += prefactor * R_ij->vector_dot(L_iajb_[ij]);
+    }
+
+    de_disp_weak_ = de_disp_weak;
+
+}
+
 double DLPNOCCSD::compute_energy() {
 
     timer_on("DLPNO-CCSD");
 
     project_j_ = options_.get_bool("PROJECT_J");
     project_k_ = options_.get_bool("PROJECT_K");
+    disp_correct_ = options_.get_bool("DISPERSION_CORRECTION");
 
     print_header();
 
@@ -3244,6 +3365,14 @@ double DLPNOCCSD::compute_energy() {
     }
     timer_off("LCCSD");
 
+    de_disp_weak_ = 0.0;
+
+    if (disp_correct_) {
+        timer_on("Weak Pair Dispersion Correction");
+        dispersion_correction();
+        timer_off("Weak Pair Dispersion Correction");
+    }
+
     if (write_qab_pao_) {
         if (algorithm_ == CCSD) {
             // Integrals no longer needed
@@ -3269,7 +3398,7 @@ double DLPNOCCSD::compute_energy() {
     timer_off("DLPNO-CCSD");
 
     double e_scf = reference_wavefunction_->energy();
-    double e_ccsd_corr = e_lccsd_ + de_lmp2_weak_ + de_lmp2_eliminated_ + de_dipole_ + de_pno_total_;
+    double e_ccsd_corr = e_lccsd_ + de_lmp2_weak_ + de_lmp2_eliminated_ + de_dipole_ + de_disp_weak_ + de_pno_total_;
     double e_ccsd_total = e_scf + e_ccsd_corr;
 
     set_scalar_variable("CCSD CORRELATION ENERGY", e_ccsd_corr);
@@ -3391,13 +3520,14 @@ void DLPNOCCSD::print_results() {
     set_scalar_variable("CC T1 DIAGNOSTIC", t1diag);
 
     outfile->Printf("  \n");
-    outfile->Printf("  Total DLPNO-CCSD Correlation Energy: %16.12f \n", e_lccsd_ + de_lmp2_weak_ + de_lmp2_eliminated_ + de_pno_total_ + de_dipole_);
+    outfile->Printf("  Total DLPNO-CCSD Correlation Energy: %16.12f \n", e_lccsd_ + de_lmp2_weak_ + de_lmp2_eliminated_ + de_pno_total_ + de_disp_weak_ + de_dipole_);
     outfile->Printf("    CCSD Correlation Energy:           %16.12f \n", e_lccsd_);
     outfile->Printf("    Eliminated Pair MP2 Correction     %16.12f \n", de_lmp2_eliminated_);
     outfile->Printf("    Weak Pair MP2 Correction:          %16.12f \n", de_lmp2_weak_);
+    outfile->Printf("    Weak Pair Dispersion Correction:   %16.12f \n", de_disp_weak_);
     outfile->Printf("    Dipole Pair Correction:            %16.12f \n", de_dipole_);
     outfile->Printf("    PNO Truncation Correction:         %16.12f \n", de_pno_total_);
-    outfile->Printf("\n\n  @Total DLPNO-CCSD Energy: %16.12f \n", variables_["SCF TOTAL ENERGY"] + e_lccsd_ + de_lmp2_eliminated_ + de_lmp2_weak_ + de_pno_total_ + de_dipole_);
+    outfile->Printf("\n\n  @Total DLPNO-CCSD Energy: %16.12f \n", variables_["SCF TOTAL ENERGY"] + e_lccsd_ + de_lmp2_eliminated_ + de_lmp2_weak_ + de_pno_total_ + de_disp_weak_ + de_dipole_);
 }
 
 }  // namespace dlpno

@@ -151,6 +151,7 @@ class DLPNOBase : public Wavefunction {
       double de_lmp2_eliminated_; ///< LMP2 correction for eliminated pairs (surviving pairs after dipole screening that
       // are neither weak nor strong)
       double de_lmp2_weak_; ///< LMP2 correction for weak pairs (only for CC)
+      double de_disp_weak_; ///< weak pair dispersion correction
       double de_pno_total_; ///< energy correction for PNO truncation
       double de_pno_total_os_; ///< energy correction for PNO truncation
       double de_pno_total_ss_; ///< energy correction for PNO truncation
@@ -309,6 +310,8 @@ class DLPNOCCSD : public DLPNOBase {
     bool project_j_;
     /// NOT [form (i a_ik | j b_jk)]
     bool project_k_;
+    /// Do weak pair dispersion correction?
+    bool disp_correct_;
 
     /// Number of svd functions for PNO pair ij in rank-reduced (Q_ij |a_ij b_ij)
     std::vector<int> n_svd_;
@@ -345,8 +348,8 @@ class DLPNOCCSD : public DLPNOBase {
     std::vector<SharedMatrix> J_ijab_; /// (i j | a_ij b_ij)
     std::vector<SharedMatrix> L_iajb_; /// 2.0 * (i a_ij | j b_ij) - (i b_ij | j a_ij)
     std::vector<SharedMatrix> M_iajb_; /// 2.0 * (i a_ij | j b_ij) - (i j | b_ij a_ij)
-    std::vector<std::vector<SharedMatrix>> J_ij_kj_; /// (i k | a_ij b_jk)
-    std::vector<std::vector<SharedMatrix>> K_ij_kj_; /// (i a_ij | k b_kj)
+    std::vector<std::vector<SharedMatrix>> J_ij_kj_;   /// (i k | a_ij b_jk)
+    std::vector<std::vector<SharedMatrix>> K_ij_kj_;   /// (i a_ij | k b_kj)
     /// (1 occupied, 3 virtual)
     std::vector<SharedMatrix> K_tilde_chem_; /// (i e_ij | a_ij f_ij) [aka K_tilde] (stored as (e, a*f)) [Chemist's Notation]
     std::vector<SharedMatrix> K_tilde_phys_; /// (i e_ij | a_ij f_ij) [aka K_tilde] (stored as (a, e*f)) [Physicist's Notation]
@@ -426,6 +429,8 @@ class DLPNOCCSD : public DLPNOBase {
     void t1_fock();
     /// local CCSD equations (with the T1-transformation)
     void t1_lccsd_iterations();
+    /// Do "dispersion correction" for weak pairs?
+    void dispersion_correction();
 
     void print_header();
     void print_results();
