@@ -3,7 +3,7 @@
 #
 # Psi4: an open-source quantum chemistry software package
 #
-# Copyright (c) 2007-2022 The Psi4 Developers.
+# Copyright (c) 2007-2024 The Psi4 Developers.
 #
 # The copyrights for code used from other parties are included in
 # the corresponding files.
@@ -37,21 +37,21 @@ Also, many Python extensions to core classes:
  - JK (constructor)
  - VBase (grid)
  - OEProp (avail prop)
-
+ - ERISieve (constructor)
 """
 
 __all__ = [
     "basis_helper",
     "pcm_helper",
+    "plump_qcvar",
     "set_options",
     "set_module_options",
-    "temp_circular_import_blocker",  # retire ASAP
 ]
 
 
+import math
 import os
 import re
-import sys
 import uuid
 import warnings
 from collections import Counter
@@ -61,13 +61,13 @@ from tempfile import NamedTemporaryFile
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
-
 import qcelemental as qcel
-from psi4 import core
-from psi4.driver import qcdb
 
+from psi4 import core, extras
+
+from .. import qcdb
 from . import optproc
-from .exceptions import TestComparisonError, ValidationError, UpgradeHelper
+from .exceptions import TestComparisonError, UpgradeHelper, ValidationError
 
 ## Python basis helps
 
@@ -634,23 +634,22 @@ def pcm_helper(block: str):
     """
     import pcmsolver
 
-    with NamedTemporaryFile(mode="w+t", delete=True) as fl:
+    # delete=True works for Unix but not for Windows
+    with NamedTemporaryFile(mode="w+t", delete=False) as fl:
         fl.write(block)
         fl.flush()
         parsed_pcm = pcmsolver.parse_pcm_input(fl.name)
+        extras.register_scratch_file(fl.name)
 
     with NamedTemporaryFile(mode="w+t", delete=False) as fl:
         fl.write(parsed_pcm)
         core.set_local_option("PCM", "PCMSOLVER_PARSED_FNAME", fl.name)
+        extras.register_scratch_file(fl.name)  # retain with -m (messy) option
 
 
 def _basname(name: str) -> str:
     """Imitates :py:meth:`core.BasisSet.make_filename` without the gbs extension."""
     return name.lower().replace('+', 'p').replace('*', 's').replace('(', '_').replace(')', '_').replace(',', '_')
-
-
-def temp_circular_import_blocker():
-    pass
 
 
 def basis_helper(block: str, name: str = '', key: str = 'BASIS', set_option: bool = True):
@@ -839,6 +838,64 @@ def _qcvar_warnings(key: str) -> str:
     return key
 
 
+def plump_qcvar(
+    key: str,
+    val: Union[float, str, List]) -> Union[float, np.ndarray]:
+    """Prepare serialized QCVariables for QCSchema AtomicResult.extras["qcvars"] by
+    converting flat arrays into numpy, shaped ones and floating strings.
+    Unlike _qcvar_reshape_get/set, multipoles aren't compressed or plumped, only reshaped.
+
+    Parameters
+    ----------
+    key
+        Shape clue (usually QCVariable key) that includes (case insensitive) an identifier like
+        'gradient' as a clue to the array's natural dimensions.
+    val
+        flat (?, ) list or scalar or string, probably from JSON storage.
+
+    Returns
+    -------
+    float or numpy.ndarray
+        Reshaped array of `val` with natural dimensions of `key`.
+
+    """
+    if isinstance(val, (np.ndarray, core.Matrix)):
+        raise TypeError
+    elif isinstance(val, list):
+        tgt = np.asarray(val)
+    else:
+        # presumably scalar. may be string
+        return float(val)
+
+    if key.upper().startswith("MBIS"):
+        if key.upper().endswith("CHARGES"):
+            reshaper = (-1, )
+        elif key.upper().endswith("DIPOLES"):
+            reshaper = (-1, 3)
+        elif key.upper().endswith("QUADRUPOLES"):
+            reshaper = (-1, 3, 3)
+        elif key.upper().endswith("OCTUPOLES"):
+            reshaper = (-1, 3, 3, 3)
+    elif key.upper().endswith("DIPOLE") or "DIPOLE -" in key.upper():
+        reshaper = (3, )
+    elif "QUADRUPOLE POLARIZABILITY TENSOR" in key.upper():
+        reshaper = (3, 3, 3)
+    elif any((key.upper().endswith(p) or f"{p} -" in key.upper()) for p in _multipole_order):
+        p = [p for p in _multipole_order if (key.upper().endswith(p) or f"{p} -" in key.upper())]
+        reshaper = tuple([3] * _multipole_order.index(p[0]))
+    elif key.upper() in ["MULLIKEN_CHARGES", "LOWDIN_CHARGES", "MULLIKEN CHARGES", "LOWDIN CHARGES", "SCF TOTAL ENERGIES"]:
+        reshaper = (-1, )
+    elif "GRADIENT" in key.upper():
+        reshaper = (-1, 3)
+    elif "HESSIAN" in key.upper():
+        ndof = int(math.sqrt(len(tgt)))
+        reshaper = (ndof, ndof)
+    else:
+        raise ValidationError(f'Uncertain how to reshape array: {key}')
+
+    return tgt.reshape(reshaper)
+
+
 _multipole_order = ["dummy", "dummy", "QUADRUPOLE", "OCTUPOLE", "HEXADECAPOLE"]
 for order in range(5, 10):
     _multipole_order.append(f"{int(2**order)}-POLE")
@@ -872,7 +929,7 @@ def _qcvar_reshape_set(key: str, val: np.ndarray) -> np.ndarray:
         p = [p for p in _multipole_order if (key.upper().endswith(p) or f"{p} -" in key.upper())]
         val = _multipole_compressor(val, _multipole_order.index(p[0]))
         reshaper = (1, -1)
-    elif key.upper() in ["MULLIKEN_CHARGES", "LOWDIN_CHARGES", "MULLIKEN CHARGES", "LOWDIN CHARGES"]:
+    elif key.upper() in ["MULLIKEN_CHARGES", "LOWDIN_CHARGES", "MULLIKEN CHARGES", "LOWDIN CHARGES", "SCF TOTAL ENERGIES"]:
         reshaper = (1, -1)
 
     if reshaper:
@@ -881,7 +938,7 @@ def _qcvar_reshape_set(key: str, val: np.ndarray) -> np.ndarray:
         return val
 
 
-def _qcvar_reshape_get(key: str, val: Union[core.Matrix, np.ndarray]) -> Union[core.Matrix, np.ndarray]:
+def _qcvar_reshape_get(key: str, val: core.Matrix) -> Union[core.Matrix, np.ndarray]:
     """For QCVariables where the 2D :py:class:`psi4.core.Matrix` shape is
     unnatural, convert to natural shape in :class:`numpy.ndarray`.
 
@@ -908,9 +965,8 @@ def _qcvar_reshape_get(key: str, val: Union[core.Matrix, np.ndarray]) -> Union[c
     elif any((key.upper().endswith(p) or f"{p} -" in key.upper()) for p in _multipole_order):
         p = [p for p in _multipole_order if (key.upper().endswith(p) or f"{p} -" in key.upper())]
         return _multipole_plumper(val.np.reshape((-1, )), _multipole_order.index(p[0]))
-    elif key.upper() in ["MULLIKEN_CHARGES", "LOWDIN_CHARGES", "MULLIKEN CHARGES", "LOWDIN CHARGES"]:
+    elif key.upper() in ["MULLIKEN_CHARGES", "LOWDIN_CHARGES", "MULLIKEN CHARGES", "LOWDIN CHARGES", "SCF TOTAL ENERGIES"]:
         reshaper = (-1, )
-
     if reshaper:
         return val.np.reshape(reshaper)
     else:
@@ -988,8 +1044,7 @@ def _multipole_plumper(compressed: np.ndarray, order: int) -> np.ndarray:
 
 
 def _core_has_variable(key: str) -> bool:
-    """Whether scalar or array :ref:`QCVariable <sec:appendices:qcvars>` *key*
-    has been set in global memory.
+    """Whether scalar or array :ref:`QCVariable <sec:appendices:qcvars>` *key* has been set in global memory.
 
     Parameters
     ----------
@@ -1002,8 +1057,7 @@ def _core_has_variable(key: str) -> bool:
 
 
 def _core_wavefunction_has_variable(self: core.Wavefunction, key: str) -> bool:
-    """Whether scalar or array :ref:`QCVariable <sec:appendices:qcvars>` *key*
-    has been set on *self*.
+    """Whether scalar or array :ref:`QCVariable <sec:appendices:qcvars>` *key* has been set on *self*.
 
     Parameters
     ----------
@@ -1120,8 +1174,7 @@ def _core_wavefunction_variable(self: core.Wavefunction, key: str) -> Union[floa
 
 
 def _core_set_variable(key: str, val: Union[core.Matrix, np.ndarray, float]) -> None:
-    """Sets scalar or array :ref:`QCVariable <sec:appendices:qcvars>` *key* to
-    *val* in global memory.
+    """Sets scalar or array :ref:`QCVariable <sec:appendices:qcvars>` *key* to *val* in global memory.
 
     Parameters
     ----------
@@ -1161,8 +1214,7 @@ def _core_set_variable(key: str, val: Union[core.Matrix, np.ndarray, float]) -> 
 
 
 def _core_wavefunction_set_variable(self: core.Wavefunction, key: str, val: Union[core.Matrix, np.ndarray, float]) -> None:
-    """Sets scalar or array :ref:`QCVariable <sec:appendices:qcvars>` *key* to
-    *val* on *self*.
+    """Sets scalar or array :ref:`QCVariable <sec:appendices:qcvars>` *key* to *val* on *self*.
 
     Parameters
     ----------
@@ -1208,8 +1260,7 @@ def _core_wavefunction_set_variable(self: core.Wavefunction, key: str, val: Unio
 
 
 def _core_del_variable(key: str) -> None:
-    """Removes scalar or array :ref:`QCVariable <sec:appendices:qcvars>` *key*
-    from global memory if present.
+    """Removes scalar or array :ref:`QCVariable <sec:appendices:qcvars>` *key* from global memory if present.
 
     Parameters
     ----------
@@ -1225,8 +1276,7 @@ def _core_del_variable(key: str) -> None:
 
 
 def _core_wavefunction_del_variable(self: core.Wavefunction, key: str) -> None:
-    """Removes scalar or array :ref:`QCVariable <sec:appendices:qcvars>` *key*
-    from *self* if present.
+    """Removes scalar or array :ref:`QCVariable <sec:appendices:qcvars>` *key* from *self* if present.
 
     Parameters
     ----------
@@ -1326,52 +1376,44 @@ def _core_get_variable(key):
     """
     .. deprecated:: 1.4
        Use :py:func:`psi4.core.variable` instead.
+    .. versionchanged:: 1.9
+       Errors rather than warn-and-forward.
 
     """
-    warnings.warn(
-        "Using `psi4.core.get_variable` instead of `psi4.core.variable` (or `psi4.core.scalar_variable` for scalar variables only) is deprecated, and as soon as 1.4 it will stop working\n",
-        category=FutureWarning,
-        stacklevel=2)
-    return core.scalar_variable(key)
+    raise UpgradeHelper("psi4.core.get_variable", "psi4.core.variable", 1.9, f" Replace `get_variable` with `variable` (or `scalar_variable` for scalar variables only).")
 
 
 def _core_get_variables():
     """
     .. deprecated:: 1.4
        Use :py:func:`psi4.core.variables` instead.
+    .. versionchanged:: 1.9
+       Errors rather than warn-and-forward.
 
     """
-    warnings.warn(
-        "Using `psi4.core.get_variables` instead of `psi4.core.variables` (or `psi4.core.scalar_variables` for scalar variables only) is deprecated, and as soon as 1.4 it will stop working\n",
-        category=FutureWarning,
-        stacklevel=2)
-    return core.scalar_variables()
+    raise UpgradeHelper("psi4.core.get_variables", "psi4.core.variables", 1.9, f" Replace `psi4.core.get_variables` with `psi4.core.variables` (or `psi4.core.scalar_variables` for scalar variables only).")
 
 
 def _core_get_array_variable(key):
     """
     .. deprecated:: 1.4
        Use :py:func:`psi4.core.variable` instead.
+    .. versionchanged:: 1.9
+       Errors rather than warn-and-forward.
 
     """
-    warnings.warn(
-        "Using `psi4.core.get_array_variable` instead of `psi4.core.variable` (or `psi4.core.array_variable` for array variables only) is deprecated, and as soon as 1.4 it will stop working\n",
-        category=FutureWarning,
-        stacklevel=2)
-    return core.array_variable(key)
+    raise UpgradeHelper("psi4.core.get_array_variable", "psi4.core.variable", 1.9, f" Replace `psi4.core.get_array_variable` with `psi4.core.variable` (or `psi4.core.array_variable` for array variables only).")
 
 
 def _core_get_array_variables():
     """
     .. deprecated:: 1.4
        Use :py:func:`psi4.core.variables` instead.
+    .. versionchanged:: 1.9
+       Errors rather than warn-and-forward.
 
     """
-    warnings.warn(
-        "Using `psi4.core.get_array_variables` instead of `psi4.core.variables` (or `psi4.core.array_variables` for array variables only) is deprecated, and as soon as 1.4 it will stop working\n",
-        category=FutureWarning,
-        stacklevel=2)
-    return core.array_variables()
+    raise UpgradeHelper("psi4.core.get_array_variables", "psi4.core.variables", 1.9, f" Replace `psi4.core.get_array_variables` with `psi4.core.variables` (or `psi4.core.array_variables` for array variables only).")
 
 
 core.get_variable = _core_get_variable
@@ -1384,52 +1426,44 @@ def _core_wavefunction_get_variable(cls, key):
     """
     .. deprecated:: 1.4
        Use :py:func:`psi4.core.Wavefunction.variable` instead.
+    .. versionchanged:: 1.9
+       Errors rather than warn-and-forward.
 
     """
-    warnings.warn(
-        "Using `psi4.core.Wavefunction.get_variable` instead of `psi4.core.Wavefunction.variable` (or `psi4.core.Wavefunction.scalar_variable` for scalar variables only) is deprecated, and as soon as 1.4 it will stop working\n",
-        category=FutureWarning,
-        stacklevel=2)
-    return cls.scalar_variable(key)
+    raise UpgradeHelper("psi4.core.Wavefunction.get_variable", "psi4.core.Wavefunction.variable", 1.9, f" Replace `psi4.core.Wavefunction.get_variable` with `psi4.core.Wavefunction.variable` (or `psi4.core.Wavefunction.scalar_variable` for scalar variables only).")
 
 
 def _core_wavefunction_get_array(cls, key):
     """
     .. deprecated:: 1.4
        Use :py:func:`psi4.core.Wavefunction.variable` instead.
+    .. versionchanged:: 1.9
+       Errors rather than warn-and-forward.
 
     """
-    warnings.warn(
-        "Using `psi4.core.Wavefunction.get_array` instead of `psi4.core.Wavefunction.variable` (or `psi4.core.Wavefunction.array_variable` for array variables only) is deprecated, and as soon as 1.4 it will stop working\n",
-        category=FutureWarning,
-        stacklevel=2)
-    return cls.array_variable(key)
+    raise UpgradeHelper("psi4.core.Wavefunction.get_array", "psi4.core.Wavefunction.variable", 1.9, f" Replace `psi4.core.Wavefunction.get_array` with `psi4.core.Wavefunction.variable` (or `psi4.core.Wavefunction.array_variable` for array variables only).")
 
 
 def _core_wavefunction_set_array(cls, key, val):
     """
     .. deprecated:: 1.4
        Use :py:func:`psi4.core.Wavefunction.set_variable` instead.
+    .. versionchanged:: 1.9
+       Errors rather than warn-and-forward.
 
     """
-    warnings.warn(
-        "Using `psi4.core.Wavefunction.set_array` instead of `psi4.core.Wavefunction.set_variable` (or `psi4.core.Wavefunction.set_array_variable` for array variables only) is deprecated, and as soon as 1.4 it will stop working\n",
-        category=FutureWarning,
-        stacklevel=2)
-    return cls.set_array_variable(key, val)
+    raise UpgradeHelper("psi4.core.Wavefunction.set_array", "psi4.core.Wavefunction.set_variable", 1.9, f" Replace `psi4.core.Wavefunction.set_array` with `psi4.core.Wavefunction.set_variable` (or `psi4.core.Wavefunction.set_array_variable` for array variables only).")
 
 
 def _core_wavefunction_arrays(cls):
     """
     .. deprecated:: 1.4
        Use :py:func:`psi4.core.Wavefunction.variables` instead.
+    .. versionchanged:: 1.9
+       Errors rather than warn-and-forward.
 
     """
-    warnings.warn(
-        "Using `psi4.core.Wavefunction.arrays` instead of `psi4.core.Wavefunction.variables` (or `psi4.core.Wavefunction.array_variables` for array variables only) is deprecated, and as soon as 1.4 it will stop working\n",
-        category=FutureWarning,
-        stacklevel=2)
-    return cls.array_variables()
+    raise UpgradeHelper("psi4.core.Wavefunction.arrays", "psi4.core.Wavefunction.variables", 1.9, f" Replace `psi4.core.Wavefunction.arrays` with `psi4.core.Wavefunction.variables` (or `psi4.core.Wavefunction.array_variables` for array variables only).")
 
 
 core.Wavefunction.get_variable = _core_wavefunction_get_variable
@@ -1493,3 +1527,42 @@ def _core_triplet(A, B, C, transA, transB, transC):
 
 core.Matrix.doublet = staticmethod(_core_doublet)
 core.Matrix.triplet = staticmethod(_core_triplet)
+
+
+@staticmethod
+def _core_erisieve_build(
+        orbital_basis: core.BasisSet,
+        cutoff: float = 0.0,
+        do_csam: bool = False
+    ) -> core.ERISieve:
+    """
+    This function previously constructed a Psi4 ERISieve object from an input basis set, with an optional cutoff threshold for
+    ERI screening and an optional input to enable CSAM screening (over Schwarz screening).
+
+    However, as the ERISieve class was removed from Psi4 in v1.9, the function now throws with an UpgradeHelper
+    exception, and lets the user know to use TwoBodyAOInt instead.
+
+    Parameters
+    ----------
+    orbital_basis
+        Basis set to use in the ERISieve object.
+    cutoff
+        Integral cutoff threshold to use for Schwarz/CSAM screening. Defaults to 0.0, disabling screening entirely.
+    do_csam
+        Use CSAM screening? If True, CSAM screening is used; else, Schwarz screening is used. By default,
+        Schwarz screening is utilized.
+
+    Returns
+    -------
+    ERISieve
+        Initialized ERISieve object.
+
+    Example
+    -------
+    >>> sieve = psi4.core.ERISieve.build(bas, cutoff, csam)
+    """
+
+    raise UpgradeHelper("ERISieve", "TwoBodyAOInt", 1.8, " The ERISieve class has been removed and replaced with the TwoBodyAOInt class. ERISieve.build(orbital_basis, cutoff, do_csam) can be replaced with the command sequence factory = psi4.core.IntegralFactory(basis); factory.eri(0).")
+
+
+core.ERISieve.build = _core_erisieve_build

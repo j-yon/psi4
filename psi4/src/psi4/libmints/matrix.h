@@ -3,7 +3,7 @@
  *
  * Psi4: an open-source quantum chemistry software package
  *
- * Copyright (c) 2007-2022 The Psi4 Developers.
+ * Copyright (c) 2007-2024 The Psi4 Developers.
  *
  * The copyrights for code used from other parties are included in
  * the corresponding files.
@@ -36,6 +36,8 @@
 
 #include "dimension.h"
 
+#include <eigen3/Eigen/Core>
+
 namespace psi {
 
 struct dpdfile2;
@@ -49,6 +51,7 @@ class Dimension;
 class Molecule;
 class Vector3;
 class Matrix;
+
 using SharedMatrix = std::shared_ptr<Matrix>;
 
 enum diagonalize_order { evals_only_ascending = 0, ascending = 1, evals_only_descending = 2, descending = 3 };
@@ -271,6 +274,10 @@ class PSI_API Matrix : public std::enable_shared_from_this<Matrix> {
     void copy(const Matrix& cp);
     void copy(const Matrix* cp);
     /** @} */
+
+    /// returns an Eigen::Map object to the underlying matrix data buffer
+    Eigen::Map<Eigen::MatrixXd> eigen_map();
+    std::vector<Eigen::Map<Eigen::MatrixXd>> eigen_maps();
 
     /**
     ** For a matrix of 3D vectors (ncol==3), rotate a set of points around an
@@ -867,22 +874,8 @@ class PSI_API Matrix : public std::enable_shared_from_this<Matrix> {
 
     /// @{
     /// Diagonalizes this, eigvectors and eigvalues must be created by caller.  Only for symmetric matrices.
-    PSI_DEPRECATED("This Matrix::diagonalize overload is deprecated and 1.7 will be the last release to have it.")
-    void diagonalize(Matrix* eigvectors, Vector* eigvalues, diagonalize_order nMatz = ascending);
-    
     void diagonalize(Matrix& eigvectors, Vector& eigvalues, diagonalize_order nMatz = ascending);
     void diagonalize(SharedMatrix& eigvectors, std::shared_ptr<Vector>& eigvalues, diagonalize_order nMatz = ascending);
-
-    PSI_DEPRECATED("This Matrix::diagonalize overload is deprecated and 1.7 will be the last release to have it.")
-    void diagonalize(SharedMatrix& eigvectors, Vector& eigvalues, diagonalize_order nMatz = ascending);
-    /// @}
-
-    /// @{
-    /// Diagonalizes this, applying supplied metric, eigvectors and eigvalues must be created by caller.  Only for
-    /// symmetric matrices.
-    PSI_DEPRECATED("This Matrix::diagonalize overload is deprecated and 1.7 will be the last release to have it.")
-    void diagonalize(SharedMatrix& metric, SharedMatrix& eigvectors, std::shared_ptr<Vector>& eigvalues,
-                     diagonalize_order nMatz = ascending);
     /// @}
 
     /// @{

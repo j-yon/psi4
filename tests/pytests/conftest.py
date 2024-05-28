@@ -48,6 +48,7 @@ def tear_down():
         "grid*",
         "pytest_output.*h5",
         "pytest_output.dat",
+        "pytest_output.log",
         "pytest_output.*grad",
         "*pcmsolver.inp",
         "PEDRA.OUT*",
@@ -65,3 +66,22 @@ def tear_down():
             os.unlink(fl)
         except (OSError, PermissionError):
             pass
+
+
+@pytest.fixture(scope="function")
+def snowflake():
+    try:
+        from qcfractal import FractalSnowflake
+        qca_next_branch = False
+    except ImportError:
+        try:
+            from qcfractal.snowflake import FractalSnowflake
+            qca_next_branch = True
+        except ImportError:
+            return None
+
+    if qca_next_branch:
+        snowflake = FractalSnowflake()
+    else:
+        snowflake = FractalSnowflake(logging=True, max_workers=4)
+    return snowflake

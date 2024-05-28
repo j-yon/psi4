@@ -3,7 +3,7 @@
 #
 # Psi4: an open-source quantum chemistry software package
 #
-# Copyright (c) 2007-2022 The Psi4 Developers.
+# Copyright (c) 2007-2024 The Psi4 Developers.
 #
 # The copyrights for code used from other parties are included in
 # the corresponding files.
@@ -31,12 +31,8 @@ chemical methods.
 
 from qcelemental.util import which
 
-from . import sapt
-from . import proc
-from . import interface_cfour
-from . import proc_data
-
-from psi4.driver.procrouting.dft import functionals, build_superfunctional_from_dictionary
+from . import interface_cfour, proc, proc_data, sapt
+from .dft import build_superfunctional_from_dictionary, functionals
 
 # never import wrappers or aliases into this file
 
@@ -254,7 +250,15 @@ for key in functionals:
         procedures['energy']['fisapt0-' + disp] = proc.run_fisapt
 
 # Will complete modelchem spec with basis='(auto)' for following methods
-integrated_basis_methods = ['g2', 'gaussian-2', 'hf3c', 'hf-3c', 'pbeh3c', 'pbeh-3c', 'sns-mp2']
+integrated_basis_methods = [
+    'g2', 'gaussian-2',
+    'hf3c', 'hf-3c',
+    'pbeh3c', 'pbeh-3c',
+    'b973c', 'b97-3c',
+    'r2scan3c', 'r2scan-3c',
+    'wb97x3c', 'wb97x-3c',
+    'sns-mp2',
+]
 
 # Integrate arbitrary order with driver routines
 for lvl in range(2, 99):

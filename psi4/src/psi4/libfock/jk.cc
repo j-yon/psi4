@@ -3,7 +3,7 @@
  *
  * Psi4: an open-source quantum chemistry software package
  *
- * Copyright (c) 2007-2022 The Psi4 Developers.
+ * Copyright (c) 2007-2024 The Psi4 Developers.
  *
  * The copyrights for code used from other parties are included in
  * the corresponding files.
@@ -56,7 +56,7 @@ using namespace psi;
 namespace psi {
 
 template <class T>
-void _set_dfjk_options(T* jk, Options& options) {
+void _set_dfjk_options(std::shared_ptr<T> jk, Options& options) {
     if (options["INTS_TOLERANCE"].has_changed()) jk->set_cutoff(options.get_double("INTS_TOLERANCE"));
     if (options["PRINT"].has_changed()) jk->set_print(options.get_int("PRINT"));
     if (options["DEBUG"].has_changed()) jk->set_debug(options.get_int("DEBUG"));
@@ -71,15 +71,73 @@ JK::~JK() {}
 std::shared_ptr<JK> JK::build_JK(std::shared_ptr<BasisSet> primary, std::shared_ptr<BasisSet> auxiliary,
                                  Options& options, std::string jk_type) {
 
-    bool do_density_screen = options.get_str("SCREENING") == "DENSITY";
-    bool do_df_scf_guess = options.get_bool("DF_SCF_GUESS");
-    
-    bool can_do_density_screen = (jk_type == "DIRECT" || jk_type == "LINK");
+    // check if algorithm is composite
+    std::array<std::string, 3> composite_algos = { "DFDIRJ", "COSX", "LINK" };
+    bool is_composite = std::any_of(
+      composite_algos.cbegin(),
+      composite_algos.cend(),
+      [&](std::string composite_algo) { return jk_type.find(composite_algo) != std::string::npos; }
+    );
 
-    if (do_density_screen && !(can_do_density_screen || do_df_scf_guess)) {
-        throw PSIEXCEPTION("Density screening has not been implemented for non-Direct SCF algorithms.");
+    // exit calculation if density screening is selected for incompatible JK algo
+    bool do_density_screen = options.get_str("SCREENING") == "DENSITY";
+
+    std::array<std::string, 3> can_do_density_screen = { "DIRECT", "DFDIRJ+LINK", "DFDIRJ" };
+    bool is_compatible_density_screen = std::any_of(
+        can_do_density_screen.cbegin(),
+        can_do_density_screen.cend(),
+        [&](std::string jk_algo) { return jk_type == jk_algo; }
+    ); 
+
+    std::array<std::string, 3> can_be_in_df_scf_guess = { "DIRECT", "MEM_DF", "DISK_DF" };
+    bool is_in_df_scf_guess = std::any_of(
+        can_be_in_df_scf_guess.cbegin(),
+        can_be_in_df_scf_guess.cend(),
+        [&](std::string jk_algo) { return jk_type == jk_algo; }
+    ); 
+    bool do_df_scf_guess = options.get_bool("DF_SCF_GUESS") && is_in_df_scf_guess;
+
+    bool is_incompatible_density_screen = !(is_compatible_density_screen || do_df_scf_guess);
+    
+    if (do_density_screen && is_incompatible_density_screen) {
+        std::string error_message = "SCREENING=DENSITY has not been implemented for ";
+        error_message += (do_df_scf_guess) ? "DF_SCF_GUESS" : jk_type;
+        error_message += ".";
+   
+        throw PSIEXCEPTION(error_message);
+    }
+    
+    // exit calculation if no screening is selected for incompatible JK algo
+    bool do_no_screen = options.get_str("SCREENING") == "NONE";
+    
+    std::array<std::string, 3> cant_do_no_screen = { "PK", "DISK_DF", "DIRECT" };
+    bool is_incompatible_no_screen = std::any_of(
+        cant_do_no_screen.cbegin(),
+        cant_do_no_screen.cend(),
+        [&](std::string jk_algo) { return jk_type == jk_algo; }
+    ); 
+    is_incompatible_no_screen |= is_composite; 
+    
+    if (do_no_screen && is_incompatible_no_screen) {
+        std::string error_message = "SCREENING=NONE has not been implemented for ";
+        error_message += jk_type;
+        error_message += ".";
+ 
+        throw PSIEXCEPTION(error_message);
     }
 
+    // exit calculation for other incompatible JK + SCREENING combos 
+    std::string screening_type = options.get_str("SCREENING");
+    if (jk_type == "DFDIRJ+LINK" && ((screening_type == "SCHWARZ") || screening_type == "CSAM" )) {
+        std::string error_message = "SCREENING=";
+        error_message += screening_type;
+        error_message += " has not been implemented for ";
+        error_message += jk_type;
+        error_message += ".";
+ 
+        throw PSIEXCEPTION(error_message);
+    }
+   
     // Throw small DF warning
     if (jk_type == "DF") {
         outfile->Printf("\n  Warning: JK type 'DF' found in simple constructor, defaulting to DiskDFJK.\n");
@@ -89,7 +147,7 @@ std::shared_ptr<JK> JK::build_JK(std::shared_ptr<BasisSet> primary, std::shared_
     }
 
     if (jk_type == "CD") {
-        CDJK* jk = new CDJK(primary, options.get_double("CHOLESKY_TOLERANCE"));
+        auto jk = std::make_shared<CDJK>(primary, options, options.get_double("CHOLESKY_TOLERANCE"));
 
         if (options["INTS_TOLERANCE"].has_changed()) jk->set_cutoff(options.get_double("INTS_TOLERANCE"));
         if (options["SCREENING"].has_changed()) jk->set_csam(options.get_str("SCREENING") == "CSAM");
@@ -101,23 +159,23 @@ std::shared_ptr<JK> JK::build_JK(std::shared_ptr<BasisSet> primary, std::shared_
         if (options["DF_INTS_NUM_THREADS"].has_changed())
             jk->set_df_ints_num_threads(options.get_int("DF_INTS_NUM_THREADS"));
 
-        return std::shared_ptr<JK>(jk);
+        return jk;
 
     } else if (jk_type == "DISK_DF") {
-        DiskDFJK* jk = new DiskDFJK(primary, auxiliary);
+        auto jk = std::make_shared<DiskDFJK>(primary, auxiliary, options);
         _set_dfjk_options<DiskDFJK>(jk, options);
         if (options["DF_INTS_IO"].has_changed()) jk->set_df_ints_io(options.get_str("DF_INTS_IO"));
 
-        return std::shared_ptr<JK>(jk);
+        return jk;
 
     } else if (jk_type == "MEM_DF") {
-        MemDFJK* jk = new MemDFJK(primary, auxiliary);
+        auto jk = std::make_shared<MemDFJK>(primary, auxiliary, options);
         // TODO: re-enable after fixing all bugs
         jk->set_wcombine(false);
         _set_dfjk_options<MemDFJK>(jk, options);
         if (options["WCOMBINE"].has_changed()) { jk->set_wcombine(options.get_bool("WCOMBINE")); }
 
-        return std::shared_ptr<JK>(jk);
+        return jk;
     } else if (jk_type == "PK") {
         PKJK* jk = new PKJK(primary, options);
 
@@ -152,8 +210,9 @@ std::shared_ptr<JK> JK::build_JK(std::shared_ptr<BasisSet> primary, std::shared_
 
         return std::shared_ptr<JK>(jk);
 
-    } else if (jk_type == "COSX") {
-        auto jk = std::make_shared<DFJCOSK>(primary, auxiliary, options);
+    /// handle composite methods
+    } else if (is_composite) {
+        auto jk = std::make_shared<CompositeJK>(primary, auxiliary, options);
 
         if (options["INTS_TOLERANCE"].has_changed()) jk->set_cutoff(options.get_double("INTS_TOLERANCE"));
         if (options["SCREENING"].has_changed()) jk->set_csam(options.get_str("SCREENING") == "CSAM");
@@ -163,17 +222,6 @@ std::shared_ptr<JK> JK::build_JK(std::shared_ptr<BasisSet> primary, std::shared_
 
         return jk;
 
-    } else if (jk_type == "LINK") {
-        auto jk = std::make_shared<DFJLinK>(primary, auxiliary, options);
-
-        if (options["INTS_TOLERANCE"].has_changed()) jk->set_cutoff(options.get_double("INTS_TOLERANCE"));
-        if (options["SCREENING"].has_changed()) jk->set_csam(options.get_str("SCREENING") == "CSAM");
-        if (options["PRINT"].has_changed()) jk->set_print(options.get_int("PRINT"));
-        if (options["DEBUG"].has_changed()) jk->set_debug(options.get_int("DEBUG"));
-        if (options["BENCH"].has_changed()) jk->set_bench(options.get_int("BENCH"));
-
-        return jk;
-    
     } else {
         std::stringstream message;
         message << "JK::build_JK: Unkown SCF Type '" << jk_type << "'" << std::endl;
@@ -218,8 +266,12 @@ SharedVector JK::iaia(SharedMatrix /*Ci*/, SharedMatrix /*Ca*/) {
     throw PSIEXCEPTION("JK: (ia|ia) integrals not implemented");
 }
 
-const std::vector<size_t>& JK::computed_shells_per_iter() {
+const std::unordered_map<std::string, std::vector<size_t> >& JK::computed_shells_per_iter() {
     return computed_shells_per_iter_;
+}
+
+const std::vector<size_t>& JK::computed_shells_per_iter(const std::string& n_let) {
+    return computed_shells_per_iter_[n_let];
 }
 
 void JK::common_init() {
@@ -244,7 +296,6 @@ void JK::common_init() {
     omega_ = 0.0;
     omega_alpha_ = 1.0;
     omega_beta_ = 0.0;
-    early_screening_ = false;
 
     num_computed_shells_ = 0L;
     computed_shells_per_iter_ = {};

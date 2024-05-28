@@ -95,6 +95,7 @@ def test_psi4_cas(datadir):
     assert psi4.compare_values(-76.073865006902, atres.return_result, 6, 'CASSCF Energy')
 
 
+@pytest.mark.nbody
 def test_psi4_dfmp2(datadir):
     """dfmp2-1"""
     #! Density fitted MP2 cc-PVDZ/cc-pVDZ-RI computation of formic acid dimer binding energy
@@ -156,6 +157,7 @@ def test_psi4_scfproperty(datadir):
     assert psi4.compare_values(-38.91591819679808, atres.extras["qcvars"]["CURRENT ENERGY"], 6, "SCF energy")
     assert psi4.compare_values(ref_hf_di_au, atres.extras["qcvars"]["SCF DIPOLE"], 4, "SCF DIPOLE")
     assert psi4.compare_values(ref_hf_quad_au, atres.extras["qcvars"]["SCF QUADRUPOLE"], 4, "SCF QUADRUPOLE")
+    print(atres.native_files["grid_field.dat"])
 
     ref_file = datadir.join(f"jatin8.ref")
     with open(ref_file) as f:
@@ -165,3 +167,4 @@ def test_psi4_scfproperty(datadir):
     assert psi4.compare_values(-39.14134740550916, atres.extras["qcvars"]["CURRENT ENERGY"], 6, "B3LYP energy")
     assert psi4.compare_values(ref_b3lyp_di_au, atres.extras["qcvars"]["B3LYP DIPOLE"], 4, "B3LYP DIPOLE")
     assert psi4.compare_values(ref_b3lyp_quad_au, atres.extras["qcvars"]["B3LYP QUADRUPOLE"], 4, "B3LYP QUADRUPOLE")
+    print(atres.native_files["grid_esp.dat"])

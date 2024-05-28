@@ -5,7 +5,7 @@
 #
 # Psi4: an open-source quantum chemistry software package
 #
-# Copyright (c) 2007-2022 The Psi4 Developers.
+# Copyright (c) 2007-2024 The Psi4 Developers.
 #
 # The copyrights for code used from other parties are included in
 # the corresponding files.
@@ -33,6 +33,7 @@ import atexit
 import datetime
 import json
 import os
+import re
 import sys
 import warnings
 from pathlib import Path
@@ -61,11 +62,19 @@ parser.add_argument("-m", "--messy", action='store_true',
 # parser.add_argument("-d", "--debug", action='store_true', help="Flush the outfile at every print statement.")
 # parser.add_argument("-r", "--restart", action='store_true', help="Number to be used instead of process id.")
 # parser.add_argument("-p", "--prefix", help="Prefix name for psi files. Default psi")
+parser.add_argument("--psiapi", action='store_true',
+                    help="""Generates a one-line bash command (safe for command substitution) to source correct """
+                         """paths for Psi4 executable (`which psi4`) and module (`python -c "import psi4"`). """
+                         """This argument is a practical refinement of `--psiapi-path`. Differences are """
+                         """(1) this is one-line so can use cmd substitution and (2) this *doesn't* add the build-time """
+                         """Python interpreter to the path, as this is often controlled by other mechanisms."""
+                         """Also see: `--module`.""")
 parser.add_argument("--psiapi-path", action='store_true',
                     help="""Generates a bash command to source correct Python """
-                         """interpreter and path for ``python -c "import psi4"``""")
+                         """interpreter and path for `python -c "import psi4"` and `which psi4`. """
+                         """Also see: `--psiapi` and `--module`.""")
 parser.add_argument("--module", action='store_true',
-                    help="""Generates the path to PsiAPI loading.""")
+                    help="""Generates the path to PsiAPI loading. That is, the following file exists: `psi4 --module`/psi4/__init__.py . Also, adding `psi4 --module` to PYTHONPATH allows "import psi4".""")
 parser.add_argument("-v", "--verbose", action='store_true', help="Prints Psithon to Python translation.")
 parser.add_argument("--inplace", action='store_true',
                     help="Runs Psi4 from the source directory. !Warning! expert option.")
@@ -78,11 +87,13 @@ parser.add_argument("--qcschema", "--schema", action='store_true',
 parser.add_argument("--json", action='store_true',
                     help="Runs a JSON input file. !Warning! depcrated option in 1.4, use --qcschema instead.")
 parser.add_argument("-t", "--test", nargs='?', const='smoke', default=None,
-                    help="Runs pytest tests. If `pytest-xdist` installed, parallel with `--nthread`.")
+                    help="Runs pytest tests (requires pytest installed). If `pytest-xdist` installed, parallel with `--nthread`.")
 parser.add_argument("--mdi", default=None,
                     help="Sets MDI configuration options")
 parser.add_argument("--loglevel", default=20,
                     help="Sets logging level: WARN=30, INFO=20, DEBUG=10.")
+parser.add_argument("--inherit-loglevel", action='store_true',
+                    help="Takes no action on logging level, not even setting the default, thereby inheriting from existing logger.")
 
 # For plugins
 parser.add_argument("--plugin-name", help="""\
@@ -110,11 +121,36 @@ Generates a CMake command for building a plugin against this Psi4 installation.
 args, unknown = parser.parse_known_args()
 args = args.__dict__  # Namespace object seems silly
 
-# Figure out pythonpath
-cmake_install_prefix = os.path.normpath(os.path.dirname(os.path.abspath(__file__)) + os.path.sep + '..')
-lib_dir = os.path.sep.join([cmake_install_prefix, "@CMAKE_INSTALL_LIBDIR@", "@PYMOD_INSTALL_LIBDIR@"])
+# Figure out paths
+# * some full paths are computed here using the prefix, but all outputs are relative to __file__, so relocatability preserved
+# * note that all path entities are directories except for "executable" that is a file
+executable = Path(__file__).resolve()
+psi4_exe_loc = executable.parent
+
+prefix = Path(r"@CMAKE_INSTALL_PREFIX@".replace("\\", "/"))
+cmake_install_bindir = r"@CMAKE_INSTALL_BINDIR@".replace("\\", "/")
+cmake_install_datadir = r"@CMAKE_INSTALL_DATADIR@".replace("\\", "/")
+cmake_install_libdir = r"@CMAKE_INSTALL_LIBDIR@".replace("\\", "/")
+pymod_install_libdir = r"@PYMOD_INSTALL_LIBDIR@".lstrip("/")
+psi4_install_cmakedir = r"@psi4_INSTALL_CMAKEDIR@".replace("\\", "/")
+full_pymod = (prefix / cmake_install_libdir / pymod_install_libdir / "psi4").resolve()
+full_data = (prefix / cmake_install_datadir / "psi4").resolve()
+full_bin = (prefix / cmake_install_bindir).resolve()
+full_cmake = (prefix / psi4_install_cmakedir).resolve()
+rel_pymod = os.path.relpath(full_pymod, start=full_bin)
+rel_data = os.path.relpath(full_data, start=full_bin)
+rel_cmake = os.path.relpath(full_cmake, start=full_bin)
+
+data_dir = psi4_exe_loc.joinpath(rel_data).resolve()
+psi4_module_loc = psi4_exe_loc.joinpath(rel_pymod).resolve()
+cmake_dir = psi4_exe_loc.joinpath(rel_cmake).resolve()
+cmake_install_prefix = os.path.commonpath([data_dir, psi4_module_loc, psi4_exe_loc, cmake_dir])
+lib_dir = str(psi4_module_loc.parent)
+bin_dir = str(psi4_exe_loc)
+share_cmake_dir = str(cmake_dir)
 
 if args["inplace"]:
+    # not tested after pathlib adjustments
     if "CMAKE_INSTALL_LIBDIR" not in lib_dir:
         raise ImportError("Cannot run inplace from an installed directory.")
 
@@ -151,8 +187,6 @@ if (args["output"] is None) and (args["qcschema"] is False):
 
 # Plugin compile line
 if args['plugin_compile']:
-    share_cmake_dir = os.path.sep.join([cmake_install_prefix, 'share', 'cmake', 'psi4'])
-
     plugincachealongside = os.path.isfile(share_cmake_dir + os.path.sep + 'psi4PluginCache.cmake')
     if plugincachealongside:
         print(f"""cmake -C {share_cmake_dir}/psi4PluginCache.cmake -DCMAKE_PREFIX_PATH={cmake_install_prefix} .""")
@@ -161,9 +195,13 @@ if args['plugin_compile']:
         print("""Install "psi4-dev" via `conda install psi4-dev -c psi4[/label/dev]`, then reissue command.""")
 
 if args['psiapi_path']:
-    pyexe_dir = os.path.dirname("@Python_EXECUTABLE@")
-    bin_dir = Path(cmake_install_prefix) / 'bin'
+    pyexe_dir = os.path.dirname(r"@Python_EXECUTABLE@")
     print(f"""export PATH={pyexe_dir}:$PATH  # python interpreter\nexport PATH={bin_dir}:$PATH  # psi4 executable\nexport PYTHONPATH={lib_dir}:$PYTHONPATH  # psi4 pymodule""")
+    # TODO Py not quite right on conda Windows and Psi include %PREFIX$. but maybe not appropriate for Win anyways
+    sys.exit()
+
+if args['psiapi']:
+    print(f"""export PATH={bin_dir}:$PATH PYTHONPATH={lib_dir}:$PYTHONPATH""")
     sys.exit()
 
 if args["module"]:
@@ -174,6 +212,12 @@ if args["module"]:
 if args["psidatadir"] is not None:
     data_dir = os.path.abspath(os.path.expanduser(args["psidatadir"]))
     os.environ["PSIDATADIR"] = data_dir
+
+if args["version"]:
+    with (psi4_module_loc / "metadata.py").open() as fp: verline = fp.readline()
+    __version__ = re.match(r"__version__ = ['\"](?P<ver>.*)['\"]", verline).group("ver")
+    print(__version__)
+    sys.exit()
 
 ### Actually import psi4 and apply setup ###
 
@@ -186,10 +230,6 @@ warnings.formatwarning = custom_formatwarning
 # Import installed psi4
 sys.path.insert(1, lib_dir)
 import psi4  # isort:skip
-
-if args["version"]:
-    print(psi4.__version__)
-    sys.exit()
 
 # Prevents a poor option combination
 if args['plugin_template'] and (not args['plugin_name']):
@@ -207,14 +247,18 @@ if args['plugin_name']:
     sys.exit()
 
 if args["test"] is not None:
-    if args["test"] not in ['smoke', 'quick', 'full', 'long']:
+    if args["test"] not in ['smoke', 'quick', 'full', 'long', 'smoke_not_d2ints', 'quick_not_d2ints']:
         raise KeyError("The test category {} does not exist.".format(args["test"]))
 
     nthread = int(args["nthread"])
     if nthread == 1:
-        extras = None
+        extras = []
     else:
         extras = ['-n', str(nthread)]
+    if args["test"] == "smoke_not_d2ints":
+        extras.extend(["-m", "smoke and not d2ints"])
+    elif args["test"] == "quick_not_d2ints":
+        extras.extend(["-m", "(quick or smoke) and not d2ints"])
     retcode = psi4.test(args["test"], extras=extras)
     sys.exit(retcode)
 
@@ -225,18 +269,23 @@ args["input"] = os.path.normpath(args["input"])
 # Setup scratch_messy
 _clean_functions = [psi4.core.clean, psi4.extras.clean_numpy_files]
 
-# Setup outfile
-if args["append"] is None:
-    args["append"] = False
-if (args["output"] != "stdout") and (args["qcschema"] is False):
-    psi4.set_output_file(args["output"], args["append"], loglevel=int(args["loglevel"]))
-
-# Set a few options
+# Set a few options (silently)
 psi4.core.set_num_threads(int(args["nthread"]), quiet=True)
 psi4.set_memory(args["memory"], quiet=True)
 psi4.extras._input_dir_ = os.path.dirname(os.path.abspath(args["input"]))
+
+# Setup outfile
+if args["append"] is None:
+    args["append"] = False
+if args["inherit_loglevel"] is None:
+    args["inherit_loglevel"] = False
 if args["qcschema"] is False:
-    psi4.print_header()
+    psi4.set_output_file(
+        args["output"],
+        args["append"],
+        loglevel=int(args["loglevel"]),
+        inherit_loglevel=args["inherit_loglevel"])
+
 start_time = datetime.datetime.now()
 
 # Initialize MDI

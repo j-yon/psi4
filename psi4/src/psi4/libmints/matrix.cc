@@ -3,7 +3,7 @@
  *
  * Psi4: an open-source quantum chemistry software package
  *
- * Copyright (c) 2007-2022 The Psi4 Developers.
+ * Copyright (c) 2007-2024 The Psi4 Developers.
  *
  * The copyrights for code used from other parties are included in
  * the corresponding files.
@@ -403,6 +403,43 @@ void Matrix::copy_to_row(int h, int row, double const *const data) {
 void Matrix::copy(const Matrix &cp) { copy(&cp); }
 
 void Matrix::copy(const SharedMatrix &cp) { copy(cp.get()); }
+
+// produces an Eigen::Map object mapping to the matrix data buffer 
+// of a matrix with a single irrep 
+Eigen::Map<Eigen::MatrixXd> Matrix::eigen_map() {
+    // this function only works with matrices with a single irrep 
+    if (nirrep() != 1) {
+        std::string message = "Matrix::eigen_map() called, but matrix only has one irrep! ";
+        message += "Use Matrix::eigen_maps() instead."; 
+        
+        throw PSIEXCEPTION(message); 
+    }
+
+    // create Eigen matrix "map" using Psi4 matrix data array directly
+    return std::move(
+        Eigen::Map<Eigen::MatrixXd>(
+            get_pointer(), nrow(), ncol()
+        )
+    );
+}
+
+// produces Eigen::Maps object mapping to the matrix data buffer
+// of a matrix with multiple irreps 
+// NOTE: this impl for mapping Psi4 matrices to Eigen maps
+// is currently experimental, as it is unused in the code 
+// currently
+std::vector<Eigen::Map<Eigen::MatrixXd>> Matrix::eigen_maps() {
+    std::vector<Eigen::Map<Eigen::MatrixXd>> eigen_maps;
+    eigen_maps.reserve(nirrep());
+
+    // create Eigen matrix "map"s for each irrep, 
+    // using Psi4 matrix data array directly
+    for (int h = 0; h != nirrep(); ++h) {
+        eigen_maps.emplace_back(get_pointer(h), rowdim(h), coldim(h));
+    } 
+    
+    return eigen_maps;
+}
 
 void Matrix::alloc() {
     if (matrix_) release();
@@ -907,7 +944,7 @@ void Matrix::symmetrize_gradient(std::shared_ptr<Molecule> molecule) {
     CharacterTable ct = molecule->point_group()->char_table();
 
     // Obtain atom mapping of atom * symm op to atom
-    int **atom_map = compute_atom_map(molecule);
+    auto atom_map = compute_atom_map(molecule);
 
     SharedMatrix ret(clone());
     ret->zero();
@@ -933,7 +970,6 @@ void Matrix::symmetrize_gradient(std::shared_ptr<Molecule> molecule) {
             ret->add(atom, 2, so(2, 2) * temp(Gatom, 2) / ct.order());
         }
     }
-    delete_atom_map(atom_map, molecule);
     copy(ret);
     ret.reset();
 }
@@ -944,7 +980,7 @@ void Matrix::symmetrize_hessian(SharedMolecule molecule) {
 
     CharacterTable ct = molecule->point_group()->char_table();
 
-    int **atom_map = compute_atom_map(molecule);
+    auto atom_map = compute_atom_map(molecule);
 
     auto symm = std::make_shared<Matrix>(clone());
     symm->zero();
@@ -997,7 +1033,6 @@ void Matrix::symmetrize_hessian(SharedMolecule molecule) {
             }
         }
     }
-    delete_atom_map(atom_map, molecule);
 }
 
 void Matrix::identity() {
@@ -1714,10 +1749,6 @@ double Matrix::vector_dot(const Matrix *const rhs) {
 
 double Matrix::vector_dot(const SharedMatrix &rhs) { return vector_dot(rhs.get()); }
 
-void Matrix::diagonalize(Matrix *eigvectors, Vector *eigvalues, diagonalize_order nMatz /* = ascending*/) {
-    diagonalize(*eigvectors, *eigvalues, nMatz);
-}
-
 void Matrix::diagonalize(Matrix &eigvectors, Vector &eigvalues, diagonalize_order nMatz /* = ascending*/) {
     if (symmetry_) {
         throw PSIEXCEPTION("Matrix::diagonalize: Matrix is non-totally symmetric.");
@@ -1746,47 +1777,6 @@ void Matrix::diagonalize(Matrix &eigvectors, Vector &eigvalues, diagonalize_orde
 void Matrix::diagonalize(SharedMatrix &eigvectors, std::shared_ptr<Vector> &eigvalues,
                          diagonalize_order nMatz /* = ascending*/) {
     diagonalize(*eigvectors, *eigvalues, nMatz);
-}
-
-void Matrix::diagonalize(SharedMatrix &eigvectors, Vector &eigvalues, diagonalize_order nMatz /* = ascending*/) {
-    diagonalize(*eigvectors, eigvalues, nMatz);
-}
-
-void Matrix::diagonalize(SharedMatrix &metric, SharedMatrix & /*eigvectors*/, std::shared_ptr<Vector> &eigvalues,
-                         diagonalize_order /*nMatz*/) {
-    if (symmetry_) {
-        throw PSIEXCEPTION("Matrix::diagonalize: Matrix non-totally symmetric.");
-    }
-
-    // this and metric are destroyed in the process, so let's make a copy
-    // that we work with.
-    Matrix t(*this);
-    Matrix m(metric);
-
-    int lwork = 3 * max_nrow();
-    std::vector<double> work(lwork);
-
-    for (int h = 0; h < nirrep_; ++h) {
-        if (!rowspi_[h] && !colspi_[h]) continue;
-
-        int err = C_DSYGV(1, 'V', 'U', rowspi_[h], t.matrix_[h][0], rowspi_[h], m.matrix_[h][0], rowspi_[h],
-                          eigvalues->pointer(h), work.data(), lwork);
-
-        if (err != 0) {
-            if (err < 0) {
-                outfile->Printf("Matrix::diagonalize with metric: C_DSYGV: argument %d has invalid parameter.\n", -err);
-
-                abort();
-            }
-            if (err > 0) {
-                outfile->Printf("Matrix::diagonalize with metric: C_DSYGV: error value: %d\n", err);
-
-                abort();
-            }
-        }
-
-        // TODO: Sort the data according to eigenvalues.
-    }
 }
 
 std::tuple<SharedMatrix, SharedVector, SharedMatrix> Matrix::svd_temps() {
@@ -1917,7 +1907,7 @@ void Matrix::svd_a(SharedMatrix &U, SharedVector &S, SharedMatrix &V) {
                 Vp[i][i] = 1.0;
             }
         }
-    }
+    } // End for loop
 }
 
 SharedMatrix Matrix::pseudoinverse(double condition, int &nremoved) {

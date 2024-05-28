@@ -3,7 +3,7 @@
  *
  * Psi4: an open-source quantum chemistry software package
  *
- * Copyright (c) 2007-2022 The Psi4 Developers.
+ * Copyright (c) 2007-2024 The Psi4 Developers.
  *
  * The copyrights for code used from other parties are included in
  * the corresponding files.
@@ -82,9 +82,11 @@ SCFDeriv::SCFDeriv(std::shared_ptr<scf::HF> ref_wfn, Options& options) :
     potential_ = ref_wfn->V_potential();
     if (ref_wfn->has_array_variable("-D Gradient")) {
         gradients_["-D Gradient"] = ref_wfn->array_variable("-D Gradient");
+        gradients_["-D Gradient"]->set_name("-D Gradient");
     }
     if (ref_wfn->has_array_variable("-D Hessian")) {
         hessians_["-D Hessian"] = ref_wfn->array_variable("-D Hessian");
+        hessians_["-D Hessian"]->set_name("-D Hessian");
     }
 
 }
@@ -509,7 +511,7 @@ SharedMatrix SCFDeriv::compute_hessian()
         hessian_terms.push_back("Effective Core Potential");
 
         // Potential energy derivatives
-        std::shared_ptr<ECPInt> ecpint(dynamic_cast<ECPInt*>(integral_->ao_ecp(2)));
+        std::shared_ptr<ECPInt> ecpint(dynamic_cast<ECPInt*>(integral_->ao_ecp(2).release()));
         const auto& buffers = ecpint->buffers();
 
         for (int P = 0; P < basisset_->nshell(); P++) {
@@ -1001,7 +1003,8 @@ SharedMatrix SCFDeriv::compute_hessian()
 #endif
     if (options_.get_str("REFERENCE") == "RHF" || 
         options_.get_str("REFERENCE") == "RKS" || 
-        options_.get_str("REFERENCE") == "UHF") {
+        options_.get_str("REFERENCE") == "UHF" ||
+        options_.get_str("REFERENCE") == "UKS") {
         hessians_["Response"] = hessian_response();
     } else {
         throw PSIEXCEPTION("SCFHessian: Response not implemented for this reference");

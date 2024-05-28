@@ -52,8 +52,9 @@ target_sources(core
   )
 
 # need to down-standard the Libint2 connection from c++17 for Intel as of 2021.4
+# See note at psi4/src/psi4/libmints/CMakeLists.txt
 add_library(l2export OBJECT export_mints.cc)
-set_property(TARGET l2export PROPERTY CXX_STANDARD 14)
+set_property(TARGET l2export PROPERTY CXX_STANDARD "${psi4_CXX_STANDARD_Libint2}")
 set_property(TARGET l2export PROPERTY POSITION_INDEPENDENT_CODE ON)
 target_include_directories(l2export
   PRIVATE
@@ -72,6 +73,14 @@ if(MSVC)
     )
 endif()
 target_link_libraries(core PRIVATE l2export)
+target_compile_definitions(core
+  PRIVATE
+    psi4_SHGSHELL_ORDERING=${psi4_SHGSHELL_ORDERING}
+  )
+target_compile_definitions(l2export
+  PRIVATE
+    psi4_SHGSHELL_ORDERING=${psi4_SHGSHELL_ORDERING}
+  )
 
 # set_target_properties(core
    # PROPERTIES
@@ -105,6 +114,13 @@ if(TARGET ECPINT::ecpint)
     )
 endif()
 
+if(TARGET Einsums::einsums)
+  target_compile_definitions(core
+    PRIVATE
+      USING_Einsums
+    )
+endif()
+
 if(TARGET BrianQC::static_wrapper)
   target_compile_definitions(core
     PRIVATE
@@ -117,6 +133,13 @@ if(TARGET BrianQC::static_wrapper)
   target_link_libraries(core
     PRIVATE
       BrianQC::static_wrapper
+    )
+endif()
+
+if(TARGET IntegratorXX::IntegratorXX)
+  target_link_libraries(core
+    PRIVATE
+      IntegratorXX::IntegratorXX
     )
 endif()
 

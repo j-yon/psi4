@@ -3,7 +3,7 @@
  *
  * Psi4: an open-source quantum chemistry software package
  *
- * Copyright (c) 2007-2022 The Psi4 Developers.
+ * Copyright (c) 2007-2024 The Psi4 Developers.
  *
  * The copyrights for code used from other parties are included in
  * the corresponding files.
@@ -44,7 +44,8 @@
 
 namespace psi {
 
-PSI_API int psi_start(FILE **infile, FILE **outfile, char **psi_file_prefix, int argc, char *argv[], int overwrite_output);
+PSI_API int psi_start(FILE **infile, FILE **outfile, char **psi_file_prefix, int argc, char *argv[],
+                      int overwrite_output);
 PSI_API int psi_stop(FILE *infile, FILE *outfile, char *psi_file_prefix);
 PSI_API char *psi_ifname();
 PSI_API char *psi_ofname();
@@ -72,15 +73,6 @@ PSI_API void arr_to_mat(double **a, double *b, int m, int n);
 //            int nr, int nl, int nc, int add) ;
 PSI_API void print_array(double *a, int m, std::string out);
 PSI_API void print_mat(double **a, int rows, int cols, std::string out);
-
-PSI_DEPRECATED(
-    "The rsp diagonalizer is deprecated and 1.7 will be the last release to have it. Please use DSPEV from LAPACK "
-    "instead.")
-PSI_API void rsp(int nm, int n, int nv, double *array, double *evals, int matz, double **evecs, double toler);
-PSI_DEPRECATED(
-    "The sq_rsp diagonalizer is deprecated and 1.7 will be the last release to have it. Please use DSYEV from LAPACK "
-    "instead.")
-PSI_API void sq_rsp(int nm, int n, double **array, double *evals, int matz, double **evecs, double toler);
 PSI_API void sq_to_tri(double **bmat, double *amat, int size);
 
 [[nodiscard]] int DSYEV_ascending(const int N, const double *const *const array, double *e_vals,
@@ -120,7 +112,7 @@ PSI_API void print_long_int_mat(long int **a, int m, int n, std::string out);
 PSI_API size_t *init_size_t_array(int size);
 
 /* Functions in block_matrix.c */
-PSI_API double **block_matrix(size_t n, size_t m, bool mlock = false);
+[[nodiscard]] PSI_API double **block_matrix(size_t n, size_t m, bool mlock = false);
 PSI_API void free_block(double **array);
 
 /* Functions in fndcor */

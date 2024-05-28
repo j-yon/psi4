@@ -3,7 +3,7 @@
 #
 # Psi4: an open-source quantum chemistry software package
 #
-# Copyright (c) 2007-2022 The Psi4 Developers.
+# Copyright (c) 2007-2024 The Psi4 Developers.
 #
 # The copyrights for code used from other parties are included in
 # the corresponding files.
@@ -26,29 +26,46 @@
 # @END LICENSE
 #
 
+"""
+isort:skip_file
+"""
 
-# Figure out psidatadir: envvar trumps staged/installed
+# Figure out paths
+# * in figuring out psidatadir: envvar trumps staged/installed
+# * some full paths are computed here using the prefix, but all outputs are relative to __file__, so relocatability preserved
+# * note that all path entities are directories except for "executable" that is a file
 import os
-psi4_module_loc = os.path.dirname(os.path.abspath(__file__))
-pymod = os.path.normpath(os.path.sep.join(['@PYMOD_INSTALL_LIBDIR@', '@CMAKE_INSTALL_LIBDIR@', 'psi4']))
-if pymod.startswith(os.path.sep + os.path.sep):
-    pymod = pymod[1:]
-pymod_dir_step = os.path.sep.join(['..'] * pymod.count(os.path.sep))
-data_dir = os.path.sep.join([psi4_module_loc, pymod_dir_step, '@CMAKE_INSTALL_DATADIR@', 'psi4'])
-executable = os.path.abspath(os.path.sep.join([psi4_module_loc, pymod_dir_step, '@CMAKE_INSTALL_BINDIR@', 'psi4']))
 from pathlib import Path
-if not Path(executable).exists():
-    # Win conda recipe moves psi4 executable unknown to CMake
-    executable = str((Path(psi4_module_loc) / ".." / ".." / ".." / "Scripts" / "psi4.exe").resolve())
+psi4_module_loc = Path(__file__).resolve().parent
 
+prefix = Path(r"@CMAKE_INSTALL_PREFIX@".replace("\\", "/"))
+cmake_install_bindir = r"@CMAKE_INSTALL_BINDIR@".replace("\\", "/")
+cmake_install_datadir = r"@CMAKE_INSTALL_DATADIR@".replace("\\", "/")
+cmake_install_libdir = r"@CMAKE_INSTALL_LIBDIR@".replace("\\", "/")
+pymod_install_libdir = r"@PYMOD_INSTALL_LIBDIR@".lstrip("/")
+full_pymod = (prefix / cmake_install_libdir / pymod_install_libdir / "psi4").resolve()
+full_data = (prefix / cmake_install_datadir / "psi4").resolve()
+full_bin = (prefix / cmake_install_bindir).resolve()
+rel_data = os.path.relpath(full_data, start=full_pymod)
+rel_bin = os.path.relpath(full_bin, start=full_pymod)
+
+executable = psi4_module_loc.joinpath(rel_bin, "psi4")
+executable_exe = (Path(r"/opt/anaconda1anaconda2anaconda3") / "Scripts" / "psi4.exe").resolve(strict=False)
+if executable_exe.exists():
+    # Win conda-build generates this unbeknownst to CMake
+    executable = executable_exe
+executable = str(executable.resolve())
+
+data_dir = psi4_module_loc.joinpath(rel_data)
 if "PSIDATADIR" in os.environ.keys():
-    data_dir = os.path.expanduser(os.environ["PSIDATADIR"])
-elif "CMAKE_INSTALL_DATADIR" in data_dir:
-    data_dir = os.path.sep.join([os.path.abspath(os.path.dirname(__file__)), "share", "psi4"])
+    data_dir = Path(os.path.expanduser(os.environ["PSIDATADIR"]))
+elif "CMAKE_INSTALL_DATADIR" in str(data_dir):
+    data_dir = Path(os.path.sep.join([os.path.abspath(os.path.dirname(__file__)), "share", "psi4"]))
 
-data_dir = os.path.abspath(data_dir)
-if not os.path.isdir(data_dir):
-    raise KeyError(f"Unable to read the Psi4 Python folder - check the PSIDATADIR environmental variable - current value is {data_dir}")
+data_dir = data_dir.resolve(strict=False)
+if not data_dir.is_dir():
+    raise KeyError(f"Unable to read the Psi4 Python folder - check the PSIDATADIR environmental variable - current value is {str(data_dir)}")
+data_dir = str(data_dir)
 
 # Init core
 from . import core
@@ -63,7 +80,8 @@ if "PSI_SCRATCH" in os.environ.keys():
     core.IOManager.shared_object().set_default_path(envvar_scratch)
 
 core.set_datadir(data_dir)
-del psi4_module_loc, pymod, pymod_dir_step, data_dir
+del cmake_install_bindir, cmake_install_datadir, cmake_install_libdir, pymod_install_libdir
+del psi4_module_loc, prefix, full_pymod, full_data, full_bin, rel_data, rel_bin, data_dir, executable_exe
 
 # Cleanup core at exit
 import atexit
@@ -92,16 +110,18 @@ from psi4.core import variable, set_variable
 #   rather than letting PYTHONPATH rule for the few.
 import sys
 if "@ENABLE_PCMSolver@".upper() in ["1", "ON", "YES", "TRUE", "Y"]:  # PCMSolver
-    sys.path.insert(1, "@PCMSolver_PYMOD@")
+    sys.path.insert(1, r"@PCMSolver_PYMOD@")
 if "@ENABLE_cppe@".upper() in ["1", "ON", "YES", "TRUE", "Y"]:  # cppe
-    sys.path.insert(1, "@cppe_PYMOD@")
+    sys.path.insert(1, r"@cppe_PYMOD@")
 if "@ENABLE_ddx@".upper() in ["1", "ON", "YES", "TRUE", "Y"]:  # pyddx
-    sys.path.insert(1, "@pyddx_PYMOD@")
+    sys.path.insert(1, r"@pyddx_PYMOD@")
 if "@ENABLE_libefp@".upper() in ["1", "ON", "YES", "TRUE", "Y"]:  # pylibefp
-    sys.path.insert(1, "@pylibefp_PYMOD@")
+    sys.path.insert(1, r"@pylibefp_PYMOD@")
+if "@ENABLE_gdma@".upper() in ["1", "ON", "YES", "TRUE", "Y"]:  # gdma
+    sys.path.insert(1, r"@gdma_PYMOD@")
+if "@ENABLE_bse@".upper() in ["1", "ON", "YES", "TRUE", "Y"]:  # bse
+    sys.path.insert(1, r"@bse_PYMOD@")
 
 # Create a custom logger
 import logging
-root = logging.getLogger()  # create root
-root.setLevel("ERROR")
 logger = logging.getLogger(__name__)  # create initial psi4 from root to be configured later in extras

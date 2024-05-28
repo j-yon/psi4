@@ -3,7 +3,7 @@
  *
  * Psi4: an open-source quantum chemistry software package
  *
- * Copyright (c) 2007-2022 The Psi4 Developers.
+ * Copyright (c) 2007-2024 The Psi4 Developers.
  *
  * The copyrights for code used from other parties are included in
  * the corresponding files.
@@ -74,8 +74,6 @@ void export_fock(py::module &m) {
         .def("get_omega_alpha", &JK::get_omega_alpha, "Weight for HF exchange term in range-separated DFT")
         .def("set_omega_beta", &JK::set_omega_beta, "Weight for dampened exchange term in range-separated DFT", "beta"_a)
         .def("get_omega_beta", &JK::get_omega_beta, "Weight for dampened exchange term in range-separated DFT")
-        .def("set_early_screening", &JK::set_early_screening, "Use severe screening techniques? Useful in early SCF iterations.", "early_screening"_a)
-        .def("get_early_screening", &JK::get_early_screening, "Use severe screening techniques? Useful in early SCF iterations.")
         .def("compute", &JK::compute)
         .def("finalize", &JK::finalize)
         .def("C_clear",
@@ -94,7 +92,8 @@ void export_fock(py::module &m) {
         .def("K", &JK::K, py::return_value_policy::reference_internal)
         .def("wK", &JK::wK, py::return_value_policy::reference_internal)
         .def("D", &JK::D, py::return_value_policy::reference_internal)
-        .def("computed_shells_per_iter", &JK::computed_shells_per_iter, "Array containing the number of ERI shell quartets computed (not screened out) during each compute call.")
+        .def("computed_shells_per_iter", py::overload_cast<>(&JK::computed_shells_per_iter), "Array containing the number of ERI shell n-lets (triplets, quartets) computed (not screened out) during each compute call.")
+        .def("computed_shells_per_iter", py::overload_cast<const std::string&>(&JK::computed_shells_per_iter), "Array containing the number of ERI shell n-lets (triplets, quartets) computed (not screened out) during each compute call.")
         .def("print_header", &JK::print_header, "docstring");
 
     py::class_<LaplaceDenominator, std::shared_ptr<LaplaceDenominator>>(m, "LaplaceDenominator", "Computer class for a Laplace factorization of the four-index energy denominator in MP2 and coupled-cluster")
@@ -162,11 +161,12 @@ void export_fock(py::module &m) {
                                                      std::vector<size_t>);
 
     py::class_<DFHelper, std::shared_ptr<DFHelper>>(m, "DFHelper", "docstring")
-        .def(py::init<std::shared_ptr<BasisSet>, std::shared_ptr<BasisSet>>())
+        .def(py::init<std::shared_ptr<BasisSet>, std::shared_ptr<BasisSet> >())
         .def("set_memory", &DFHelper::set_memory)
         .def("get_memory", &DFHelper::get_memory)
         .def("set_method", &DFHelper::set_method)
         .def("get_method", &DFHelper::get_method)
+        .def("set_subalgo", &DFHelper::set_subalgo)
         .def("get_AO_size", &DFHelper::get_AO_size)
         .def("set_nthreads", &DFHelper::set_nthreads)
         .def("hold_met", &DFHelper::hold_met)
@@ -196,12 +196,12 @@ void export_fock(py::module &m) {
     py::class_<DirectJK, std::shared_ptr<DirectJK>, JK>(m, "DirectJK", "docstring")
         .def("do_incfock_iter", &DirectJK::do_incfock_iter, "Was the last Fock build incremental?");
 
-    py::class_<DFJCOSK, std::shared_ptr<DFJCOSK>, JK>(m, "DFJCOSK", "docstring")
-        .def("do_incfock_iter", &DFJCOSK::do_incfock_iter, "Was the last Fock build incremental?")
-    	.def("clear_D_prev", &DFJCOSK::clear_D_prev, "Clear previous D matrices.");
+    py::class_<CompositeJK, std::shared_ptr<CompositeJK>, JK>(m, "CompositeJK", "docstring")
+        .def("do_incfock_iter", &CompositeJK::do_incfock_iter, "Was the last Fock build incremental?")
+        .def("clear_D_prev", &CompositeJK::clear_D_prev, "Clear previous D matrices.")
+        .def("set_COSX_grid", &CompositeJK::set_COSX_grid, "Set grid to use for COSX for this SCF iteration.")
+        .def("get_COSX_grid", &CompositeJK::get_COSX_grid, "Return grid used for COSX for this SCF iteration.");
 
-    py::class_<DFJLinK, std::shared_ptr<DFJLinK>, JK>(m, "DFJLinK", "docstring")
-        .def("do_incfock_iter", &DFJLinK::do_incfock_iter, "Was the last Fock build incremental?");
     py::class_<scf::SADGuess, std::shared_ptr<scf::SADGuess>>(m, "SADGuess", "docstring")
         .def_static("build_SAD",
                     [](std::shared_ptr<BasisSet> basis, std::vector<std::shared_ptr<BasisSet>> atomic_bases) { return scf::SADGuess(basis, atomic_bases, Process::environment.options); })

@@ -30,6 +30,19 @@ foreach(_l IN LISTS LAPACK_LIBRARIES)
         break()
     endif()
 endforeach()
+if(isMKL STREQUAL " MKL")
+    set(_VENDOR "MKL")
+else()
+    set(_VENDOR "All")
+endif()
+set_target_properties(
+  lapack
+  PROPERTIES
+    VENDOR ${_VENDOR}
+    INT_INTERFACE lp64  # Psi4 only works with lp64 afaik
+  )
+set(export_properties "VENDOR;INT_INTERFACE")
+set_property(TARGET lapack APPEND PROPERTY EXPORT_PROPERTIES "${export_properties}")
 
 # <<  Detect OpenMP and modify for BLAS/LAPACK  >>
 if(NOT TARGET tgt::MathOpenMP)
@@ -47,7 +60,7 @@ list(GET _ill 0 _ill0)
 message(STATUS "${Cyan}Found LAPACK${isMKL}${ColourReset}: ${_ill0};...")
 
 if(NOT (${isMKL} MATCHES "MKL"))
-    message(WARNING "${Yellow}MKL is the only BLAS/LAPACK distribution thoroughly tested with Psi4. Several others are mostly fine, with problems cropping up in particular modules or when running in threaded mode. When using a non-MKL distribution, please run the test suite in full and also run particular tests in threaded mode, if you plan to run Psi4 threaded. MKL is freely available through conda; see instructions to compile against conda MKL through the 'source' option on the download website page.${ColourReset}")
+    message(WARNING "${Yellow}MKL is the only BLAS/LAPACK distribution thoroughly tested with Psi4. Several others are mostly fine, with problems cropping up in particular modules or when running in threaded mode. When using a non-MKL distribution, please run the test suite in full and also run particular tests in threaded mode, if you plan to run Psi4 threaded. MKL is freely available through conda; see instructions to compile against conda MKL through the 'source' option on the download website page. OpenBLAS also seems to work, but be sure you're using the OpenMP, not the pthreads, variant.${ColourReset}")
 endif()
 
 unset(BLAS_LIBRARIES)
@@ -63,7 +76,7 @@ install(TARGETS blas lapk lapack
 
 include(CMakePackageConfigHelpers)
 
-set(CMAKECONFIG_INSTALL_DIR "share/cmake/${PN}")
+set(CMAKECONFIG_INSTALL_DIR "${TargetLAPACK_INSTALL_CMAKEDIR}")
 configure_package_config_file(${PN}Config.cmake.in
                               "${CMAKE_CURRENT_BINARY_DIR}/${PN}Config.cmake"
                               INSTALL_DESTINATION ${CMAKECONFIG_INSTALL_DIR})
@@ -79,4 +92,4 @@ add_custom_target(lapack_external
     ${CMAKE_COMMAND} "-DCMAKE_INSTALL_PREFIX=${STAGED_INSTALL_PREFIX}" -P "${PROJECT_BINARY_DIR}/cmake_install.cmake"
     COMMENT "Installing Psi4-detected BLAS/LAPACK")
 
-set(${PN}_DIR ${STAGED_INSTALL_PREFIX}/share/cmake/${PN} CACHE PATH "path to externally detected ${PN}Config.cmake" FORCE)
+set(${PN}_DIR ${STAGED_INSTALL_PREFIX}/${TargetLAPACK_INSTALL_CMAKEDIR} CACHE PATH "path to externally detected ${PN}Config.cmake" FORCE)

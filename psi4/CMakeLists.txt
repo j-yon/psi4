@@ -1,9 +1,5 @@
-if(DEFINED ENV{LGTM_SRC})
-    cmake_minimum_required(VERSION 3.12 FATAL_ERROR)
-else()
-    cmake_minimum_required(VERSION 3.15 FATAL_ERROR)
-    cmake_policy(SET CMP0094 NEW)
-endif()
+cmake_minimum_required(VERSION 3.19 FATAL_ERROR)
+cmake_policy(SET CMP0094 NEW)
 project(psi4-core
         LANGUAGES C CXX)
 # no Fortran in psi4-core proper, but language needs to be declared
@@ -33,8 +29,7 @@ if(${endianness})
 else()
     set(_endian_ext ".little")
 endif()
-# GNUInstallDirs "DATADIR" wrong here; CMake search path wants "share".
-set(CMAKECONFIG_INSTALL_DIR "share/cmake/psi4")
+set(CMAKECONFIG_INSTALL_DIR "${psi4_INSTALL_CMAKEDIR}")
 
 # <<<  Marshal Dependencies & Add-ons  >>>
 
@@ -51,27 +46,29 @@ get_property(_illb TARGET tgt::blas PROPERTY INTERFACE_LINK_LIBRARIES)
 list(APPEND _addons ${_ill} ${_illb})
 message(STATUS "${Cyan}Using LAPACK${_isMKL}${ColourReset}: ${_ill0};...")
 
-if(ENABLE_ambit OR ENABLE_CheMPS2)
+if(ENABLE_ambit OR ENABLE_CheMPS2 OR ENABLE_Einsums)
     find_package(TargetHDF5 CONFIG REQUIRED)
     get_property(_ill TARGET tgt::hdf5 PROPERTY INTERFACE_LINK_LIBRARIES)
     list(GET _ill 0 _ill0)
     list(APPEND _addons ${_ill})
     message(STATUS "${Cyan}Using HDF5${ColourReset}: ${_ill0};... (found version ${${PN}_VERSION})")
 else()
-    message(STATUS "Disabled HDF5")
+    message(STATUS "Disabled HDF5 ${TargetHDF5_DIR}")
 endif()
 
 #  <<  Pybind11 & Python  >>
-if(DEFINED ENV{LGTM_SRC})
-    find_package(Python 3.6 COMPONENTS Interpreter Development REQUIRED)
-else()
-    find_package(Python 3.8 COMPONENTS Interpreter Development NumPy REQUIRED)
-endif()
+find_package(Python 3.8 COMPONENTS Interpreter Development NumPy REQUIRED)
 find_package(pybind11 2.6.2 CONFIG REQUIRED)
 message(STATUS "${Cyan}Using pybind11${ColourReset}: ${pybind11_INCLUDE_DIR} (version ${pybind11_VERSION} for Py${Python_VERSION} and ${CMAKE_CXX_STANDARD})")
 message(STATUS "${Cyan}Using Python ${Python_VERSION_MAJOR}.${Python_VERSION_MINOR}${ColourReset}: ${Python_EXECUTABLE}")
 
-find_package(DL)
+find_file(LIBDL_FOUND dlfcn.h)
+if(LIBDL_FOUND)
+    message(STATUS "Using DL: ${LIBDL_FOUND} ${CMAKE_DL_LIBS}")
+    # use ${CMAKE_DL_LIBS} if found to be explicitly needed
+else()
+    message(STATUS "Disabled DL ${LIBDL_FOUND}")
+endif()
 
 if(${ENABLE_ambit})
     find_package(ambit 0.6 CONFIG REQUIRED)
@@ -79,7 +76,7 @@ if(${ENABLE_ambit})
     list(APPEND _addons ${_loc})
     message(STATUS "${Cyan}Using ambit${ColourReset}: ${_loc} (version ${ambit_VERSION})")
 else()
-    message(STATUS "Disabled ambit")
+    message(STATUS "Disabled ambit ${ambit_DIR}")
 endif ()
 
 if(${ENABLE_CheMPS2})
@@ -88,7 +85,7 @@ if(${ENABLE_CheMPS2})
     list(APPEND _addons ${_loc})
     message(STATUS "${Cyan}Using CheMPS2${ColourReset}: ${_loc} (version ${CheMPS2_VERSION})")
 else()
-    message(STATUS "Disabled CheMPS2")
+    message(STATUS "Disabled CheMPS2 ${CheMPS2_DIR}")
 endif ()
 
 if(${ENABLE_dkh})
@@ -97,7 +94,16 @@ if(${ENABLE_dkh})
     list(APPEND _addons ${_loc})
     message(STATUS "${Cyan}Using dkh${ColourReset}: ${_loc} (version ${dkh_VERSION})")
 else()
-    message(STATUS "Disabled dkh")
+    message(STATUS "Disabled dkh ${dkh_DIR}")
+endif()
+
+if(${ENABLE_IntegratorXX})
+    find_package(IntegratorXX CONFIG REQUIRED)
+    get_property(_loc TARGET IntegratorXX::IntegratorXX PROPERTY LOCATION)
+    list(APPEND _addons ${_loc})
+    message(STATUS "${Cyan}Using IntegratorXX${ColourReset}: ${_loc} (version ${IntegratorXX_VERSION})")
+else()
+    message(STATUS "Disabled IntegratorXX")
 endif()
 
 if(${ENABLE_ecpint})
@@ -106,7 +112,7 @@ if(${ENABLE_ecpint})
     list(APPEND _addons ${_loc})
     message(STATUS "${Cyan}Using ecpint${ColourReset}: ${_loc} (version ${ecpint_VERSION})")
 else()
-    message(STATUS "Disabled ecpint")
+    message(STATUS "Disabled ecpint ${ecpint_DIR}")
 endif()
 
 if(${ENABLE_libefp})
@@ -118,13 +124,24 @@ if(${ENABLE_libefp})
     list(APPEND _addons ${_loc})
     message(STATUS "${Cyan}Using libefp${ColourReset}: ${_loc} (version ${libefp_VERSION})")
 
-    find_package(pylibefp 0.6.1 CONFIG REQUIRED)
-    get_property(_loc TARGET pylibefp::core PROPERTY LOCATION)
-    list(APPEND _addons ${_loc})
+    #find_package(pylibefp 0.6.1 CONFIG REQUIRED)
+    #get_property(_loc TARGET pylibefp::core PROPERTY LOCATION)
+    include(FindPythonModule)
+    find_python_module(pylibefp QUIET REQUIRED)
+    #list(APPEND _addons ${_loc})
     message(STATUS "${Cyan}Using pylibefp${ColourReset}: ${_loc} (version ${pylibefp_VERSION})")
 else()
-    message(STATUS "Disabled libefp")
+    message(STATUS "Disabled libefp ${libefp_DIR} ${pylibefp_DIR}")
 endif()
+
+if(${ENABLE_Einsums})
+    find_package(Einsums 0.5 CONFIG REQUIRED)
+    get_property(_loc TARGET Einsums::einsums PROPERTY LOCATION)
+    list(APPEND _addons ${_loc})
+    message(STATUS "${Cyan}Using Einsums${ColourReset}: ${_loc} (version ${Einsums_VERSION})")
+else()
+    message(STATUS "Disabled Einsums ${Einsums_DIR}")
+endif ()
 
 if(${ENABLE_erd})
     find_package(erd 3.0.6 CONFIG REQUIRED)
@@ -132,7 +149,7 @@ if(${ENABLE_erd})
     list(APPEND _addons ${_loc})
     message(STATUS "${Cyan}Using erd${ColourReset}: ${_loc} (version ${erd_VERSION})")
 else()
-    message(STATUS "Disabled erd")
+    message(STATUS "Disabled erd ${erd_DIR}")
 endif()
 
 find_package(gau2grid 2.0 CONFIG REQUIRED)
@@ -141,12 +158,14 @@ list(APPEND _addons ${_loc})
 message(STATUS "${Cyan}Using gau2grid${ColourReset}: ${_loc} (version ${gau2grid_VERSION})")
 
 if(${ENABLE_gdma})
-    find_package(gdma 2.2.6 CONFIG REQUIRED)
-    get_property(_loc TARGET gdma::gdma PROPERTY LOCATION)
-    list(APPEND _addons ${_loc})
-    message(STATUS "${Cyan}Using gdma${ColourReset}: ${_loc} (version ${gdma_VERSION})")
+    # neither gdma nor pygdma actually needed c-side; runtime detection would
+    #   do just as well. included for completeness and so gdma_PYMOD can be
+    #   hard-loaded into PYTHONPATH.
+    find_package(gdma 2.3.3 CONFIG REQUIRED COMPONENTS Python)
+    get_property(_loc TARGET gdma::pygdma PROPERTY LOCATION)
+    message(STATUS "${Cyan}Found gdma${ColourReset}: ${_loc} (version ${gdma_VERSION})")
 else()
-    message(STATUS "Disabled gdma")
+    message(STATUS "Disabled gdma ${gdma_DIR}")
 endif()
 
 if(${ENABLE_Libint1t})
@@ -156,18 +175,24 @@ list(APPEND _addons ${_loc})
 message(STATUS "${Cyan}Using Libint ${Libint_MAX_AM_ERI}${ColourReset}: ${_loc} (version ${Libint_VERSION})")
 endif()
 
-# CHOOSE! this one for `make export` libint2 library (bad caps)
-#find_package(libint2 2.6 CONFIG REQUIRED) # COMPONENTS ${MAX_AM_ERI})
-#get_property(_loc TARGET Libint2::int2 PROPERTY LOCATION)
-
-# CHOOSE! this one for pure cmake libint2 library
-if(DEFINED ENV{LGTM_SRC})
-    find_package(Libint2 CONFIG REQUIRED COMPONENTS gss "eri_c4_d0_l${MAX_AM_ERI}")
-else()
-    find_package(Libint2 CONFIG REQUIRED COMPONENTS gss CXX_ho impure_sh "eri_c4_d0_l${MAX_AM_ERI}" eri_c4_d1_l2 eri_c4_d2_l2 eri_c3_d0_l4 eri_c3_d1_l3 eri_c3_d2_l3 eri_c2_d0_l4 eri_c2_d1_l3 eri_c2_d2_l3 onebody_d0_l4 onebody_d1_l3 onebody_d2_l3)
-endif()
+find_package(
+  Libint2
+  2.8.1
+  CONFIG
+  REQUIRED
+#  COMPONENTS
+#    sss
+#    CXX_ho
+#    impure_sh
+#    "eri_c4_d0_l${MAX_AM_ERI}" eri_c3_d0_l4 eri_c2_d0_l4 onebody_d0_l4
+#     eri_c4_d1_l2              eri_c3_d1_l3 eri_c2_d1_l3 onebody_d1_l3
+#                                                         onebody_d2_l3
+#  OPTIONAL_COMPONENTS
+#     eri_c4_d2_l2              eri_c3_d2_l3 eri_c2_d2_l3
+  )
 get_property(_loc TARGET Libint2::int2 PROPERTY LOCATION)
-
+# defer until upstream provides full-dress targets get_property(Libint2_VERSION TARGET Libint2::int2 PROPERTY Libint2_VERSION)
+# defer until upstream provides full-dress targets get_property(Libint2_MAX_AM_ERI TARGET Libint2::int2 PROPERTY Libint2_MAX_AM_ERI)
 list(APPEND _addons ${_loc})
 message(STATUS "${Cyan}Using Libint2 ${Libint2_MAX_AM_ERI}${ColourReset}: ${_loc} (version ${Libint2_VERSION})")
 
@@ -177,7 +202,7 @@ if(${ENABLE_mdi})
     list(APPEND _addons ${_loc})
     message(STATUS "${Cyan}Using mdi${ColourReset}: ${_loc} (version ${mdi_VERSION})")
 else()
-    message(STATUS "Disabled MDI")
+    message(STATUS "Disabled MDI ${mdi_DIR}")
 endif ()
 
 if(${ENABLE_PCMSolver})
@@ -186,7 +211,7 @@ if(${ENABLE_PCMSolver})
     list(APPEND _addons ${_loc})
     message(STATUS "${Cyan}Using PCMSolver${ColourReset}: ${_loc} (version ${PCMSolver_VERSION})")
 else()
-    message(STATUS "Disabled PCMSolver")
+    message(STATUS "Disabled PCMSolver ${PCMSolver_DIR}")
 endif ()
 
 if(${ENABLE_simint})
@@ -195,7 +220,7 @@ if(${ENABLE_simint})
     list(APPEND _addons ${_loc})
     message(STATUS "${Cyan}Using simint ${simint_MAXAM}${ColourReset}: ${_loc} (version ${simint_VERSION}; vectorization ${simint_VECTOR})")
 else()
-    message(STATUS "Disabled simint")
+    message(STATUS "Disabled simint ${simint_DIR}")
 endif()
 
 if(${ENABLE_BrianQC})
@@ -204,13 +229,10 @@ if(${ENABLE_BrianQC})
     list(APPEND _addons ${_loc})
     message(STATUS "${Cyan}Using BrianQC${ColourReset}: ${BrianQC_DIR}")
 else()
-    message(STATUS "Disabled BrianQC")
+    message(STATUS "Disabled BrianQC ${BrianQC_DIR}")
 endif()
 
-find_package(Libxc 6.0.0 CONFIG COMPONENTS C)
-if(NOT ${Libxc_FOUND})
-    find_package(Libxc 5.1.2 CONFIG REQUIRED COMPONENTS C)
-endif()
+find_package(Libxc 6.1.0 CONFIG REQUIRED COMPONENTS C)
 get_property(_loc TARGET Libxc::xc PROPERTY LOCATION)
 list(APPEND _addons ${_loc})
 message(STATUS "${Cyan}Using Libxc${ColourReset}: ${_loc} (version ${Libxc_VERSION})")
@@ -400,7 +422,7 @@ install(FILES ${CMAKE_BINARY_DIR}/psi4PluginCache.cmake
               ${PSI4_ROOT}/cmake/custom_static_library.cmake
               ${PSI4_ROOT}/cmake/custom_cxxstandard.cmake
               ${PSI4_ROOT}/cmake/xhost.cmake
-        DESTINATION ${CMAKECONFIG_INSTALL_DIR})
+        DESTINATION ${CMAKE_INSTALL_PREFIX}/${CMAKECONFIG_INSTALL_DIR})
 
     # <<<  Export Config for Plugins  >>>
 # Determine relative path from Psi4's include directory to PyBind11's
@@ -409,8 +431,8 @@ file(RELATIVE_PATH RELATIVE_PYBIND11_INCLUDE_DIR
     ${pybind11_INCLUDE_DIR})
 configure_package_config_file(
         psi4Config.cmake.in
-        ${CMAKE_CURRENT_BINARY_DIR}/share/cmake/psi4/psi4Config.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/${psi4_INSTALL_CMAKEDIR}/psi4Config.cmake
         INSTALL_DESTINATION ${CMAKECONFIG_INSTALL_DIR})
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/share/cmake/psi4/psi4Config.cmake
-              ${CMAKE_CURRENT_BINARY_DIR}/share/cmake/psi4/psi4ConfigVersion.cmake
-        DESTINATION ${CMAKECONFIG_INSTALL_DIR})
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${psi4_INSTALL_CMAKEDIR}/psi4Config.cmake
+              ${CMAKE_CURRENT_BINARY_DIR}/${psi4_INSTALL_CMAKEDIR}/psi4ConfigVersion.cmake
+        DESTINATION ${CMAKE_INSTALL_PREFIX}/${CMAKECONFIG_INSTALL_DIR})

@@ -37,13 +37,14 @@ foreach(dir_name
   dmrg
   fisapt
   fnocc
-  gdma_interface
   mcscf
   mrcc
   occ
   psimrcc
   sapt
   scfgrad
+  dummy_einsums
+  dummy_integratorxx
   )
   add_subdirectory(${dir_name})
 endforeach ()
