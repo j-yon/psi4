@@ -45,6 +45,8 @@
 
 #include "psi4/cc/ccwave.h"
 
+#include "psi4/dlpno/dlpno.h"
+
 #include "psi4/detci/ciwave.h"
 #include "psi4/detci/civect.h"
 
@@ -640,4 +642,16 @@ void export_wavefunction(py::module& m) {
                .. warning:: Symmetry free calculations only (nirreps > 1 will cause error)
                .. warning:: No checks that the amplitudes will fit in core. Do not use for proteins
         )pbdoc");
+    py::class_<dlpno::DLPNOBase, std::shared_ptr<dlpno::DLPNOBase>, Wavefunction>(
+        m, "DLPNOBase", "Wavefunction that contains the backend technology for DLPNO methods")
+        .def(py::init<std::shared_ptr<Wavefunction>, Options&>());
+    py::class_<dlpno::DLPNOMP2, std::shared_ptr<dlpno::DLPNOMP2>, Wavefunction>(
+        m, "DLPNOMP2", "Wavefunction that runs the DLPNO-MP2 algorithm")
+        .def(py::init<std::shared_ptr<Wavefunction>, Options&>());
+    py::class_<dlpno::DLPNOCCSD, std::shared_ptr<dlpno::DLPNOCCSD>, Wavefunction>(
+        m, "DLPNOCCSD", "Wavefunction that runs the DLPNO-CCSD algorithm")
+        .def(py::init<std::shared_ptr<Wavefunction>, Options&>());
+    py::class_<dlpno::DLPNOCCSD_T, std::shared_ptr<dlpno::DLPNOCCSD_T>, Wavefunction>(
+        m, "DLPNOCCSD_T", "Wavefunction that runs the DLPNO-CCSD(T) algorithm")
+        .def(py::init<std::shared_ptr<Wavefunction>, Options&>());
 }

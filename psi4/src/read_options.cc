@@ -2533,7 +2533,7 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         :ref:`Defaults <apdx:basisFamily>` to a RI basis. -*/
         options.add_str("DF_BASIS_MP2", "");
         /*- General convergence criteria for DLPNO methods -*/
-        options.add_str("PNO_CONVERGENCE", "NORMAL", "LOOSE NORMAL TIGHT");
+        options.add_str("PNO_CONVERGENCE", "NORMAL", "LOOSE NORMAL TIGHT VERY_TIGHT");
         /*- Convergence criteria for the Foster-Boys orbital localization -*/
         options.add_double("LOCAL_CONVERGENCE", 1.0E-12);
         /*- Maximum iterations in Foster-Boys localization -*/
@@ -2543,32 +2543,97 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         /*- Residual convergence criteria for local MP2 iterations -*/
         options.add_double("R_CONVERGENCE", 1e-6);
         /*- Orbital localizer -*/
-        options.add_str("DLPNO_LOCAL_ORBITALS", "BOYS", "BOYS PIPEK_MEZEY");
+        options.add_str("DLPNO_LOCAL_ORBITALS", "BOYS", "BOYS PIPEK_MEZEY NONE");
         /*- Maximum number of iterations to determine the MP2 amplitudes. -*/
         options.add_int("DLPNO_MAXITER", 50);
+        /*- Which DLPNO Algorithm to run !expert*/
+        options.add_str("DLPNO_ALGORITHM", "CCSD", "MP2 CCSD CCSD(T)");
+        /*- Use T0 approximation for DLPNO-CCSD(T)? !expert*/
+        options.add_bool("T0_APPROXIMATION", false);
 
         /*- SUBSECTION Expert Options -*/
 
         /*- Occupation number threshold for removing PNOs !expert -*/
         options.add_double("T_CUT_PNO", 1e-8);
+        /*- Occupation trace sum threshold for removing PNOs !expert -*/
+        options.add_double("T_CUT_TRACE", 0.999);
+        /*- Pair energy tolerance for removing PNOs !expert -*/
+        options.add_double("T_CUT_ENERGY", 0.997);
+        /*- Perform "dispersion correction" for neglected weak pairs? !expert -*/
+        options.add_bool("DISPERSION_CORRECTION", false);
+        /*- Use low memory PNO overlap algorithm? !expert -*/
+        options.add_bool("LOW_MEMORY_OVERLAP", false);
+        /*- AO ERI Schwarz Screening tolerance for building DF ints in DLPNO !expert -*/
+        options.add_double("DLPNO_AO_INTS_TOL", 1.0e-10);
+        /*- Write (Q_{ij} | m_{ij} a_{ij}) integrals to disk? !expert -*/
+        options.add_bool("WRITE_QIA_PNO", false);
+        /*- Write (Q_{ij} | a_{ij} b_{ij}) integrals to disk? !expert -*/
+        options.add_bool("WRITE_QAB_PNO", false);
+        /*- Occupation number threshold for removing PNOs (for MP2 prescreening) !expert -*/
+        options.add_double("T_CUT_PNO_MP2", 1e-10);
+        /*- Occupation trace sum threshold for removing PNOs (for MP2 prescreening) !expert -*/
+        options.add_double("T_CUT_TRACE_MP2", 0.9999);
+        /*- Pair energy tolerance for removing PNOs (for MP2 prescreening) !expert -*/
+        options.add_double("T_CUT_ENERGY_MP2", 0.999);
+        /*- How much to scale T_CUT_PNO by for diagonal PNOs !expert */
+        options.add_double("T_CUT_PNO_DIAG_SCALE", 3e-2);
         /*- DOI threshold for including PAO (u) in domain of LMO (i) !expert -*/
         options.add_double("T_CUT_DO", 1e-2);
         /*- DOI threshold for treating LMOs (i,j) as interacting !expert -*/
         options.add_double("T_CUT_DO_ij", 1e-5);
+        /*- DOI threshold for treating PAOs (u,v) as interacting !expert -*/
+        options.add_double("T_CUT_DO_uv", 1e-5);
         /*- Pair energy threshold (dipole approximation) for treating LMOs (i, j) as interacting !expert -*/
         options.add_double("T_CUT_PRE", 1e-6); 
         /*- DOI threshold for including PAO (u) in domain of LMO (i) during pre-screening !expert -*/
         options.add_double("T_CUT_DO_PRE", 3e-2);
+        /*- The tolerance to decide between "MP2 Pairs" and "CCSD Pairs" after the initial pair prescreening -*/
+        options.add_double("T_CUT_PAIRS", 1e-5);
         /*- Mulliken charge threshold for including aux BFs on atom (a) in domain of LMO (i) !expert -*/
         options.add_double("T_CUT_MKN", 1e-3);
         /*- Basis set coefficient threshold for including basis function (m) in domain of LMO (i) !expert -*/
-        options.add_double("T_CUT_CLMO", 1e-2);
+        options.add_double("T_CUT_CLMO", 1e-3);
         /*- Basis set coefficient threshold for including basis function (n) in domain of PAO (u) !expert -*/
         options.add_double("T_CUT_CPAO", 1e-3);
         /*- Overlap matrix threshold for removing linear dependencies !expert -*/
         options.add_double("S_CUT", 1e-8);
         /*- Fock matrix threshold for treating ampltudes as coupled during local MP2 iterations !expert -*/
         options.add_double("F_CUT", 1e-5);
+        /*- Occupation number threshold for removing TNOs !expert -*/
+        options.add_double("T_CUT_TNO", 1e-9);
+        /*- T_CUT_TNO scaling for strong triplets in the iterative (T) algorithm !expert -*/
+        options.add_double("T_CUT_TNO_STRONG_SCALE", 10.0);
+        /*- T_CUT_TNO scaling for weak triplets in the iterative (T) algorithm !expert -*/
+        options.add_double("T_CUT_TNO_WEAK_SCALE", 100.0);
+        /*- Occupation number threshold used in the prescreening step !expert -*/
+        options.add_double("T_CUT_TNO_PRE", 1e-7);
+        /*- Local density fitting tolerance for the prescreening portion of the (T) algorithm -*/
+        options.add_double("T_CUT_MKN_TRIPLES_PRE", 0.1);
+        /*- LMO/PAO threshold for the prescreening portion of the (T) algorithm -*/
+        options.add_double("T_CUT_DO_TRIPLES_PRE", 2e-2);
+        /*- Triples energy threshold for a triplet (ijk) to not be further considered -*/
+        options.add_double("T_CUT_TRIPLES_WEAK", 1e-7);
+        /*- Local density fitting tolerance for the (T) algorithm -*/
+        options.add_double("T_CUT_MKN_TRIPLES", 1e-2);
+        /*- LMO/PAO threshold for the (T) algorithm -*/
+        options.add_double("T_CUT_DO_TRIPLES", 1e-2);
+        /*- Fock matrix threshold for treating ampltudes as coupled during local (T) iterations !expert -*/
+        options.add_double("F_CUT_T", 1e-3);
+        /*- Energy difference in which to stop considering triples in iterative (T) */
+        options.add_double("T_CUT_ITER", 1e-3);
+        /*- Write triples amplitudes to disk? !expert -*/
+        options.add_bool("WRITE_TRIPLES", false);
+
+        /*- Number of spherical points in DOI grid !expert -*/
+        options.add_int("DOI_SPHERICAL_POINTS", 50);
+        /*- Number of radial points in DOI grid !expert -*/
+        options.add_int("DOI_RADIAL_POINTS", 25);
+        /*- Screening criteria for basis function values on DOI grids !expert -*/
+        options.add_double("DOI_BASIS_TOLERANCE", 1.0E-10);
+        /*- Pruning scheme for DOI grids !expert -*/
+        options.add_str("DOI_PRUNING_SCHEME", "ROBUST", 
+                        "ROBUST TREUTLER NONE FLAT P_GAUSSIAN D_GAUSSIAN P_SLATER D_SLATER LOG_GAUSSIAN LOG_SLATER NONE");
+
     }
     if (name == "PSIMRCC" || options.read_globals()) {
         /*- MODULEDESCRIPTION Performs multireference coupled cluster computations.  This theory
