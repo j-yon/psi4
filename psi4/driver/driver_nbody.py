@@ -1451,6 +1451,9 @@ class ManyBodyComputer(BaseComputer):
         nbody_model = self.get_results(client=client)
         ret = nbody_model.return_result
 
+        import pprint
+        pprint.pprint(nbody_model.extras["component_results"], width=200)
+
         wfn = core.Wavefunction.build(self.molecule, "def2-svp", quiet=True)
 
         # TODO all besides nbody may be better candidates for extras than qcvars. energy/gradient/hessian_body_dict in particular are too simple for qcvars (e.g., "2")

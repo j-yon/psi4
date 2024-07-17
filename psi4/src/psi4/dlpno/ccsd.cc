@@ -3528,6 +3528,8 @@ void DLPNOCCSD::print_results() {
     outfile->Printf("    Dipole Pair Correction:            %16.12f \n", de_dipole_);
     outfile->Printf("    PNO Truncation Correction:         %16.12f \n", de_pno_total_);
     outfile->Printf("\n\n  @Total DLPNO-CCSD Energy: %16.12f \n", variables_["SCF TOTAL ENERGY"] + e_lccsd_ + de_lmp2_eliminated_ + de_lmp2_weak_ + de_pno_total_ + de_disp_weak_ + de_dipole_);
+
+    Process::environment.globals["WEAK PAIR DISPERSION CORRECTION"] = de_disp_weak_;
 }
 
 }  // namespace dlpno
