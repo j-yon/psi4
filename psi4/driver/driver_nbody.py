@@ -1452,6 +1452,7 @@ class ManyBodyComputer(BaseComputer):
         ret = nbody_model.return_result
 
         import pprint
+        # TODO: change to writing to MBD_COMPONENTS_PKL
         pprint.pprint(nbody_model.extras["component_results"], width=200)
 
         wfn = core.Wavefunction.build(self.molecule, "def2-svp", quiet=True)
