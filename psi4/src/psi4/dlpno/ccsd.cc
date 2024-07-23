@@ -3370,6 +3370,7 @@ double DLPNOCCSD::compute_energy() {
     if (disp_correct_) {
         timer_on("Weak Pair Dispersion Correction");
         dispersion_correction();
+        set_scalar_variable("DLPNO-CCSD Dispersion Correction", de_disp_weak_);
         timer_off("Weak Pair Dispersion Correction");
     }
 

@@ -1454,7 +1454,25 @@ class ManyBodyComputer(BaseComputer):
         import pprint
         # TODO: change to writing to MBD_COMPONENTS_PKL
         pprint.pprint(nbody_model.extras["component_results"], width=200)
+        # get psi4 options
+        options = p4util.procutil.prepare_options_for_modules()
+        pprint.pprint(options, width=200)
+        import json
+        import os
+        class NumpyEncoder(json.JSONEncoder):
+            def default(self, obj):
+                if isinstance(obj, np.ndarray):
+                    return obj.tolist()
+                return json.JSONEncoder.default(self, obj)
 
+        def dict_to_json(d: dict, fn: str):
+            with open(fn, "w") as f:
+                json_dump = json.dumps(d, indent=4, cls=NumpyEncoder)
+                f.write(json_dump)
+            return
+        psi4_many_body_output = os.environ.get("PSI4_MANY_BODY_OUTPUT", None)
+        if psi4_many_body_output:
+            dict_to_json(dict(nbody_model.extras["component_results"]), psi4_many_body_output)
         wfn = core.Wavefunction.build(self.molecule, "def2-svp", quiet=True)
 
         # TODO all besides nbody may be better candidates for extras than qcvars. energy/gradient/hessian_body_dict in particular are too simple for qcvars (e.g., "2")

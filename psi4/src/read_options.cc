@@ -55,7 +55,7 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
     // dodoc == "GLOBALS" fake line to make document_options_and_tests.pl generate a GLOBALS doc section
     
     /*- output from MBD nbody_model.extras["component_results"] for dimer and monomer individual psi4 variables -*/
-    options.add("MBD_COMPONENTS_PKL", new ArrayType());
+    // options.add_str("MBD_COMPONENTS_PKL", "");
 
     /*- An array containing the number of doubly-occupied orbitals per irrep
     (in Cotton order) -*/
