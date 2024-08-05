@@ -457,9 +457,7 @@ class DLPNOCCSD_T : public DLPNOCCSD {
     /// final energies
     double de_lccsd_t_screened_; ///< energy contribution from screened triplets
     double e_lccsd_t_; ///< local (T) correlation energy
-
-    /// Recompute PNOs (Pair Natural Orbitals) using CCSD densities
-    void recompute_pnos();
+    
     /// Create sparsity maps for triples
     void triples_sparsity(bool prescreening);
     /// Create TNOs (Triplet Natural Orbitals) for DLPNO-(T)

@@ -117,80 +117,6 @@ SharedMatrix matmul_3d(SharedMatrix A, SharedMatrix X, int dim_old, int dim_new)
     return A_new;
 }
 
-void DLPNOCCSD_T::recompute_pnos() {
-    timer_on("Recompute PNOs");
-
-    int naocc = nalpha_ - nfrzc();
-    int n_lmo_pairs = ij_to_i_j_.size();
-    int npao = C_pao_->colspi(0);
-
-    // Recompute Pair Natural Orbitals using CCSD densities
-    outfile->Printf("\n  ==> Recomputing Pair Natural Orbitals for (T) <==\n");
-
-#pragma omp parallel for schedule(dynamic, 1)
-    for (int ij = 0; ij < n_lmo_pairs; ++ij) {
-        int i, j;
-        std::tie(i, j) = ij_to_i_j_[ij];
-        int ji = ij_to_ji_[ij];
-
-        if (i > j) continue;
-
-        auto F_pao_ij = submatrix_rows_and_cols(*F_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[ij]);
-        auto F_pno_ij_init = linalg::triplet(X_pno_[ij], F_pao_ij, X_pno_[ij], true, false, false);
-
-        // Construct pair density from amplitudes
-        auto D_ij = linalg::doublet(Tt_iajb_[ij], T_iajb_[ij], false, true);
-        D_ij->add(linalg::doublet(Tt_iajb_[ij], T_iajb_[ij], true, false));
-        if (i == j) D_ij->scale(0.5);
-
-        int nvir_ij = F_pno_ij_init->rowspi(0);
-
-        // Diagonalization of pair density gives PNOs (in basis of the LMO's virtual domain) and PNO occ numbers
-        auto X_pno_ij = std::make_shared<Matrix>("eigenvectors", nvir_ij, nvir_ij);
-        Vector pno_occ("eigenvalues", nvir_ij);
-        D_ij->diagonalize(*X_pno_ij, pno_occ, descending);
-
-        // No PNOs are truncated, the PNO space is rotated to make the natural orbitals more amenable to the CCSD virtual space
-        SharedMatrix pno_canon;
-        SharedVector e_pno_ij;
-        std::tie(pno_canon, e_pno_ij) = canonicalizer(X_pno_ij, F_pno_ij_init);
-
-        // This transformation gives orbitals that are orthonormal and canonical
-        X_pno_ij = linalg::doublet(X_pno_ij, pno_canon, false, false);
-
-        auto K_pno_ij = linalg::triplet(X_pno_ij, K_iajb_[ij], X_pno_ij, true, false, false);
-        auto T_pno_ij = linalg::triplet(X_pno_ij, T_iajb_[ij], X_pno_ij, true, false, false);
-        auto Tt_pno_ij = linalg::triplet(X_pno_ij, Tt_iajb_[ij], X_pno_ij, true, false, false);
-
-        // Recompute singles amplitudes
-        if (i == j) {
-            T_ia_[i] = linalg::doublet(X_pno_ij, T_ia_[i], true, false);
-        }
-
-        // New PNO transformation matrix
-        X_pno_ij = linalg::doublet(X_pno_[ij], X_pno_ij, false, false);
-
-        K_iajb_[ij] = K_pno_ij;
-        T_iajb_[ij] = T_pno_ij;
-        Tt_iajb_[ij] = Tt_pno_ij;
-        X_pno_[ij] = X_pno_ij;
-        e_pno_[ij] = e_pno_ij;
-        n_pno_[ij] = X_pno_ij->colspi(0);
-
-        // account for symmetry
-        if (i < j) {
-            K_iajb_[ji] = K_iajb_[ij]->transpose();
-            T_iajb_[ji] = T_iajb_[ij]->transpose();
-            Tt_iajb_[ji] = Tt_iajb_[ij]->transpose();
-            X_pno_[ji] = X_pno_[ij];
-            e_pno_[ji] = e_pno_[ij];
-            n_pno_[ji] = n_pno_[ij];
-        } // end if (i < j)
-    }
-
-    timer_off("Recompute PNOs");
-}
-
 void DLPNOCCSD_T::triples_sparsity(bool prescreening) {
     timer_on("Triples Sparsity");
 
@@ -1298,10 +1224,7 @@ double DLPNOCCSD_T::compute_energy() {
     double t_cut_tno_pre = options_.get_double("T_CUT_TNO_PRE");
     double t_cut_tno = options_.get_double("T_CUT_TNO");
 
-    // Step 1: Recompute PNOs with converged CCSD amplitudes
-    recompute_pnos();
-
-    // Step 2: Perform the prescreening
+    // Step 1: Perform the prescreening
     outfile->Printf("\n   Starting Triplet Prescreening...\n");
     outfile->Printf("     T_CUT_TNO set to %6.3e \n", t_cut_tno_pre);
     outfile->Printf("     T_CUT_DO  set to %6.3e \n", options_.get_double("T_CUT_DO_TRIPLES_PRE"));
@@ -1311,7 +1234,7 @@ double DLPNOCCSD_T::compute_energy() {
     tno_transform(t_cut_tno_pre);
     double E_T0_pre = compute_lccsd_t0();
 
-    // Step 3: Compute DLPNO-CCSD(T0) energy with surviving triplets
+    // Step 2: Compute DLPNO-CCSD(T0) energy with surviving triplets
     outfile->Printf("\n   Continuing computation with surviving triplets...\n");
     outfile->Printf("     Eliminated all triples with energy less than %6.3e Eh... \n\n", options_.get_double("T_CUT_TRIPLES_WEAK"));
     triples_sparsity(false);
@@ -1331,7 +1254,7 @@ double DLPNOCCSD_T::compute_energy() {
     outfile->Printf("    * Screened Triplets Contribution:  %16.12f \n\n", de_lccsd_t_screened_);
 
 
-    // Step 4: Compute full DLPNO-CCSD(T) energy if NOT using T0 approximation
+    // Step 3: Compute full DLPNO-CCSD(T) energy if NOT using T0 approximation
 
     if (!options_.get_bool("T0_APPROXIMATION")) {
         outfile->Printf("\n\n  ==> Computing Full Iterative (T) <==\n\n");
