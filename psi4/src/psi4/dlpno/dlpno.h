@@ -391,15 +391,25 @@ class DLPNOCCSD : public DLPNOBase {
 
     // => CCSD intermediates <= //
 
-    std::vector<SharedMatrix> compute_B_tilde();
-    std::vector<SharedMatrix> compute_C_tilde();
-    std::vector<SharedMatrix> compute_D_tilde();
-    SharedMatrix compute_G_tilde();
+    /// Jiang Equation 82
+    std::vector<SharedMatrix> compute_beta();
+    /// Jiang Equation 83
+    std::vector<SharedMatrix> compute_gamma();
+    /// Jiang Equation 84
+    std::vector<SharedMatrix> compute_delta();
+    /// Jiang Equation 86
+    SharedMatrix compute_Fkj_double_tilde();
 
-    /// compute T1-dressed DF integrals
+    /// compute T1-dressed DF integrals (Jiang Eq. 91-92)
     void t1_ints();
-    /// compute T1-dressed Fock matrix intermediates
+    /// compute T1-dressed Fock matrix intermediates (Jiang Eq. 94-101)
     void t1_fock();
+
+    /// computes singles residuals in LCCSD equations, using pre-allocated memory (Jiang Eq. 32)
+    void compute_R_ia(std::vector<SharedMatrix>& R_ia, std::vector<std::vector<SharedMatrix>>& R_ia_buffer);
+    /// computes doubles residuals in LCCSD equations, using pre-allocated memory (Jiang Eq. 19)
+    void compute_R_iajb(std::vector<SharedMatrix>& R_iajb, std::vector<SharedMatrix>& Rn_iajb);
+
     /// iteratively solve local CCSD equations
     void lccsd_iterations();
     /// Do "dispersion correction" for weak pairs?
