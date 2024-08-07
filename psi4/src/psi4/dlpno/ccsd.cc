@@ -126,7 +126,7 @@ inline std::vector<SharedMatrix> DLPNOCCSD::QIA_PNO(const int ij) {
         std::vector<SharedMatrix> Qma_pno(naux_ij);
         for (int q_ij = 0; q_ij < naux_ij; q_ij++) {
             Qma_pno[q_ij] = std::make_shared<Matrix>(nlmo_ij, npno_ij);
-            C_DCOPY(nlmo_ij * npno_ij, &(*q_ov)(q_ij, 0), 1, &(*Qma_pno[q_ij])(0, 0), 1);
+            ::memcpy(&(*Qma_pno[q_ij])(0, 0), &(*q_ov)(q_ij, 0), nlmo_ij * npno_ij * sizeof(double));
         }
         return Qma_pno;
     } else {
@@ -152,7 +152,7 @@ inline std::vector<SharedMatrix> DLPNOCCSD::QAB_PNO(const int ij) {
         std::vector<SharedMatrix> Qab_pno(naux_ij);
         for (int q_ij = 0; q_ij < naux_ij; q_ij++) {
             Qab_pno[q_ij] = std::make_shared<Matrix>(npno_ij, npno_ij);
-            C_DCOPY(npno_ij * npno_ij, &(*q_vv)(q_ij, 0), 1, &(*Qab_pno[q_ij])(0, 0), 1);
+            ::memcpy(&(*Qab_pno[q_ij])(0, 0), &(*q_vv)(q_ij, 0), npno_ij * npno_ij * sizeof(double));
         }
         return Qab_pno;
     } else {
@@ -1144,6 +1144,11 @@ void DLPNOCCSD::compute_cc_integrals() {
         const int npno_ij = n_pno_[ij];
         if (i > j || npno_ij == 0) continue;
 
+        int thread = 0;
+#ifdef _OPENMP
+        thread = omp_get_thread_num();
+#endif
+
         // number of LMOs in the pair domain
         const int nlmo_ij = lmopair_to_lmos_[ij].size();
         // number of PAOs in the pair domain (before removing linear dependencies)
@@ -1179,6 +1184,8 @@ void DLPNOCCSD::compute_cc_integrals() {
         }
         npao_ext_ij = extended_pao_domain.size();
 
+        if (thread == 0) timer_on("DLPNO-CCSD: Setup Integrals");
+
         for (int q_ij = 0; q_ij < naux_ij; q_ij++) {
             const int q = lmopair_to_ribfs_[ij][q_ij];
             const int centerq = ribasis_->function_to_center(q);
@@ -1188,39 +1195,31 @@ void DLPNOCCSD::compute_cc_integrals() {
             const std::vector<int> i_slice(1, i_sparse);
             const std::vector<int> j_slice(1, j_sparse);
 
+            const auto sparse_lmo_list = index_list(riatom_to_lmos_ext_[centerq], lmopair_to_lmos_[ij]);
+            const auto sparse_pao_list = index_list(riatom_to_paos_ext_[centerq], lmopair_to_paos_[ij]);
+
             q_pair->set(q_ij, 0, (*qij_[q])(i_sparse, j_sparse));
             
-            auto q_io_tmp = submatrix_rows_and_cols(*qij_[q], i_slice, 
-                                lmopair_lmo_to_riatom_lmo_[ij][q_ij]);
-            C_DCOPY(nlmo_ij, &(*q_io_tmp)(0,0), 1, &(*q_io)(q_ij, 0), 1);
+            auto q_io_tmp = submatrix_rows_and_cols(*qij_[q], i_slice, sparse_lmo_list);
+            ::memcpy(&(*q_io)(q_ij, 0), &(*q_io_tmp)(0,0), nlmo_ij * sizeof(double));
 
-            auto q_jo_tmp = submatrix_rows_and_cols(*qij_[q], j_slice, 
-                                lmopair_lmo_to_riatom_lmo_[ij][q_ij]);
-            C_DCOPY(nlmo_ij, &(*q_jo_tmp)(0,0), 1, &(*q_jo)(q_ij, 0), 1);
+            auto q_jo_tmp = submatrix_rows_and_cols(*qij_[q], j_slice, sparse_lmo_list);
+            ::memcpy(&(*q_jo)(q_ij, 0), &(*q_jo_tmp)(0,0), nlmo_ij * sizeof(double));
 
-            auto q_oo_tmp = submatrix_rows_and_cols(*qij_[q], lmopair_lmo_to_riatom_lmo_[ij][q_ij],
-                                lmopair_lmo_to_riatom_lmo_[ij][q_ij]);
-            C_DCOPY(nlmo_ij * nlmo_ij, &(*q_oo_tmp)(0,0), 1, &(*q_oo)(q_ij, 0), 1);
+            auto q_oo_tmp = submatrix_rows_and_cols(*qij_[q], sparse_lmo_list, sparse_lmo_list);
+            ::memcpy(&(*q_oo)(q_ij, 0), &(*q_oo_tmp)(0,0), nlmo_ij * nlmo_ij * sizeof(double));
 
-            auto q_iv_tmp = submatrix_rows_and_cols(*qia_[q], i_slice,
-                                lmopair_pao_to_riatom_pao_[ij][q_ij]);
+            auto q_iv_tmp = submatrix_rows_and_cols(*qia_[q], i_slice, sparse_pao_list);
             q_iv_tmp = linalg::doublet(q_iv_tmp, X_pno_[ij], false, false);
-            C_DCOPY(npno_ij, &(*q_iv_tmp)(0,0), 1, &(*q_iv)(q_ij, 0), 1);
+            ::memcpy(&(*q_iv)(q_ij, 0), &(*q_iv_tmp)(0,0), npno_ij * sizeof(double));
 
-            auto q_jv_tmp = submatrix_rows_and_cols(*qia_[q], j_slice,
-                                lmopair_pao_to_riatom_pao_[ij][q_ij]);
+            auto q_jv_tmp = submatrix_rows_and_cols(*qia_[q], j_slice, sparse_pao_list);
             q_jv_tmp = linalg::doublet(q_jv_tmp, X_pno_[ij], false, false);
-            C_DCOPY(npno_ij, &(*q_jv_tmp)(0,0), 1, &(*q_jv)(q_ij, 0), 1);
-            
-            std::vector<int> m_ij_indices;
-            for (const int &m : lmopair_to_lmos_[ij]) {
-                const int m_sparse = riatom_to_lmos_ext_dense_[centerq][m];
-                m_ij_indices.push_back(m_sparse);
-            }
+            ::memcpy(&(*q_jv)(q_ij, 0), &(*q_jv_tmp)(0,0), npno_ij * sizeof(double));
 
-            auto q_ov_tmp = submatrix_rows_and_cols(*qia_[q], m_ij_indices, lmopair_pao_to_riatom_pao_[ij][q_ij]);
+            auto q_ov_tmp = submatrix_rows_and_cols(*qia_[q], sparse_lmo_list, sparse_pao_list);
             q_ov_tmp = linalg::doublet(q_ov_tmp, X_pno_[ij], false, false);
-            C_DCOPY(nlmo_ij * npno_ij, &(*q_ov_tmp)(0,0), 1, &(*q_ov)(q_ij, 0), 1);
+            ::memcpy(&(*q_ov)(q_ij, 0), &(*q_ov_tmp)(0,0), nlmo_ij * npno_ij * sizeof(double));
 
             SharedMatrix q_vv_tmp;
             if (write_qab_pao_) {
@@ -1230,8 +1229,7 @@ void DLPNOCCSD::compute_cc_integrals() {
                 q_vv_tmp = std::make_shared<Matrix>(toc_entry.str(), npao_q, npao_q);
 #pragma omp critical
                 q_vv_tmp->load(psio_, PSIF_DLPNO_QAB_PAO, psi::Matrix::LowerTriangle);
-                q_vv_tmp = submatrix_rows_and_cols(*q_vv_tmp, lmopair_pao_to_riatom_pao_[ij][q_ij],
-                                lmopair_pao_to_riatom_pao_[ij][q_ij]);
+                q_vv_tmp = submatrix_rows_and_cols(*q_vv_tmp, sparse_pao_list, sparse_pao_list);
             } else {
                 q_vv_tmp = std::make_shared<Matrix>(npao_ij, npao_ij);
                 for (int u_ij = 0; u_ij < npao_ij; ++u_ij) {
@@ -1245,8 +1243,7 @@ void DLPNOCCSD::compute_cc_integrals() {
                 }
             }
             q_vv_tmp = linalg::triplet(X_pno_[ij], q_vv_tmp, X_pno_[ij], true, false, false);
-            
-            C_DCOPY(npno_ij * npno_ij, &(*q_vv_tmp)(0,0), 1, &(*q_vv)(q_ij, 0), 1);
+            ::memcpy(&(*q_vv)(q_ij, 0), &(*q_vv_tmp)(0,0), npno_ij * npno_ij * sizeof(double));
         }
 
         auto A_solve = submatrix_rows_and_cols(*full_metric_, lmopair_to_ribfs_[ij], lmopair_to_ribfs_[ij]);
@@ -1279,6 +1276,10 @@ void DLPNOCCSD::compute_cc_integrals() {
         C_DGESV_wrapper(A_solve->clone(), q_oo);
         C_DGESV_wrapper(A_solve->clone(), q_ov);
         C_DGESV_wrapper(A_solve->clone(), q_vv);
+
+        if (thread == 0) timer_off("DLPNO-CCSD: Setup Integrals");
+
+        if (thread == 0) timer_on("DLPNO-CCSD: J_ij_kj Integrals");
 
         if (i_j_to_ij_strong_[i][j] != -1 || disp_correct_) {
             for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
@@ -1324,6 +1325,10 @@ void DLPNOCCSD::compute_cc_integrals() {
             }
         }
 
+        if (thread == 0) timer_off("DLPNO-CCSD: J_ij_kj Integrals");
+
+        if (thread == 0) timer_on("DLPNO-CCSD: K_ij_kj Integrals");
+
         if (i_j_to_ij_strong_[i][j] != -1 || disp_correct_) {
             for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
                 int k = lmopair_to_lmos_[ij][k_ij];
@@ -1365,6 +1370,10 @@ void DLPNOCCSD::compute_cc_integrals() {
             }
         }
 
+        if (thread == 0) timer_off("DLPNO-CCSD: K_ij_kj Integrals");
+
+        if (thread == 0) timer_on("DLPNO-CCSD: Contract Integrals");
+
         K_mnij_[ij] = linalg::doublet(q_io, q_jo, true, false);
         K_bar_[ij] = linalg::doublet(q_io, q_jv, true, false);
         J_ijab_[ij] = linalg::doublet(q_pair, q_vv, true, false);
@@ -1399,7 +1408,7 @@ void DLPNOCCSD::compute_cc_integrals() {
                 for (int q_ij = 0; q_ij < naux_ij; ++q_ij) {
                     // Save transformed (Q_ij | m_ij a_ij) integrals
                     Qma_ij_[ij][q_ij] = std::make_shared<Matrix>(nlmo_ij, npno_ij);
-                    C_DCOPY(nlmo_ij * npno_ij, &(*q_ov)(q_ij, 0), 1, &(*Qma_ij_[ij][q_ij])(0, 0), 1);
+                    ::memcpy(&(*Qma_ij_[ij][q_ij])(0, 0), &(*q_ov)(q_ij,0), nlmo_ij * npno_ij * sizeof(double));
                 }
             } else {
                 std::stringstream toc_entry;
@@ -1414,7 +1423,7 @@ void DLPNOCCSD::compute_cc_integrals() {
                 for (int q_ij = 0; q_ij < naux_ij; ++q_ij) {
                     // Save transformed (Q_ij | a_ij b_ij) integrals
                     Qab_ij_[ij][q_ij] = std::make_shared<Matrix>(npno_ij, npno_ij);
-                    C_DCOPY(npno_ij * npno_ij, &(*q_vv)(q_ij, 0), 1, &(*Qab_ij_[ij][q_ij])(0, 0), 1);
+                    ::memcpy(&(*Qab_ij_[ij][q_ij])(0, 0), &(*q_vv)(q_ij,0), npno_ij * npno_ij * sizeof(double));
                 }
             } else {
                 std::stringstream toc_entry;
@@ -1442,6 +1451,8 @@ void DLPNOCCSD::compute_cc_integrals() {
         if (i != j) {
             M_iajb_[ji] = M_iajb_[ij]->transpose();
         }
+
+        if (thread == 0) timer_off("DLPNO-CCSD: Contract Integrals");
     }
 
     // Antisymmetrize K_mbij integrals

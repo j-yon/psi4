@@ -873,41 +873,6 @@ void DLPNOBase::prep_sparsity(bool initial, bool last) {
             }
         }
     } // end if
-
-    lmopair_lmo_to_riatom_lmo_.clear();
-    lmopair_pao_to_riatom_pao_.clear();
-
-    lmopair_lmo_to_riatom_lmo_.resize(n_lmo_pairs);
-    lmopair_pao_to_riatom_pao_.resize(n_lmo_pairs);
-
-#pragma omp parallel for
-    for (int ij = 0; ij < n_lmo_pairs; ++ij) {
-        int naux_ij = lmopair_to_ribfs_[ij].size();
-        lmopair_lmo_to_riatom_lmo_[ij].resize(naux_ij);
-        lmopair_pao_to_riatom_pao_[ij].resize(naux_ij);
-
-        for (int q_ij = 0; q_ij < naux_ij; q_ij++) {
-            int q = lmopair_to_ribfs_[ij][q_ij];
-            int centerq = ribasis_->function_to_center(q);
-
-            int nlmo_ij = lmopair_to_lmos_[ij].size();
-            int npao_ij = lmopair_to_paos_[ij].size();
-            lmopair_lmo_to_riatom_lmo_[ij][q_ij].resize(nlmo_ij);
-            lmopair_pao_to_riatom_pao_[ij][q_ij].resize(npao_ij);
-
-            for (int m_ij = 0; m_ij < nlmo_ij; m_ij++) {
-                int m = lmopair_to_lmos_[ij][m_ij];
-                int m_sparse = riatom_to_lmos_ext_dense_[centerq][m];
-                lmopair_lmo_to_riatom_lmo_[ij][q_ij][m_ij] = m_sparse;
-            }
-
-            for (int a_ij = 0; a_ij < npao_ij; a_ij++) {
-                int a = lmopair_to_paos_[ij][a_ij];
-                int a_sparse = riatom_to_paos_ext_dense_[centerq][a];
-                lmopair_pao_to_riatom_pao_[ij][q_ij][a_ij] = a_sparse;
-            }
-        }
-    }
 }
 
 void DLPNOBase::compute_qij() {

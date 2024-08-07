@@ -52,7 +52,7 @@ enum AlgorithmType { MP2, CCSD, CCSD_T };
 
 // Equations refer to Pinski et al. (JCP 143, 034108, 2015; DOI: 10.1063/1.4926879)
 
-class DLPNOBase : public Wavefunction {
+class PSI_API DLPNOBase : public Wavefunction {
     protected:
       /// what quantum chemistry module are we running
       AlgorithmType algorithm_;
@@ -258,7 +258,7 @@ class DLPNOBase : public Wavefunction {
       double compute_energy() override;
 };
 
-class DLPNOMP2 : public DLPNOBase {
+class PSI_API DLPNOMP2 : public DLPNOBase {
    protected:
     /// PNO overlap integrals
     std::vector<std::vector<SharedMatrix>> S_pno_ij_kj_; ///< pno overlaps
@@ -288,7 +288,7 @@ class DLPNOMP2 : public DLPNOBase {
     double compute_energy() override;
 };
 
-class DLPNOCCSD : public DLPNOBase {
+class PSI_API DLPNOCCSD : public DLPNOBase {
    protected:
     /// Use low memory algorithm to store PNO overlaps?
     bool low_memory_overlap_;
@@ -426,8 +426,8 @@ class DLPNOCCSD : public DLPNOBase {
     double compute_energy() override;
 };
 
-class DLPNOCCSD_T : public DLPNOCCSD {
-   private:
+class PSI_API DLPNOCCSD_T : public DLPNOCCSD {
+   protected:
     // Sparsity information
     // WARNING: Only unique triplets are used
     SparseMap lmotriplet_to_ribfs_; ///< which ribfs are on an LMO triplet (i, j, k)
@@ -457,7 +457,7 @@ class DLPNOCCSD_T : public DLPNOCCSD {
     /// final energies
     double de_lccsd_t_screened_; ///< energy contribution from screened triplets
     double e_lccsd_t_; ///< local (T) correlation energy
-    
+
     /// Create sparsity maps for triples
     void triples_sparsity(bool prescreening);
     /// Create TNOs (Triplet Natural Orbitals) for DLPNO-(T)
