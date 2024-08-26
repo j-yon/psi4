@@ -2409,14 +2409,6 @@ void DLPNOCCSD::dispersion_correction() {
 
         auto R_ij = std::make_shared<Matrix>(n_pno_[ij], n_pno_[ij]);
 
-        /*
-        // Expensive term A
-        auto qab_ij = QAB_PNO(ij);
-        for (int q_ij = 0; q_ij < naux_ij; ++q_ij) {
-            R_ij->add(linalg::triplet(qab_ij[q_ij], T_iajb_[ij], qab_ij[q_ij], false, false, true));
-        } // end q_ij
-        */
-
         for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
             int k = lmopair_to_lmos_[ij][k_ij];
             int ik = i_j_to_ij_[i][k], kj = i_j_to_ij_[k][j];
@@ -2430,84 +2422,16 @@ void DLPNOCCSD::dispersion_correction() {
             temp_a->scale(-0.5);
             R_ij->add(temp_a);
 
-            /*
-            if (true) { // (tight) {
+            if (tight) {
                 // C1
                 R_ij->subtract(linalg::triplet(S_PNO(ij, kj), T_iajb_[kj], J_ij_kj_[ij][k_ij], false, false, true));
                 R_ij->subtract(linalg::triplet(J_ij_kj_[ji][k_ij], T_iajb_[ik], S_PNO(ik, ij), false, false, false));
-
+                
                 temp_a = linalg::triplet(J_ij_kj_[ij][k_ij], T_iajb_[kj], S_PNO(kj, ij), false, true, false);
                 temp_a->add(linalg::triplet(S_PNO(ij, ik), T_iajb_[ik], J_ij_kj_[ji][k_ij], false, true, true));
                 temp_a->scale(-0.5);
                 R_ij->add(temp_a);
-
-                for (int l_ij = 0; l_ij < nlmo_ij; ++l_ij) {
-                    int l = lmopair_to_lmos_[ij][l_ij];
-                    int kl = i_j_to_ij_[k][l], il = i_j_to_ij_[i][l], lj = i_j_to_ij_[l][j];
-                    if (kl == -1) continue;
-
-                    // C2
-                    auto T_il = linalg::triplet(S_PNO(kl, il), T_iajb_[il], S_PNO(il, ij));
-                    auto T_lj = linalg::triplet(S_PNO(ij, lj), T_iajb_[lj], S_PNO(lj, kl));
-                    auto T_ik = linalg::triplet(S_PNO(kl, ik), T_iajb_[ik], S_PNO(ik, ij));
-                    auto T_kj = linalg::triplet(S_PNO(ij, kj), T_iajb_[kj], S_PNO(kj, kl));
-
-                    temp_a = linalg::triplet(T_il, K_iajb_[kl], T_kj, true, false, true);
-                    temp_a->add(linalg::triplet(T_ik, K_iajb_[kl], T_lj, true, true, true));
-                    temp_a->scale(0.25);
-                    R_ij->add(temp_a);
-
-                    temp_a = linalg::triplet(T_lj, K_iajb_[kl], T_ik, false, false, false);
-                    temp_a->add(linalg::triplet(T_kj, K_iajb_[kl], T_il, false, true, false));
-                    temp_a->scale(0.5);
-                    R_ij->add(temp_a);
-
-                    // D2
-                    auto U_ik = linalg::triplet(S_PNO(ij, ik), Tt_iajb_[ik], S_PNO(ik, kl));
-                    auto U_il = linalg::triplet(S_PNO(ij, il), Tt_iajb_[il], S_PNO(il, kl));
-                    auto U_kj = linalg::triplet(S_PNO(kl, kj), Tt_iajb_[kj], S_PNO(kj, ij));
-                    auto U_lj = linalg::triplet(S_PNO(kl, lj), Tt_iajb_[lj], S_PNO(lj, ij));
-
-                    temp_a = linalg::triplet(U_il, L_iajb_[kl], U_kj, false, true, false);
-                    temp_a->add(linalg::triplet(U_ik, L_iajb_[kl], U_lj, false, false, false));
-                    temp_a->scale(0.25);
-                    R_ij->add(temp_a);
-                }
             }
-            */
-
-            // New Version (MP3)
-            /*
-            auto temp_a = linalg::triplet(S_PNO(ij, ik), T_iajb_[ik], K_ij_kj_[ji][k_ij], false, false, true);
-            temp_a->scale(4.0);
-            R_ij->add(temp_a);
-
-            temp_a = linalg::triplet(S_PNO(ij, ik), T_iajb_[ik], J_ij_kj_[ji][k_ij], false, false, true);
-            temp_a->scale(-2.0);
-            R_ij->add(temp_a);
-
-            temp_a = linalg::triplet(S_PNO(ij, ik), T_iajb_[ik], K_ij_kj_[ji][k_ij], false, true, true);
-            temp_a->scale(-2.0);
-            R_ij->add(temp_a);
-
-            temp_a = linalg::triplet(J_ij_kj_[ji][k_ij], T_iajb_[ik], S_PNO(ik, ij), false, true, false);
-            temp_a->scale(-2.0);
-            R_ij->add(temp_a);
-            */
-
-            /*
-            // Expensive term B
-            for (int l_ij = 0; l_ij < nlmo_ij; ++l_ij) {
-                int l = lmopair_to_lmos_[ij][l_ij];
-                int kl = i_j_to_ij_[k][l];
-
-                if (kl == -1) continue;
-
-                auto T_kl = linalg::triplet(S_PNO(ij, kl), T_iajb_[kl], S_PNO(kl, ij));
-                T_kl->scale((*K_mnij_[ij])(k_ij, l_ij));
-                R_ij->add(T_kl);
-            }
-            */
         }
 
         for (int a_ij = 0; a_ij < n_pno_[ij]; ++a_ij) {

@@ -91,7 +91,7 @@ void DLPNOCCSD_T::print_header() {
     outfile->Printf("\n\n");
 }
 
-SharedMatrix matmul_3d(SharedMatrix A, SharedMatrix X, int dim_old, int dim_new) {
+SharedMatrix DLPNOCCSD_T::matmul_3d(SharedMatrix A, SharedMatrix X, int dim_old, int dim_new) {
     /*
     Performs the operation A'[i,j,k] = A[I,J,K] * X[i,I] * X[j,J] * X[k,K] for cube 3d tensors
     */
@@ -949,7 +949,7 @@ double DLPNOCCSD_T::compute_t_iteration_energy() {
     return E_T;
 }
 
-inline SharedMatrix DLPNOCCSD_T::triples_permuter(const SharedMatrix &X, int i, int j, int k, bool reverse) {
+SharedMatrix DLPNOCCSD_T::triples_permuter(const SharedMatrix &X, int i, int j, int k, bool reverse) {
     SharedMatrix Xperm = X->clone();
     int ntno_ijk = X->rowspi(0);
 
@@ -1211,6 +1211,7 @@ double DLPNOCCSD_T::compute_energy() {
     double e_dlpno_ccsd = DLPNOCCSD::compute_energy();
 
     // Clear CCSD integrals
+    /*
     K_mnij_.clear();
     K_bar_.clear();
     K_bar_chem_.clear();
@@ -1231,6 +1232,7 @@ double DLPNOCCSD_T::compute_energy() {
     i_Qa_t1_.clear();
     S_pno_ij_kj_.clear();
     S_pno_ij_mn_.clear();
+    */
 
     print_header();
 
@@ -1283,8 +1285,8 @@ double DLPNOCCSD_T::compute_energy() {
         estimate_memory();
 
         double E_T0_crude = compute_lccsd_t0(true);
-        double E_T_crude = lccsd_t_iterations();
-        double dE_T = E_T_crude - E_T0_crude;
+        E_T_ = lccsd_t_iterations();
+        double dE_T = E_T_ - E_T0_crude;
 
         outfile->Printf("\n");
         outfile->Printf("    DLPNO-CCSD(T0) energy at looser tolerance: %16.12f\n", E_T0_crude);
@@ -1295,7 +1297,7 @@ double DLPNOCCSD_T::compute_energy() {
     }
 
     double e_scf = reference_wavefunction_->energy();
-    double e_ccsd_t_corr = e_lccsd_t_ + de_lmp2_weak_ + de_lmp2_eliminated_ + de_dipole_ + de_pno_total_;
+    double e_ccsd_t_corr = e_lccsd_t_ + de_lmp2_weak_ + de_disp_weak_ + de_lmp2_eliminated_ + de_dipole_ + de_pno_total_;
     double e_ccsd_t_total = e_scf + e_ccsd_t_corr;
 
     set_scalar_variable("CCSD(T) CORRELATION ENERGY", e_ccsd_t_corr);

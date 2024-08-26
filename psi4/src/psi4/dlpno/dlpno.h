@@ -457,6 +457,7 @@ class PSI_API DLPNOCCSD_T : public DLPNOCCSD {
     /// final energies
     double de_lccsd_t_screened_; ///< energy contribution from screened triplets
     double e_lccsd_t_; ///< local (T) correlation energy
+    double E_T_; ///< raw iterative (T) energy at weaker triples cutoffs
 
     /// Create sparsity maps for triples
     void triples_sparsity(bool prescreening);
@@ -465,8 +466,10 @@ class PSI_API DLPNOCCSD_T : public DLPNOCCSD {
     /// Sort triplets to split between "strong" and "weak" triplets (for (T) iterations)
     void sort_triplets(double e_total);
 
+    /// A helper function to transform TNO-like quantities
+    SharedMatrix matmul_3d(SharedMatrix A, SharedMatrix X, int dim_old, int dim_new);
     /// Returns a symmetrized version of that matrix (in i <= j <= k ordering)
-    inline SharedMatrix triples_permuter(const SharedMatrix& X, int i, int j, int k, bool reverse=false);
+    SharedMatrix triples_permuter(const SharedMatrix& X, int i, int j, int k, bool reverse=false);
     /// compute (T) iteration energy
     double compute_t_iteration_energy();
 
