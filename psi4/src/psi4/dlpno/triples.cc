@@ -1290,7 +1290,7 @@ double DLPNOCCSD_T::compute_energy() {
 
         outfile->Printf("\n");
         outfile->Printf("    DLPNO-CCSD(T0) energy at looser tolerance: %16.12f\n", E_T0_crude);
-        outfile->Printf("    DLPNO-CCSD(T)  energy at looser tolerance: %16.12f\n", E_T_crude);
+        outfile->Printf("    DLPNO-CCSD(T)  energy at looser tolerance: %16.12f\n", E_T_);
         outfile->Printf("    * Net Iterative (T) contribution:          %16.12f\n\n", dE_T);
 
         e_lccsd_t_ += dE_T;
