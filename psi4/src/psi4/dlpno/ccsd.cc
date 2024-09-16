@@ -288,18 +288,16 @@ void DLPNOCCSD::estimate_memory() {
         oovv += (4 - dij) * npno_ij * npno_ij;
         ovvv += npno_ij * npno_ij * npno_ij;
 
-        if (i_j_to_ij_strong_[i][j] == -1) continue;
-
-        if (i >= j) {
-            qov += naux_ij * nlmo_ij * npno_ij;
-            qvv += naux_ij * npno_ij * npno_ij;
-        }
-        
         for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
             int k = lmopair_to_lmos_[ij][k_ij];
             int ik = i_j_to_ij_[i][k], jk = i_j_to_ij_[j][k];
             oovv_large += n_pno_[ij] * n_pno_[jk];
             oovv_large += n_pno_[ij] * n_pno_[jk];
+        }
+
+        if (i >= j && i_j_to_ij_strong_[i][j] != -1) {
+            qov += naux_ij * nlmo_ij * npno_ij;
+            qvv += naux_ij * npno_ij * npno_ij;
         }
     }
 
@@ -430,7 +428,7 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
         SharedVector e_pao_ij;  // energies of the canonical PAOs
         std::tie(X_pao_ij, e_pao_ij) = orthocanonicalizer(S_pao_ij, F_pao_ij);
 
-        // S_pao_ij = linalg::triplet(X_pao_ij, S_pao_ij, X_pao_ij, true, false, false);
+        S_pao_ij = linalg::triplet(X_pao_ij, S_pao_ij, X_pao_ij, true, false, false);
         F_pao_ij = linalg::triplet(X_pao_ij, F_pao_ij, X_pao_ij, true, false, false);
         K_pao_ij = linalg::triplet(X_pao_ij, K_pao_ij, X_pao_ij, true, false, false);
 
@@ -491,15 +489,27 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
 
             double e_pno = 0.0;
             double occ_pno = 0.0;
+            double proj_err = 1.0;
+
             int nvir_ij_final = 0;
             std::vector<int> a_curr;
             auto K_pno_init = linalg::triplet(X_pno_ij, K_pao_ij, X_pno_ij, true, false, false);
             auto Tt_pno_init = linalg::triplet(X_pno_ij, Tt_pao_ij, X_pno_ij, true, false, false);
+            auto S_pno_test = linalg::doublet(S_pao_ij, X_pno_ij, false, false);
+
             for (size_t a = 0; a < nvir_ij; ++a) {
                 a_curr.push_back(a);
                 if (fabs(pno_occ.get(a)) >= t_cut_scale * T_CUT_PNO_MP2_ || occ_pno / occ_total < T_CUT_TRACE_MP2_ ||
-                        std::fabs(e_pno) < T_CUT_ENERGY_MP2_ * std::fabs(e_ij_initial)) {
+                        std::fabs(e_pno) < T_CUT_ENERGY_MP2_ * std::fabs(e_ij_initial) || proj_err >= T_CUT_PROJ_MP2_) {
+                    // Energy criteria
                     e_pno = submatrix_rows_and_cols(*K_pno_init, a_curr, a_curr)->vector_dot(submatrix_rows_and_cols(*Tt_pno_init, a_curr, a_curr));
+                    // Projection criteria
+                    auto S_pno_temp = submatrix_cols(*S_pno_test, a_curr);
+                    S_pno_temp = linalg::doublet(S_pno_temp, S_pno_temp, false, true);
+                    S_pno_temp->subtract(S_pao_ij);
+                    proj_err = S_pno_temp->rms();
+
+                    // Trace criteria
                     occ_pno += pno_occ.get(a);
                     nvir_ij_final++;
                 }
@@ -779,6 +789,7 @@ void DLPNOCCSD::pno_lmp2_iterations() {
 
             e_curr += K_iajb_[ij]->vector_dot(Tt_iajb_[ij]);
         }
+
         r_curr = *max_element(R_iajb_rms.begin(), R_iajb_rms.end());
 
         r_converged = (fabs(r_curr) < 0.01 * options_.get_double("R_CONVERGENCE"));
@@ -795,6 +806,19 @@ void DLPNOCCSD::pno_lmp2_iterations() {
         }
     }
 
+    // Set reference LMP2 reference energy to MP2 energy this iteration
+    e_lmp2_ = e_curr;
+
+}
+
+void DLPNOCCSD::recompute_pnos() {
+
+    timer_on("Recompute PNOs");
+
+    int nbf = basisset_->nbf();
+    int naocc = i_j_to_ij_.size();
+    int n_lmo_pairs = ij_to_i_j_.size();
+
     // Recompute Pair Natural Orbitals for LCCSD iterations
 
     outfile->Printf("\n  ==> Forming Pair Natural Orbitals (for LCCSD) <==\n");
@@ -806,7 +830,16 @@ void DLPNOCCSD::pno_lmp2_iterations() {
 
         if (i > j) continue;
 
+        auto S_pao_ij = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[ij]);
         auto F_pao_ij = submatrix_rows_and_cols(*F_pao_, lmopair_to_paos_[ij], lmopair_to_paos_[ij]);
+
+        SharedMatrix X_pao_ij;  // canonical transformation of this domain's PAOs to
+        SharedVector e_pao_ij;  // energies of the canonical PAOs
+        std::tie(X_pao_ij, e_pao_ij) = orthocanonicalizer(S_pao_ij, F_pao_ij);
+
+        auto S_pno_ij_init = linalg::triplet(X_pno_[ij], S_pao_ij, X_pno_[ij], true, false, false);
+        auto S_pao_half = linalg::triplet(X_pao_ij, S_pao_ij, X_pno_[ij], true, false, false);
+        S_pao_ij = linalg::triplet(X_pao_ij, S_pao_ij, X_pao_ij, true, false, false);
         auto F_pno_ij_init = linalg::triplet(X_pno_[ij], F_pao_ij, X_pno_[ij], true, false, false);
 
         // Construct pair density from amplitudes
@@ -831,15 +864,27 @@ void DLPNOCCSD::pno_lmp2_iterations() {
         double e_pno = 0.0;
         double e_ij_total = K_iajb_[ij]->vector_dot(Tt_iajb_[ij]);
         double occ_pno = 0.0;
+        double proj_err = 1.0;
+
         int nvir_ij_final = 0;
         std::vector<int> a_curr;
         auto K_pno_init = linalg::triplet(X_pno_ij, K_iajb_[ij], X_pno_ij, true, false, false);
         auto Tt_pno_init = linalg::triplet(X_pno_ij, Tt_iajb_[ij], X_pno_ij, true, false, false);
+        auto S_pno_test = linalg::doublet(S_pao_half, X_pno_ij, false, false);
+
         for (size_t a = 0; a < nvir_ij; ++a) {
             a_curr.push_back(a);
             if (fabs(pno_occ.get(a)) >= t_cut_scale * T_CUT_PNO_ || occ_pno / occ_total < T_CUT_TRACE_ ||
-                    std::fabs(e_pno) < T_CUT_ENERGY_ * std::fabs(e_ij_total)) {
+                    std::fabs(e_pno) < T_CUT_ENERGY_ * std::fabs(e_ij_total) || proj_err >= T_CUT_PROJ_) {
+                // Energy criteria
                 e_pno = submatrix_rows_and_cols(*K_pno_init, a_curr, a_curr)->vector_dot(submatrix_rows_and_cols(*Tt_pno_init, a_curr, a_curr));
+                // Projection criteria
+                auto S_pno_temp = submatrix_cols(*S_pno_test, a_curr);
+                S_pno_temp = linalg::doublet(S_pno_temp, S_pno_temp, false, true);
+                S_pno_temp->subtract(S_pao_ij);
+                proj_err = S_pno_temp->rms();
+
+                // Trace criteria
                 occ_pno += pno_occ.get(a);
                 nvir_ij_final++;
             }
@@ -900,10 +945,10 @@ void DLPNOCCSD::pno_lmp2_iterations() {
     int pno_count_total = 0, pno_count_min = nbf, pno_count_max = 0;
     double occ_number_total = 0.0, occ_number_min = 2.0, occ_number_max = 0.0;
     double trace_total = 0.0, trace_min = 1.0, trace_max = 0.0;
-    de_lmp2_weak_ = 0.0, de_pno_total_ = 0.0, de_pno_total_os_ = 0.0, de_pno_total_ss_ = 0.0;
+    de_weak_ = 0.0, de_pno_total_ = 0.0, de_pno_total_os_ = 0.0, de_pno_total_ss_ = 0.0;
     for (int ij = 0; ij < n_lmo_pairs; ++ij) {
         auto &[i, j] = ij_to_i_j_[ij];
-        if (i_j_to_ij_strong_[i][j] == -1) de_lmp2_weak_ += K_iajb_[ij]->vector_dot(Tt_iajb_[ij]);
+        if (i_j_to_ij_strong_[i][j] == -1) de_weak_ += K_iajb_[ij]->vector_dot(Tt_iajb_[ij]);
 
         pno_count_total += n_pno_[ij];
         pno_count_min = std::min(pno_count_min, n_pno_[ij]);
@@ -929,9 +974,10 @@ void DLPNOCCSD::pno_lmp2_iterations() {
     outfile->Printf("      Min Trace Sum: %.6f \n", trace_min);
     outfile->Printf("      Max Trace Sum: %.6f \n", trace_max);
     outfile->Printf("  \n");
-    outfile->Printf("    Weak pair energy      = %.12f\n", de_lmp2_weak_);
+    outfile->Printf("    LMP2 Weak pair energy = %.12f\n", de_weak_);
     outfile->Printf("    PNO truncation energy = %.12f\n", de_pno_total_);
 
+    timer_off("Recompute PNOs");
 }
 
 template<bool crude> std::pair<double, double> DLPNOCCSD::filter_pairs(const std::vector<double>& e_ijs) {
@@ -1048,7 +1094,7 @@ template<bool crude> void DLPNOCCSD::pair_prescreening() {
         int n_lmo_pairs_init = ij_to_i_j_.size();
 
         const std::vector<double>& e_ijs_crude = compute_pair_energies<true>();
-        std::tie(de_lmp2_eliminated_, de_lmp2_weak_) = filter_pairs<true>(e_ijs_crude);
+        std::tie(de_lmp2_eliminated_, de_weak_) = filter_pairs<true>(e_ijs_crude);
 
         int n_strong_pairs = ij_to_i_j_strong_.size();
         int n_weak_pairs = ij_to_i_j_weak_.size();
@@ -1067,7 +1113,7 @@ template<bool crude> void DLPNOCCSD::pair_prescreening() {
 
         const std::vector<double>& e_ijs = compute_pair_energies<false>();
         double de_lmp2_eliminated_refined = 0.0;
-        std::tie(de_lmp2_eliminated_refined, de_lmp2_weak_) = filter_pairs<false>(e_ijs);
+        std::tie(de_lmp2_eliminated_refined, de_weak_) = filter_pairs<false>(e_ijs);
         de_lmp2_eliminated_ += de_lmp2_eliminated_refined;
 
         int n_strong_pairs = ij_to_i_j_strong_.size();
@@ -1080,7 +1126,7 @@ template<bool crude> void DLPNOCCSD::pair_prescreening() {
         outfile->Printf("    (Final) Strong Pairs            = %d\n", n_strong_pairs);
         outfile->Printf("    Strong Pairs / Total Pairs      = (%.2f %%)\n", (100.0 * n_strong_pairs) / (naocc * naocc));
         outfile->Printf("    (Cumulative) Eliminated Pair dE = %.12f\n", de_lmp2_eliminated_);
-        outfile->Printf("    Weak Pair dE                    = %.12f\n\n", de_lmp2_weak_);
+        outfile->Printf("    (Initial) Weak Pair dE          = %.12f\n\n", de_weak_);
     }
 }
 
@@ -1095,6 +1141,7 @@ void DLPNOCCSD::compute_cc_integrals() {
     K_bar_.resize(n_lmo_pairs);
     L_bar_.resize(n_lmo_pairs);
     // 2 virtual
+    lmopair_to_paos_ext_.resize(n_lmo_pairs);
     J_ijab_.resize(n_lmo_pairs);
     L_iajb_.resize(n_lmo_pairs);
     M_iajb_.resize(n_lmo_pairs);
@@ -1183,6 +1230,9 @@ void DLPNOCCSD::compute_cc_integrals() {
             extended_pao_domain = merge_lists(extended_pao_domain, lmo_to_paos_[k]);
         }
         npao_ext_ij = extended_pao_domain.size();
+
+        lmopair_to_paos_ext_[ij] = extended_pao_domain;
+        if (i != j) lmopair_to_paos_ext_[ji] = extended_pao_domain;
 
         if (thread == 0) timer_on("DLPNO-CCSD: Setup Integrals");
 
@@ -1280,47 +1330,45 @@ void DLPNOCCSD::compute_cc_integrals() {
         if (thread == 0) timer_off("DLPNO-CCSD: Setup Integrals");
 
         if (thread == 0) timer_on("DLPNO-CCSD: J_ij_kj Integrals");
+        
+        for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
+            int k = lmopair_to_lmos_[ij][k_ij];
+            int ik = i_j_to_ij_[i][k], kj = i_j_to_ij_[k][j];
+            J_ij_kj_[ij][k_ij] = std::make_shared<Matrix>(n_pno_[ij], n_pno_[kj]);
+            if (i != j) J_ij_kj_[ji][k_ij] = std::make_shared<Matrix>(n_pno_[ij], n_pno_[ik]);
+        }
 
-        if (i_j_to_ij_strong_[i][j] != -1 || disp_correct_) {
+        for (int q_ij = 0; q_ij < naux_ij; q_ij++) {
+            const int q = lmopair_to_ribfs_[ij][q_ij];
+            const int centerq = ribasis_->function_to_center(q);
+            
+            auto q_cd_temp = std::make_shared<Matrix>(npao_ij, npao_ext_ij);
+            for (int u_ij = 0; u_ij < npao_ij; ++u_ij) {
+                int u = lmopair_to_paos_[ij][u_ij];
+                for (int v_ij = 0; v_ij < npao_ext_ij; ++v_ij) {
+                    int v = extended_pao_domain[v_ij];
+                    int uv_idx = riatom_to_pao_pairs_dense_[centerq][u][v];
+                    if (uv_idx == -1) continue;
+                    q_cd_temp->set(u_ij, v_ij, qab_[q]->get(uv_idx, 0));
+                }
+            }
+            q_cd_temp = linalg::doublet(X_pno_[ij], q_cd_temp, true, false);
+
             for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
                 int k = lmopair_to_lmos_[ij][k_ij];
                 int ik = i_j_to_ij_[i][k], kj = i_j_to_ij_[k][j];
-                J_ij_kj_[ij][k_ij] = std::make_shared<Matrix>(n_pno_[ij], n_pno_[kj]);
-                if (i != j) J_ij_kj_[ji][k_ij] = std::make_shared<Matrix>(n_pno_[ij], n_pno_[ik]);
-            }
+                auto kj_idx = index_list(extended_pao_domain, lmopair_to_paos_[kj]);
 
-            for (int q_ij = 0; q_ij < naux_ij; q_ij++) {
-                const int q = lmopair_to_ribfs_[ij][q_ij];
-                const int centerq = ribasis_->function_to_center(q);
-                
-                auto q_cd_temp = std::make_shared<Matrix>(npao_ij, npao_ext_ij);
-                for (int u_ij = 0; u_ij < npao_ij; ++u_ij) {
-                    int u = lmopair_to_paos_[ij][u_ij];
-                    for (int v_ij = 0; v_ij < npao_ext_ij; ++v_ij) {
-                        int v = extended_pao_domain[v_ij];
-                        int uv_idx = riatom_to_pao_pairs_dense_[centerq][u][v];
-                        if (uv_idx == -1) continue;
-                        q_cd_temp->set(u_ij, v_ij, qab_[q]->get(uv_idx, 0));
-                    }
-                }
-                q_cd_temp = linalg::doublet(X_pno_[ij], q_cd_temp, true, false);
+                auto J_ij_kj_temp = linalg::doublet(submatrix_cols(*q_cd_temp, kj_idx), X_pno_[kj], false, false);
+                J_ij_kj_temp->scale((*q_io_clone)(q_ij, k_ij));
+                J_ij_kj_[ij][k_ij]->add(J_ij_kj_temp);
 
-                for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
-                    int k = lmopair_to_lmos_[ij][k_ij];
-                    int ik = i_j_to_ij_[i][k], kj = i_j_to_ij_[k][j];
-                    auto kj_idx = index_list(extended_pao_domain, lmopair_to_paos_[kj]);
+                if (i != j) {
+                    auto ik_idx = index_list(extended_pao_domain, lmopair_to_paos_[ik]);
 
-                    auto J_ij_kj_temp = linalg::doublet(submatrix_cols(*q_cd_temp, kj_idx), X_pno_[kj], false, false);
-                    J_ij_kj_temp->scale((*q_io_clone)(q_ij, k_ij));
-                    J_ij_kj_[ij][k_ij]->add(J_ij_kj_temp);
-
-                    if (i != j) {
-                        auto ik_idx = index_list(extended_pao_domain, lmopair_to_paos_[ik]);
-
-                        auto J_ij_ik_temp = linalg::doublet(submatrix_cols(*q_cd_temp, ik_idx), X_pno_[ik], false, false);
-                        J_ij_ik_temp->scale((*q_jo_clone)(q_ij, k_ij));
-                        J_ij_kj_[ji][k_ij]->add(J_ij_ik_temp);
-                    }
+                    auto J_ij_ik_temp = linalg::doublet(submatrix_cols(*q_cd_temp, ik_idx), X_pno_[ik], false, false);
+                    J_ij_ik_temp->scale((*q_jo_clone)(q_ij, k_ij));
+                    J_ij_kj_[ji][k_ij]->add(J_ij_ik_temp);
                 }
             }
         }
@@ -1328,47 +1376,46 @@ void DLPNOCCSD::compute_cc_integrals() {
         if (thread == 0) timer_off("DLPNO-CCSD: J_ij_kj Integrals");
 
         if (thread == 0) timer_on("DLPNO-CCSD: K_ij_kj Integrals");
+        
+        for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
+            int k = lmopair_to_lmos_[ij][k_ij];
+            int ik = i_j_to_ij_[i][k], kj = i_j_to_ij_[k][j];
+            K_ij_kj_[ij][k_ij] = std::make_shared<Matrix>(n_pno_[ij], n_pno_[kj]);
+            if (i != j) K_ij_kj_[ji][k_ij] = std::make_shared<Matrix>(n_pno_[ij], n_pno_[ik]);
+        }
 
-        if (i_j_to_ij_strong_[i][j] != -1 || disp_correct_) {
+        for (int q_ij = 0; q_ij < naux_ij; q_ij++) {
+            const int q = lmopair_to_ribfs_[ij][q_ij];
+            const int centerq = ribasis_->function_to_center(q);
+
             for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
                 int k = lmopair_to_lmos_[ij][k_ij];
                 int ik = i_j_to_ij_[i][k], kj = i_j_to_ij_[k][j];
-                K_ij_kj_[ij][k_ij] = std::make_shared<Matrix>(n_pno_[ij], n_pno_[kj]);
-                if (i != j) K_ij_kj_[ji][k_ij] = std::make_shared<Matrix>(n_pno_[ij], n_pno_[ik]);
-            }
+                int k_sparse = riatom_to_lmos_ext_dense_[centerq][k];
+                auto kj_idx = index_list(riatom_to_paos_ext_[centerq], lmopair_to_paos_[kj]);
+                
+                auto K_ij_kj_temp = linalg::doublet(submatrix_rows_and_cols(*qia_[q], std::vector<int>(1, k_sparse), kj_idx), X_pno_[kj]);
 
-            for (int q_ij = 0; q_ij < naux_ij; q_ij++) {
-                const int q = lmopair_to_ribfs_[ij][q_ij];
-                const int centerq = ribasis_->function_to_center(q);
-
-                for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
-                    int k = lmopair_to_lmos_[ij][k_ij];
-                    int ik = i_j_to_ij_[i][k], kj = i_j_to_ij_[k][j];
-                    int k_sparse = riatom_to_lmos_ext_dense_[centerq][k];
-                    auto kj_idx = index_list(riatom_to_paos_ext_[centerq], lmopair_to_paos_[kj]);
-                    
-                    auto K_ij_kj_temp = linalg::doublet(submatrix_rows_and_cols(*qia_[q], std::vector<int>(1, k_sparse), kj_idx), X_pno_[kj]);
+                for (int a_ij = 0; a_ij < n_pno_[ij]; ++a_ij) {
+                    for (int c_kj = 0; c_kj < n_pno_[kj]; ++c_kj) {
+                        (*K_ij_kj_[ij][k_ij])(a_ij, c_kj) += (*q_iv_clone)(q_ij, a_ij) * (*K_ij_kj_temp)(0, c_kj);
+                    }
+                }
+                
+                if (i != j) {
+                    auto ik_idx = index_list(riatom_to_paos_ext_[centerq], lmopair_to_paos_[ik]);
+                    auto K_ij_ik_temp = linalg::doublet(submatrix_rows_and_cols(*qia_[q], std::vector<int>(1, k_sparse), ik_idx), X_pno_[ik]);
 
                     for (int a_ij = 0; a_ij < n_pno_[ij]; ++a_ij) {
-                        for (int c_kj = 0; c_kj < n_pno_[kj]; ++c_kj) {
-                            (*K_ij_kj_[ij][k_ij])(a_ij, c_kj) += (*q_iv_clone)(q_ij, a_ij) * (*K_ij_kj_temp)(0, c_kj);
+                        for (int c_ik = 0; c_ik < n_pno_[ik]; ++c_ik) {
+                            (*K_ij_kj_[ji][k_ij])(a_ij, c_ik) += (*q_jv_clone)(q_ij, a_ij) * (*K_ij_ik_temp)(0, c_ik);
                         }
                     }
-                    
-                    if (i != j) {
-                        auto ik_idx = index_list(riatom_to_paos_ext_[centerq], lmopair_to_paos_[ik]);
-                        auto K_ij_ik_temp = linalg::doublet(submatrix_rows_and_cols(*qia_[q], std::vector<int>(1, k_sparse), ik_idx), X_pno_[ik]);
+                } // end (i != j)
 
-                        for (int a_ij = 0; a_ij < n_pno_[ij]; ++a_ij) {
-                            for (int c_ik = 0; c_ik < n_pno_[ik]; ++c_ik) {
-                                (*K_ij_kj_[ji][k_ij])(a_ij, c_ik) += (*q_jv_clone)(q_ij, a_ij) * (*K_ij_ik_temp)(0, c_ik);
-                            }
-                        }
-                    } // end (i != j)
-
-                }
             }
         }
+        
 
         if (thread == 0) timer_off("DLPNO-CCSD: K_ij_kj Integrals");
 
@@ -1961,6 +2008,100 @@ void DLPNOCCSD::compute_R_ia(std::vector<SharedMatrix>& R_ia, std::vector<std::v
     timer_off("DLPNO-CCSD: Compute R1");
 }
 
+void DLPNOCCSD::compute_R_iajb_weak(std::vector<SharedMatrix>& R_iajb) {
+    
+    timer_on("DLPNO-CCSD: Compute R2 (weak pairs)");
+
+    int naocc = i_j_to_ij_.size();
+    int n_weak_pairs = ij_to_i_j_weak_.size();
+
+#pragma omp parallel for schedule(dynamic, 1)
+    for (int ij_weak = 0; ij_weak < n_weak_pairs; ++ij_weak) {
+        auto &[i, j] = ij_to_i_j_weak_[ij_weak];
+        int ij = i_j_to_ij_[i][j], ii = i_j_to_ij_[i][i], jj = i_j_to_ij_[j][j];
+        int ji = ij_to_ji_[ij];
+
+        if (i > j) continue;
+
+        int nlmo_ij = lmopair_to_lmos_[ij].size();
+        int naux_ij = lmopair_to_ribfs_[ij].size();
+
+        // MP2 Like Terms
+        for (int a = 0; a < n_pno_[ij]; ++a) {
+            for (int b = 0; b < n_pno_[ij]; ++b) {
+                R_iajb[ij]->set(a, b,
+                                K_iajb_[ij]->get(a, b) +
+                                    (e_pno_[ij]->get(a) + e_pno_[ij]->get(b) - F_lmo_->get(i, i) - F_lmo_->get(j, j)) *
+                                        T_iajb_[ij]->get(a, b));
+            }
+        }
+
+        for (int k = 0; k < naocc; ++k) {
+            int kj = i_j_to_ij_[k][j];
+            int ik = i_j_to_ij_[i][k];
+
+            if (kj != -1 && i != k && fabs(F_lmo_->get(i, k)) > options_.get_double("F_CUT") && n_pno_[kj] > 0) {
+                auto S_ij_kj = S_PNO(ij, kj);
+                auto temp = linalg::triplet(S_ij_kj, T_iajb_[kj], S_ij_kj, false, false, true);
+                temp->scale(-1.0 * F_lmo_->get(i, k));
+                R_iajb[ij]->add(temp);
+            }
+            if (ik != -1 && j != k && fabs(F_lmo_->get(k, j)) > options_.get_double("F_CUT") && n_pno_[ik] > 0) {
+                auto S_ij_ik = S_PNO(ij, ik);
+                auto temp = linalg::triplet(S_ij_ik, T_iajb_[ik], S_ij_ik, false, false, true);
+                temp->scale(-1.0 * F_lmo_->get(k, j));
+                R_iajb[ij]->add(temp);
+            }
+        }
+
+        // Linear T1 contributions
+        R_iajb[ij]->subtract(linalg::doublet(K_bar_[ji], T_n_ij_[ij], true, false));
+        R_iajb[ij]->subtract(linalg::doublet(T_n_ij_[ij], K_bar_[ij], true, false));
+
+        auto K_tilde_ij = K_tilde_chem_[ij]->clone();
+        K_tilde_ij->reshape(n_pno_[ij] * n_pno_[ij], n_pno_[ij]);
+        K_tilde_ij = linalg::triplet(K_tilde_ij, S_PNO(ij, jj), T_ia_[j]);
+        K_tilde_ij->reshape(n_pno_[ij], n_pno_[ij]);
+        R_iajb[ij]->add(K_tilde_ij);
+
+        auto K_tilde_ji = K_tilde_chem_[ji]->clone();
+        K_tilde_ji->reshape(n_pno_[ij] * n_pno_[ij], n_pno_[ij]);
+        K_tilde_ji = linalg::triplet(K_tilde_ji, S_PNO(ij, ii), T_ia_[i]);
+        K_tilde_ji->reshape(n_pno_[ij], n_pno_[ij]);
+        R_iajb[ij]->add(K_tilde_ji->transpose());
+
+        // Linear T2 contributions
+        for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
+            int k = lmopair_to_lmos_[ij][k_ij];
+            int ik = i_j_to_ij_[i][k], kj = i_j_to_ij_[k][j];
+
+            // C1
+            R_iajb[ij]->subtract(linalg::triplet(S_PNO(ij, kj), T_iajb_[kj], J_ij_kj_[ij][k_ij], false, false, true));
+            R_iajb[ij]->subtract(linalg::triplet(J_ij_kj_[ji][k_ij], T_iajb_[ik], S_PNO(ik, ij), false, false, false));
+                
+            auto temp_a = linalg::triplet(J_ij_kj_[ij][k_ij], T_iajb_[kj], S_PNO(kj, ij), false, true, false);
+            temp_a->add(linalg::triplet(S_PNO(ij, ik), T_iajb_[ik], J_ij_kj_[ji][k_ij], false, true, true));
+            temp_a->scale(-0.5);
+            R_iajb[ij]->add(temp_a);
+
+            // D1
+            R_iajb[ij]->add(linalg::triplet(K_ij_kj_[ij][k_ij], Tt_iajb_[kj], S_PNO(kj, ij), false, false, false));
+            R_iajb[ij]->add(linalg::triplet(S_PNO(ij, ik), Tt_iajb_[ik], K_ij_kj_[ji][k_ij], false, false, true));
+
+            temp_a = linalg::triplet(J_ij_kj_[ij][k_ij], Tt_iajb_[kj], S_PNO(kj, ij), false, false, false);
+            temp_a->add(linalg::triplet(S_PNO(ij, ik), Tt_iajb_[ik], J_ij_kj_[ji][k_ij], false, false, true));
+            temp_a->scale(-0.5);
+            R_iajb[ij]->add(temp_a);
+        }
+
+        if (i != j) {
+            R_iajb[ji] = R_iajb[ij]->transpose();
+        }
+    }
+
+    timer_off("DLPNO-CCSD: Compute R2 (weak pairs)");
+}
+
 void DLPNOCCSD::compute_R_iajb(std::vector<SharedMatrix>& R_iajb, std::vector<SharedMatrix>& Rn_iajb) {
 
     timer_on("DLPNO-CCSD: Compute R2");
@@ -2208,7 +2349,7 @@ void DLPNOCCSD::lccsd_iterations() {
     }
 
     int iteration = 0, max_iteration = options_.get_int("DLPNO_MAXITER");
-    double e_curr = 0.0, e_prev = 0.0, r1_curr = 0.0, r2_curr = 0.0;
+    double e_curr = 0.0, e_prev = 0.0, e_weak = 0.0, r1_curr = 0.0, r2_curr = 0.0;
     bool e_converged = false, r_converged = false;
 
     DIISManager diis(options_.get_int("DIIS_MAX_VECS"), "LCCSD DIIS", DIISManager::RemovalPolicy::LargestError, DIISManager::StoragePolicy::InCore);
@@ -2265,6 +2406,9 @@ void DLPNOCCSD::lccsd_iterations() {
         // Step 4: Compute R2 residual
         compute_R_iajb(R_iajb, Rn_iajb);
 
+        // Step 5: Compute R2 residual for weak pairs
+        compute_R_iajb_weak(R_iajb);
+
         // Get rms of R_iajb
 #pragma omp parallel for schedule(dynamic, 1)
         for (int ij = 0; ij < n_lmo_pairs; ++ij) {
@@ -2275,7 +2419,6 @@ void DLPNOCCSD::lccsd_iterations() {
 #pragma omp parallel for
         for (int i = 0; i < naocc; ++i) {
             int ii = i_j_to_ij_[i][i];
-            int i_ii = lmopair_to_lmos_dense_[ii][i];
             for (int a_ii = 0; a_ii < n_pno_[ii]; ++a_ii) {
                 (*T_ia_[i])(a_ii, 0) -= (*R_ia[i])(a_ii, 0) / (e_pno_[ii]->get(a_ii) - F_lmo_->get(i,i));
             }
@@ -2285,11 +2428,6 @@ void DLPNOCCSD::lccsd_iterations() {
 #pragma omp parallel for schedule(dynamic, 1)
         for (int ij = 0; ij < n_lmo_pairs; ++ij) {
             auto &[i, j] = ij_to_i_j_[ij];
-            int ii = i_j_to_ij_[i][i], jj = i_j_to_ij_[j][j], ji = ij_to_ji_[ij];
-            if (n_pno_[ij] == 0 || i_j_to_ij_strong_[i][j] == -1) continue;
-
-            int pair_idx = (i > j) ? ji : ij;
-            int i_ij = lmopair_to_lmos_dense_[ij][i], j_ij = lmopair_to_lmos_dense_[ij][j];
 
             for (int a_ij = 0; a_ij < n_pno_[ij]; ++a_ij) {
                 for (int b_ij = 0; b_ij < n_pno_[ij]; ++b_ij) {
@@ -2356,15 +2494,15 @@ void DLPNOCCSD::lccsd_iterations() {
         e_prev = e_curr;
         // Compute LCCSD energy
         e_curr = 0.0;
-#pragma omp parallel for schedule(dynamic, 1) reduction(+ : e_curr)
+        e_weak = 0.0;
+#pragma omp parallel for schedule(dynamic, 1) reduction(+ : e_curr, e_weak)
         for (int ij = 0; ij < n_lmo_pairs; ++ij) {
             int i, j;
             std::tie(i, j) = ij_to_i_j_[ij];
-
-            if (n_pno_[ij] == 0) continue;
-            // ONLY strong pair doubles contribute to CCSD energy
-            if (i_j_to_ij_strong_[i][j] == -1) continue;
-            e_curr += tau[ij]->vector_dot(L_iajb_[ij]);
+            double e_ij = tau[ij]->vector_dot(L_iajb_[ij]);
+            
+            e_curr += e_ij;
+            if (i_j_to_ij_strong_[i][j] == -1) e_weak += e_ij;
         }
         double r_curr1 = *max_element(R_ia_rms.begin(), R_ia_rms.end());
         double r_curr2 = *max_element(R_iajb_rms.begin(), R_iajb_rms.end());
@@ -2384,7 +2522,8 @@ void DLPNOCCSD::lccsd_iterations() {
         }
     }
 
-    e_lccsd_ = e_curr;
+    e_lccsd_ = e_curr - e_weak;
+    de_weak_ = e_weak;
 }
 
 void DLPNOCCSD::dispersion_correction() {
@@ -2520,6 +2659,27 @@ double DLPNOCCSD::compute_energy() {
     pno_lmp2_iterations();
     timer_off("PNO-LMP2 Iterations");
 
+    // Set variables from LMP2
+
+    double e_scf = reference_wavefunction_->energy();
+    double e_lmp2_corr = e_lmp2_ + de_lmp2_eliminated_ + de_dipole_ + de_pno_total_;
+    double e_lmp2_total = e_scf + e_lmp2_corr;
+
+    set_scalar_variable("MP2 CORRELATION ENERGY", e_lmp2_corr);
+    set_scalar_variable("CURRENT CORRELATION ENERGY", e_lmp2_corr);
+    set_scalar_variable("MP2 TOTAL ENERGY", e_lmp2_total);
+    set_scalar_variable("CURRENT ENERGY", e_lmp2_total);
+
+    outfile->Printf("  \n");
+    outfile->Printf("  Total DLPNO-MP2 Correlation Energy: %16.12f \n", e_lmp2_ + de_lmp2_eliminated_ + de_pno_total_ + de_dipole_);
+    outfile->Printf("    MP2 Correlation Energy:           %16.12f \n", e_lmp2_);
+    outfile->Printf("    Eliminated Pair MP2 Correction:   %16.12f \n", de_lmp2_eliminated_);
+    outfile->Printf("    Dipole Correction:                %16.12f \n", de_dipole_);
+    outfile->Printf("    PNO Truncation Correction:        %16.12f \n\n", de_pno_total_);
+
+    // Now we do the hard stuff
+    recompute_pnos();
+
     timer_on("DF Ints");
     print_integral_sparsity();
     compute_qij();
@@ -2570,9 +2730,8 @@ double DLPNOCCSD::compute_energy() {
     print_results();
 
     timer_off("DLPNO-CCSD");
-
-    double e_scf = reference_wavefunction_->energy();
-    double e_ccsd_corr = e_lccsd_ + de_lmp2_weak_ + de_lmp2_eliminated_ + de_dipole_ + de_disp_weak_ + de_pno_total_;
+    
+    double e_ccsd_corr = e_lccsd_ + de_weak_ + de_lmp2_eliminated_ + de_dipole_ + de_disp_weak_ + de_pno_total_;
     double e_ccsd_total = e_scf + e_ccsd_corr;
 
     set_scalar_variable("CCSD CORRELATION ENERGY", e_ccsd_corr);
@@ -2699,14 +2858,14 @@ void DLPNOCCSD::print_results() {
     set_scalar_variable("CC T1 DIAGNOSTIC", t1diag);
 
     outfile->Printf("  \n");
-    outfile->Printf("  Total DLPNO-CCSD Correlation Energy: %16.12f \n", e_lccsd_ + de_lmp2_weak_ + de_lmp2_eliminated_ + de_pno_total_ + de_disp_weak_ + de_dipole_);
+    outfile->Printf("  Total DLPNO-CCSD Correlation Energy: %16.12f \n", e_lccsd_ + de_weak_ + de_lmp2_eliminated_ + de_pno_total_ + de_disp_weak_ + de_dipole_);
     outfile->Printf("    CCSD Correlation Energy:           %16.12f \n", e_lccsd_);
+    outfile->Printf("    Weak Pair Correction:              %16.12f \n", de_weak_);
     outfile->Printf("    Eliminated Pair MP2 Correction     %16.12f \n", de_lmp2_eliminated_);
-    outfile->Printf("    Weak Pair MP2 Correction:          %16.12f \n", de_lmp2_weak_);
     outfile->Printf("    Weak Pair Dispersion Correction:   %16.12f \n", de_disp_weak_);
     outfile->Printf("    Dipole Pair Correction:            %16.12f \n", de_dipole_);
     outfile->Printf("    PNO Truncation Correction:         %16.12f \n", de_pno_total_);
-    outfile->Printf("\n\n  @Total DLPNO-CCSD Energy: %16.12f \n", variables_["SCF TOTAL ENERGY"] + e_lccsd_ + de_lmp2_eliminated_ + de_lmp2_weak_ + de_pno_total_ + de_disp_weak_ + de_dipole_);
+    outfile->Printf("\n\n  @Total DLPNO-CCSD Energy: %16.12f \n", variables_["SCF TOTAL ENERGY"] + e_lccsd_ + de_lmp2_eliminated_ + de_weak_ + de_pno_total_ + de_disp_weak_ + de_dipole_);
 }
 
 }  // namespace dlpno

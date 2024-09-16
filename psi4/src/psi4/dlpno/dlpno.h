@@ -64,12 +64,16 @@ class PSI_API DLPNOBase : public Wavefunction {
       double T_CUT_TRACE_;
       /// pair energy threshold for PNO truncation
       double T_CUT_ENERGY_;
+      /// projection error threshold for PNO truncation
+      double T_CUT_PROJ_;
       /// threshold for PNO truncation for MP2 pairs (for DLPNO-CC methods)
       double T_CUT_PNO_MP2_;
       /// trace threshold for PNO truncation for MP2 pairs (for DLPNO-CC methods)
       double T_CUT_TRACE_MP2_;
       /// pair energy threshold for PNO truncation for MP2 pairs (for DLPNO-CC methods)
       double T_CUT_ENERGY_MP2_;
+      /// projection error threshold for PNO truncation for MP2 pairs (for DLPNO-CC methods)
+      double T_CUT_PROJ_MP2_;
       /// tolerance to separate pairs into CCSD and MP2 pairs
       double T_CUT_PAIRS_;
       /// tolerance to separate MP2 pairs in between crude and refined prescreening
@@ -140,7 +144,7 @@ class PSI_API DLPNOBase : public Wavefunction {
       double e_lmp2_trunc_; ///< LMP2 energy computed with (truncated) PNOs (Strong Pairs Only)
       double de_lmp2_eliminated_; ///< LMP2 correction for eliminated pairs (surviving pairs after dipole screening that
       // are neither weak nor strong)
-      double de_lmp2_weak_; ///< LMP2 correction for weak pairs (only for CC)
+      double de_weak_; ///< Energy contribution for weak pairs
       double de_disp_weak_; ///< weak pair dispersion correction
       double de_pno_total_; ///< energy correction for PNO truncation
       double de_pno_total_os_; ///< energy correction for PNO truncation
@@ -327,6 +331,9 @@ class PSI_API DLPNOCCSD : public DLPNOBase {
     std::vector<std::pair<int,int>> ij_to_i_j_weak_;
     std::vector<int> ij_to_ji_weak_;
 
+    // => Additional helpful sparse maps <= //
+    SparseMap lmopair_to_paos_ext_;
+
     // => CCSD Integrals <= //
 
     /// (4 occupied, 0 virtual)
@@ -362,6 +369,7 @@ class PSI_API DLPNOCCSD : public DLPNOBase {
     std::vector<SharedMatrix> Fai_;
     std::vector<SharedMatrix> Fab_;
 
+    double e_lmp2_; ///< raw (uncorrected) local MP2 correlation energy
     double e_lccsd_; ///< raw (uncorrected) local CCSD correlation energy
 
     /// Returns the appropriate overlap matrix given two LMO pairs
@@ -378,6 +386,8 @@ class PSI_API DLPNOCCSD : public DLPNOBase {
 
     /// Runs preceeding DLPNO-MP2 computation before DLPNO-CCSD iterations
     void pno_lmp2_iterations();
+    /// Recompute PNOs after DLPNO-MP2 converges
+    void recompute_pnos();
 
     /// compute PNO/PNO overlap matrices for DLPNO-CCSD
     void compute_pno_overlaps();
@@ -407,6 +417,8 @@ class PSI_API DLPNOCCSD : public DLPNOBase {
 
     /// computes singles residuals in LCCSD equations, using pre-allocated memory (Jiang Eq. 32)
     void compute_R_ia(std::vector<SharedMatrix>& R_ia, std::vector<std::vector<SharedMatrix>>& R_ia_buffer);
+    /// computes doubles residuals for weak pairs (Schwilk SI Eq. 11)
+    void compute_R_iajb_weak(std::vector<SharedMatrix>& R_iajb);
     /// computes doubles residuals in LCCSD equations, using pre-allocated memory (Jiang Eq. 19)
     void compute_R_iajb(std::vector<SharedMatrix>& R_iajb, std::vector<SharedMatrix>& Rn_iajb);
 

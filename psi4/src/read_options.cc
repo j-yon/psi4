@@ -2559,6 +2559,8 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_double("T_CUT_TRACE", 0.999);
         /*- Pair energy tolerance for removing PNOs !expert -*/
         options.add_double("T_CUT_ENERGY", 0.997);
+        /*- Projection error tolerance for removing PNOs !expert -*/
+        options.add_double("T_CUT_PROJ", 0.06);
         /*- Perform "dispersion correction" for neglected weak pairs? !expert -*/
         options.add_bool("DISPERSION_CORRECTION", false);
         /*- Use low memory PNO overlap algorithm? !expert -*/
@@ -2575,6 +2577,8 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_double("T_CUT_TRACE_MP2", 0.9999);
         /*- Pair energy tolerance for removing PNOs (for MP2 prescreening) !expert -*/
         options.add_double("T_CUT_ENERGY_MP2", 0.999);
+        /*- Projection error tolerance for removing PNOs (for MP2 prescreening) !expert -*/
+        options.add_double("T_CUT_PROJ_MP2", 0.05);
         /*- How much to scale T_CUT_PNO by for diagonal PNOs !expert */
         options.add_double("T_CUT_PNO_DIAG_SCALE", 3e-2);
         /*- DOI threshold for including PAO (u) in domain of LMO (i) !expert -*/
