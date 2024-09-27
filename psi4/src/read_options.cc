@@ -2560,9 +2560,13 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         /*- Pair energy tolerance for removing PNOs !expert -*/
         options.add_double("T_CUT_ENERGY", 0.997);
         /*- Projection error tolerance for removing PNOs !expert -*/
-        options.add_double("T_CUT_PROJ", 0.06);
+        options.add_double("T_CUT_PROJ", 0.07);
         /*- Perform "dispersion correction" for neglected weak pairs? !expert -*/
         options.add_bool("DISPERSION_CORRECTION", false);
+        /*- Do add back linear T1 and T2 contributions for weak pair amplitudes? !expert -*/
+        options.add_bool("WEAK_PAIR_RESIDUAL", true);
+        /*- Add the "projection error" criterion when selectring PNOs !expert -*/
+        options.add_bool("PNO_PROJECTION_SELECTION", false);
         /*- Use low memory PNO overlap algorithm? !expert -*/
         options.add_bool("LOW_MEMORY_OVERLAP", false);
         /*- AO ERI Schwarz Screening tolerance for building DF ints in DLPNO !expert -*/

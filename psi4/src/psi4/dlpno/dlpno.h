@@ -86,6 +86,12 @@ class PSI_API DLPNOBase : public Wavefunction {
       double T_CUT_PNO_DIAG_SCALE_;
       /// Tolerance for TNO truncation (by occupation number)
       double T_CUT_TNO_;
+      /// Use projectio criterion for PNO selection?
+      bool pno_proj_select_;
+      /// Do weak pair dispersion correction? (CCSD)
+      bool disp_correct_;
+      /// Perform weak pair residual updates?
+      bool weak_pair_residual_;
 
       /// auxiliary basis
       std::shared_ptr<BasisSet> ribasis_;
@@ -304,8 +310,6 @@ class PSI_API DLPNOCCSD : public DLPNOBase {
     bool project_j_;
     /// NOT [form (i a_ik | j b_jk)]
     bool project_k_;
-    /// Do weak pair dispersion correction?
-    bool disp_correct_;
 
     /// Number of svd functions for PNO pair ij in rank-reduced (Q_ij |a_ij b_ij)
     std::vector<int> n_svd_;

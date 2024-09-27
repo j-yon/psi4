@@ -288,15 +288,22 @@ void DLPNOCCSD::estimate_memory() {
         oovv += (4 - dij) * npno_ij * npno_ij;
         ovvv += npno_ij * npno_ij * npno_ij;
 
-        for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
-            int k = lmopair_to_lmos_[ij][k_ij];
-            int ik = i_j_to_ij_[i][k], jk = i_j_to_ij_[j][k];
-            oovv_large += n_pno_[ij] * n_pno_[jk];
-            oovv_large += n_pno_[ij] * n_pno_[jk];
+        bool is_strong_pair = i_j_to_ij_strong_[i][j] != -1;
+
+        if (is_strong_pair || weak_pair_residual_ || disp_correct_) {
+            for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
+                int k = lmopair_to_lmos_[ij][k_ij];
+                int ik = i_j_to_ij_[i][k], jk = i_j_to_ij_[j][k];
+                oovv_large += n_pno_[ij] * n_pno_[jk];
+                oovv_large += n_pno_[ij] * n_pno_[jk];
+            }
         }
 
-        if (i >= j && i_j_to_ij_strong_[i][j] != -1) {
+        if (i <= j && is_strong_pair) {
             qov += naux_ij * nlmo_ij * npno_ij;
+        }
+
+        if (i <= j && (is_strong_pair || weak_pair_residual_)) {
             qvv += naux_ij * npno_ij * npno_ij;
         }
     }
@@ -489,7 +496,7 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
 
             double e_pno = 0.0;
             double occ_pno = 0.0;
-            double proj_err = 1.0;
+            double proj_crit = 1.0;
 
             int nvir_ij_final = 0;
             std::vector<int> a_curr;
@@ -497,20 +504,27 @@ template<bool crude> std::vector<double> DLPNOCCSD::compute_pair_energies() {
             auto Tt_pno_init = linalg::triplet(X_pno_ij, Tt_pao_ij, X_pno_ij, true, false, false);
             auto S_pno_test = linalg::doublet(S_pao_ij, X_pno_ij, false, false);
 
+            SharedMatrix X_pno_curr = std::make_shared<Matrix>(nvir_ij, nvir_ij);
+
             for (size_t a = 0; a < nvir_ij; ++a) {
-                a_curr.push_back(a);
                 if (fabs(pno_occ.get(a)) >= t_cut_scale * T_CUT_PNO_MP2_ || occ_pno / occ_total < T_CUT_TRACE_MP2_ ||
-                        std::fabs(e_pno) < T_CUT_ENERGY_MP2_ * std::fabs(e_ij_initial) || proj_err >= T_CUT_PROJ_MP2_) {
+                        std::fabs(e_pno) < T_CUT_ENERGY_MP2_ * std::fabs(e_ij_initial) || proj_crit < T_CUT_PROJ_MP2_) {
+                    a_curr.push_back(a);
+
                     // Energy criteria
                     e_pno = submatrix_rows_and_cols(*K_pno_init, a_curr, a_curr)->vector_dot(submatrix_rows_and_cols(*Tt_pno_init, a_curr, a_curr));
-                    // Projection criteria
-                    auto S_pno_temp = submatrix_cols(*S_pno_test, a_curr);
-                    S_pno_temp = linalg::doublet(S_pno_temp, S_pno_temp, false, true);
-                    S_pno_temp->subtract(S_pao_ij);
-                    proj_err = S_pno_temp->rms();
 
                     // Trace criteria
                     occ_pno += pno_occ.get(a);
+
+                    // Projection criteria
+                    std::vector<int> col_a(1, a);
+                    auto S_pno_a = submatrix_cols(*S_pno_test, col_a);
+                    auto X_pno_a = submatrix_cols(*X_pno_ij, col_a);
+                    auto X_pno_cont = linalg::triplet(X_pno_a, S_pno_a, X_pno_ij, false, true, false);
+                    X_pno_curr->add(X_pno_cont);
+                    proj_crit = linalg::doublet(X_pno_ij, X_pno_curr, true, false)->trace() / nvir_ij;
+                    
                     nvir_ij_final++;
                 }
             }
@@ -864,31 +878,39 @@ void DLPNOCCSD::recompute_pnos() {
         double e_pno = 0.0;
         double e_ij_total = K_iajb_[ij]->vector_dot(Tt_iajb_[ij]);
         double occ_pno = 0.0;
-        double proj_err = 1.0;
+        double proj_crit = 1.0;
 
         int nvir_ij_final = 0;
         std::vector<int> a_curr;
         auto K_pno_init = linalg::triplet(X_pno_ij, K_iajb_[ij], X_pno_ij, true, false, false);
         auto Tt_pno_init = linalg::triplet(X_pno_ij, Tt_iajb_[ij], X_pno_ij, true, false, false);
-        auto S_pno_test = linalg::doublet(S_pao_half, X_pno_ij, false, false);
+        auto S_pno_test = linalg::doublet(S_pno_ij_init, X_pno_ij, false, false);
+
+        SharedMatrix X_pno_curr = std::make_shared<Matrix>(nvir_ij, nvir_ij);
 
         for (size_t a = 0; a < nvir_ij; ++a) {
-            a_curr.push_back(a);
             if (fabs(pno_occ.get(a)) >= t_cut_scale * T_CUT_PNO_ || occ_pno / occ_total < T_CUT_TRACE_ ||
-                    std::fabs(e_pno) < T_CUT_ENERGY_ * std::fabs(e_ij_total) || proj_err >= T_CUT_PROJ_) {
+                    std::fabs(e_pno) < T_CUT_ENERGY_ * std::fabs(e_ij_total) || proj_crit < T_CUT_PROJ_) {
+                a_curr.push_back(a);
+
                 // Energy criteria
                 e_pno = submatrix_rows_and_cols(*K_pno_init, a_curr, a_curr)->vector_dot(submatrix_rows_and_cols(*Tt_pno_init, a_curr, a_curr));
-                // Projection criteria
-                auto S_pno_temp = submatrix_cols(*S_pno_test, a_curr);
-                S_pno_temp = linalg::doublet(S_pno_temp, S_pno_temp, false, true);
-                S_pno_temp->subtract(S_pao_ij);
-                proj_err = S_pno_temp->rms();
 
                 // Trace criteria
                 occ_pno += pno_occ.get(a);
+
+                // Projection criteria
+                std::vector<int> col_a(1, a);
+                auto S_pno_a = submatrix_cols(*S_pno_test, col_a);
+                auto X_pno_a = submatrix_cols(*X_pno_ij, col_a);
+                auto X_pno_cont = linalg::triplet(X_pno_a, S_pno_a, X_pno_ij, false, true, false);
+                X_pno_curr->add(X_pno_cont);
+                proj_crit = linalg::doublet(X_pno_ij, X_pno_curr, true, false)->trace() / nvir_ij;
+
                 nvir_ij_final++;
             }
         }
+
         // Make sure there is at least one PNO per pair :)
         nvir_ij_final = std::max(1, nvir_ij_final);
 
@@ -1190,6 +1212,7 @@ void DLPNOCCSD::compute_cc_integrals() {
         // number of PNOs in the pair domain
         const int npno_ij = n_pno_[ij];
         if (i > j || npno_ij == 0) continue;
+        bool is_strong_pair = i_j_to_ij_strong_[i][j] != -1;
 
         int thread = 0;
 #ifdef _OPENMP
@@ -1329,95 +1352,98 @@ void DLPNOCCSD::compute_cc_integrals() {
 
         if (thread == 0) timer_off("DLPNO-CCSD: Setup Integrals");
 
-        if (thread == 0) timer_on("DLPNO-CCSD: J_ij_kj Integrals");
-        
-        for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
-            int k = lmopair_to_lmos_[ij][k_ij];
-            int ik = i_j_to_ij_[i][k], kj = i_j_to_ij_[k][j];
-            J_ij_kj_[ij][k_ij] = std::make_shared<Matrix>(n_pno_[ij], n_pno_[kj]);
-            if (i != j) J_ij_kj_[ji][k_ij] = std::make_shared<Matrix>(n_pno_[ij], n_pno_[ik]);
-        }
+        if (is_strong_pair || weak_pair_residual_ || disp_correct_) {
 
-        for (int q_ij = 0; q_ij < naux_ij; q_ij++) {
-            const int q = lmopair_to_ribfs_[ij][q_ij];
-            const int centerq = ribasis_->function_to_center(q);
+            if (thread == 0) timer_on("DLPNO-CCSD: J_ij_kj Integrals");
             
-            auto q_cd_temp = std::make_shared<Matrix>(npao_ij, npao_ext_ij);
-            for (int u_ij = 0; u_ij < npao_ij; ++u_ij) {
-                int u = lmopair_to_paos_[ij][u_ij];
-                for (int v_ij = 0; v_ij < npao_ext_ij; ++v_ij) {
-                    int v = extended_pao_domain[v_ij];
-                    int uv_idx = riatom_to_pao_pairs_dense_[centerq][u][v];
-                    if (uv_idx == -1) continue;
-                    q_cd_temp->set(u_ij, v_ij, qab_[q]->get(uv_idx, 0));
-                }
-            }
-            q_cd_temp = linalg::doublet(X_pno_[ij], q_cd_temp, true, false);
-
             for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
                 int k = lmopair_to_lmos_[ij][k_ij];
                 int ik = i_j_to_ij_[i][k], kj = i_j_to_ij_[k][j];
-                auto kj_idx = index_list(extended_pao_domain, lmopair_to_paos_[kj]);
-
-                auto J_ij_kj_temp = linalg::doublet(submatrix_cols(*q_cd_temp, kj_idx), X_pno_[kj], false, false);
-                J_ij_kj_temp->scale((*q_io_clone)(q_ij, k_ij));
-                J_ij_kj_[ij][k_ij]->add(J_ij_kj_temp);
-
-                if (i != j) {
-                    auto ik_idx = index_list(extended_pao_domain, lmopair_to_paos_[ik]);
-
-                    auto J_ij_ik_temp = linalg::doublet(submatrix_cols(*q_cd_temp, ik_idx), X_pno_[ik], false, false);
-                    J_ij_ik_temp->scale((*q_jo_clone)(q_ij, k_ij));
-                    J_ij_kj_[ji][k_ij]->add(J_ij_ik_temp);
-                }
+                J_ij_kj_[ij][k_ij] = std::make_shared<Matrix>(n_pno_[ij], n_pno_[kj]);
+                if (i != j) J_ij_kj_[ji][k_ij] = std::make_shared<Matrix>(n_pno_[ij], n_pno_[ik]);
             }
-        }
 
-        if (thread == 0) timer_off("DLPNO-CCSD: J_ij_kj Integrals");
-
-        if (thread == 0) timer_on("DLPNO-CCSD: K_ij_kj Integrals");
-        
-        for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
-            int k = lmopair_to_lmos_[ij][k_ij];
-            int ik = i_j_to_ij_[i][k], kj = i_j_to_ij_[k][j];
-            K_ij_kj_[ij][k_ij] = std::make_shared<Matrix>(n_pno_[ij], n_pno_[kj]);
-            if (i != j) K_ij_kj_[ji][k_ij] = std::make_shared<Matrix>(n_pno_[ij], n_pno_[ik]);
-        }
-
-        for (int q_ij = 0; q_ij < naux_ij; q_ij++) {
-            const int q = lmopair_to_ribfs_[ij][q_ij];
-            const int centerq = ribasis_->function_to_center(q);
-
-            for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
-                int k = lmopair_to_lmos_[ij][k_ij];
-                int ik = i_j_to_ij_[i][k], kj = i_j_to_ij_[k][j];
-                int k_sparse = riatom_to_lmos_ext_dense_[centerq][k];
-                auto kj_idx = index_list(riatom_to_paos_ext_[centerq], lmopair_to_paos_[kj]);
+            for (int q_ij = 0; q_ij < naux_ij; q_ij++) {
+                const int q = lmopair_to_ribfs_[ij][q_ij];
+                const int centerq = ribasis_->function_to_center(q);
                 
-                auto K_ij_kj_temp = linalg::doublet(submatrix_rows_and_cols(*qia_[q], std::vector<int>(1, k_sparse), kj_idx), X_pno_[kj]);
-
-                for (int a_ij = 0; a_ij < n_pno_[ij]; ++a_ij) {
-                    for (int c_kj = 0; c_kj < n_pno_[kj]; ++c_kj) {
-                        (*K_ij_kj_[ij][k_ij])(a_ij, c_kj) += (*q_iv_clone)(q_ij, a_ij) * (*K_ij_kj_temp)(0, c_kj);
+                auto q_cd_temp = std::make_shared<Matrix>(npao_ij, npao_ext_ij);
+                for (int u_ij = 0; u_ij < npao_ij; ++u_ij) {
+                    int u = lmopair_to_paos_[ij][u_ij];
+                    for (int v_ij = 0; v_ij < npao_ext_ij; ++v_ij) {
+                        int v = extended_pao_domain[v_ij];
+                        int uv_idx = riatom_to_pao_pairs_dense_[centerq][u][v];
+                        if (uv_idx == -1) continue;
+                        q_cd_temp->set(u_ij, v_ij, qab_[q]->get(uv_idx, 0));
                     }
                 }
-                
-                if (i != j) {
-                    auto ik_idx = index_list(riatom_to_paos_ext_[centerq], lmopair_to_paos_[ik]);
-                    auto K_ij_ik_temp = linalg::doublet(submatrix_rows_and_cols(*qia_[q], std::vector<int>(1, k_sparse), ik_idx), X_pno_[ik]);
+                q_cd_temp = linalg::doublet(X_pno_[ij], q_cd_temp, true, false);
+
+                for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
+                    int k = lmopair_to_lmos_[ij][k_ij];
+                    int ik = i_j_to_ij_[i][k], kj = i_j_to_ij_[k][j];
+                    auto kj_idx = index_list(extended_pao_domain, lmopair_to_paos_[kj]);
+
+                    auto J_ij_kj_temp = linalg::doublet(submatrix_cols(*q_cd_temp, kj_idx), X_pno_[kj], false, false);
+                    J_ij_kj_temp->scale((*q_io_clone)(q_ij, k_ij));
+                    J_ij_kj_[ij][k_ij]->add(J_ij_kj_temp);
+
+                    if (i != j) {
+                        auto ik_idx = index_list(extended_pao_domain, lmopair_to_paos_[ik]);
+
+                        auto J_ij_ik_temp = linalg::doublet(submatrix_cols(*q_cd_temp, ik_idx), X_pno_[ik], false, false);
+                        J_ij_ik_temp->scale((*q_jo_clone)(q_ij, k_ij));
+                        J_ij_kj_[ji][k_ij]->add(J_ij_ik_temp);
+                    }
+                }
+            }
+
+            if (thread == 0) timer_off("DLPNO-CCSD: J_ij_kj Integrals");
+
+            if (thread == 0) timer_on("DLPNO-CCSD: K_ij_kj Integrals");
+            
+            for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
+                int k = lmopair_to_lmos_[ij][k_ij];
+                int ik = i_j_to_ij_[i][k], kj = i_j_to_ij_[k][j];
+                K_ij_kj_[ij][k_ij] = std::make_shared<Matrix>(n_pno_[ij], n_pno_[kj]);
+                if (i != j) K_ij_kj_[ji][k_ij] = std::make_shared<Matrix>(n_pno_[ij], n_pno_[ik]);
+            }
+
+            for (int q_ij = 0; q_ij < naux_ij; q_ij++) {
+                const int q = lmopair_to_ribfs_[ij][q_ij];
+                const int centerq = ribasis_->function_to_center(q);
+
+                for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
+                    int k = lmopair_to_lmos_[ij][k_ij];
+                    int ik = i_j_to_ij_[i][k], kj = i_j_to_ij_[k][j];
+                    int k_sparse = riatom_to_lmos_ext_dense_[centerq][k];
+                    auto kj_idx = index_list(riatom_to_paos_ext_[centerq], lmopair_to_paos_[kj]);
+                    
+                    auto K_ij_kj_temp = linalg::doublet(submatrix_rows_and_cols(*qia_[q], std::vector<int>(1, k_sparse), kj_idx), X_pno_[kj]);
 
                     for (int a_ij = 0; a_ij < n_pno_[ij]; ++a_ij) {
-                        for (int c_ik = 0; c_ik < n_pno_[ik]; ++c_ik) {
-                            (*K_ij_kj_[ji][k_ij])(a_ij, c_ik) += (*q_jv_clone)(q_ij, a_ij) * (*K_ij_ik_temp)(0, c_ik);
+                        for (int c_kj = 0; c_kj < n_pno_[kj]; ++c_kj) {
+                            (*K_ij_kj_[ij][k_ij])(a_ij, c_kj) += (*q_iv_clone)(q_ij, a_ij) * (*K_ij_kj_temp)(0, c_kj);
                         }
                     }
-                } // end (i != j)
+                    
+                    if (i != j) {
+                        auto ik_idx = index_list(riatom_to_paos_ext_[centerq], lmopair_to_paos_[ik]);
+                        auto K_ij_ik_temp = linalg::doublet(submatrix_rows_and_cols(*qia_[q], std::vector<int>(1, k_sparse), ik_idx), X_pno_[ik]);
 
+                        for (int a_ij = 0; a_ij < n_pno_[ij]; ++a_ij) {
+                            for (int c_ik = 0; c_ik < n_pno_[ik]; ++c_ik) {
+                                (*K_ij_kj_[ji][k_ij])(a_ij, c_ik) += (*q_jv_clone)(q_ij, a_ij) * (*K_ij_ik_temp)(0, c_ik);
+                            }
+                        }
+                    } // end (i != j)
+
+                }
             }
-        }
-        
 
-        if (thread == 0) timer_off("DLPNO-CCSD: K_ij_kj Integrals");
+            if (thread == 0) timer_off("DLPNO-CCSD: K_ij_kj Integrals");
+        
+        } // end if (strong pair, dispersion, or weak pair residual)
 
         if (thread == 0) timer_on("DLPNO-CCSD: Contract Integrals");
 
@@ -1438,7 +1464,7 @@ void DLPNOCCSD::compute_cc_integrals() {
             K_tilde_chem_[ji] = linalg::doublet(q_jv, q_vv, true, false);
         }
 
-        if (i_j_to_ij_strong_[i][j] != -1) {
+        if (is_strong_pair) {
             i_Qk_ij_[ij] = q_io;
             i_Qa_ij_[ij] = q_iv;
 
@@ -1449,7 +1475,7 @@ void DLPNOCCSD::compute_cc_integrals() {
         }
 
         // Save DF integrals (only for strong pairs)
-        if (i_j_to_ij_strong_[i][j] != -1) {
+        if (is_strong_pair) {
             if (!write_qia_pno_) {
                 Qma_ij_[ij].resize(naux_ij);
                 for (int q_ij = 0; q_ij < naux_ij; ++q_ij) {
@@ -1461,10 +1487,12 @@ void DLPNOCCSD::compute_cc_integrals() {
                 std::stringstream toc_entry;
                 toc_entry << "QIA (PNO) " << ij;
                 q_ov->set_name(toc_entry.str());
-#pragma omp critical
+    #pragma omp critical
                 q_ov->save(psio_, PSIF_DLPNO_QIA_PNO, psi::Matrix::SubBlocks);
             }
+        }
 
+        if (is_strong_pair || weak_pair_residual_) {
             if (!write_qab_pno_) {
                 Qab_ij_[ij].resize(naux_ij);
                 for (int q_ij = 0; q_ij < naux_ij; ++q_ij) {
@@ -1476,7 +1504,7 @@ void DLPNOCCSD::compute_cc_integrals() {
                 std::stringstream toc_entry;
                 toc_entry << "QAB (PNO) " << ij;
                 q_vv->set_name(toc_entry.str());
-#pragma omp critical
+    #pragma omp critical
                 q_vv->save(psio_, PSIF_DLPNO_QAB_PNO, psi::Matrix::ThreeIndexLowerTriangle);
             }
         }
@@ -2070,26 +2098,77 @@ void DLPNOCCSD::compute_R_iajb_weak(std::vector<SharedMatrix>& R_iajb) {
         K_tilde_ji->reshape(n_pno_[ij], n_pno_[ij]);
         R_iajb[ij]->add(K_tilde_ji->transpose());
 
+        // Form extended domain
+        SharedMatrix S_ij;
+        std::vector<int> pair_ext_domain;
+        if (low_memory_overlap_) {
+            for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
+                int k = lmopair_to_lmos_[ij][k_ij];
+                for (int l_ij = 0; l_ij < nlmo_ij; ++l_ij) {
+                    int l = lmopair_to_lmos_[ij][l_ij];
+                    int kl = i_j_to_ij_[k][l];
+                    if (kl == -1 || n_pno_[kl] == 0) continue;
+                    pair_ext_domain = merge_lists(pair_ext_domain, lmopair_to_paos_[kl]);
+                } // end k
+            } // end l
+            S_ij = submatrix_rows_and_cols(*S_pao_, pair_ext_domain, lmopair_to_paos_[ij]);
+            S_ij = linalg::doublet(S_ij, X_pno_[ij], false, false);
+        } // end if
+
         // Linear T2 contributions
+        
+        // A1
+        auto qab_ij = QAB_PNO(ij);
+        for (int q_ij = 0; q_ij < naux_ij; ++q_ij) {
+            R_iajb[ij]->add(linalg::triplet(qab_ij[q_ij], T_iajb_[ij], qab_ij[q_ij], false, false, true));
+        } // end q_ij
+        
         for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
             int k = lmopair_to_lmos_[ij][k_ij];
             int ik = i_j_to_ij_[i][k], kj = i_j_to_ij_[k][j];
 
+            // B1
+            for (int l_ij = 0; l_ij < nlmo_ij; ++l_ij) {
+                int l = lmopair_to_lmos_[ij][l_ij];
+                int kl = i_j_to_ij_[k][l];
+                if (kl == -1) continue;
+                
+                SharedMatrix S_kl_ij = (low_memory_overlap_) ? 
+                            linalg::doublet(X_pno_[kl], submatrix_rows(*S_ij, index_list(pair_ext_domain, lmopair_to_paos_[kl])), true, false) : S_PNO(kl, ij);
+
+                auto T_kl = linalg::triplet(S_kl_ij, T_iajb_[kl], S_kl_ij, true, false, false);
+                T_kl->scale((*K_mnij_[ij])(k_ij, l_ij));
+                R_iajb[ij]->add(T_kl);
+            }
+
             // C1
+            auto T_kj = linalg::triplet(S_PNO(ij, kj), T_iajb_[kj], S_PNO(kj, ik));
             R_iajb[ij]->subtract(linalg::triplet(S_PNO(ij, kj), T_iajb_[kj], J_ij_kj_[ij][k_ij], false, false, true));
+            // R_iajb[ij]->subtract(linalg::triplet(T_kj, J_ijab_[ik], S_PNO(ik, ij)));
+
+            auto T_ik = linalg::triplet(S_PNO(kj, ik), T_iajb_[ik], S_PNO(ik, ij));
             R_iajb[ij]->subtract(linalg::triplet(J_ij_kj_[ji][k_ij], T_iajb_[ik], S_PNO(ik, ij), false, false, false));
+            // R_iajb[ij]->subtract(linalg::triplet(S_PNO(ij, kj), J_ijab_[kj], T_ik));
                 
             auto temp_a = linalg::triplet(J_ij_kj_[ij][k_ij], T_iajb_[kj], S_PNO(kj, ij), false, true, false);
             temp_a->add(linalg::triplet(S_PNO(ij, ik), T_iajb_[ik], J_ij_kj_[ji][k_ij], false, true, true));
+            // auto temp_a = linalg::triplet(S_PNO(ij, ik), J_ijab_[ik], T_kj, false, false, true);
+            // temp_a->add(linalg::triplet(T_ik, J_ijab_[kj], S_PNO(kj, ij), true, false, false));
             temp_a->scale(-0.5);
             R_iajb[ij]->add(temp_a);
 
             // D1
+            // auto U_kj = linalg::triplet(S_PNO(ik, kj), Tt_iajb_[kj], S_PNO(kj, ij));
+            // auto U_ik = linalg::triplet(S_PNO(ij, ik), Tt_iajb_[ik], S_PNO(ik, kj));
             R_iajb[ij]->add(linalg::triplet(K_ij_kj_[ij][k_ij], Tt_iajb_[kj], S_PNO(kj, ij), false, false, false));
             R_iajb[ij]->add(linalg::triplet(S_PNO(ij, ik), Tt_iajb_[ik], K_ij_kj_[ji][k_ij], false, false, true));
+            // R_iajb[ij]->add(linalg::triplet(S_PNO(ij, ik), K_iajb_[ik], U_kj, false, false, false));
+            // R_iajb[ij]->add(linalg::triplet(U_ik, K_iajb_[kj], S_PNO(kj, ij), false, false, false));
 
             temp_a = linalg::triplet(J_ij_kj_[ij][k_ij], Tt_iajb_[kj], S_PNO(kj, ij), false, false, false);
             temp_a->add(linalg::triplet(S_PNO(ij, ik), Tt_iajb_[ik], J_ij_kj_[ji][k_ij], false, false, true));
+            // temp_a = linalg::triplet(S_PNO(ij, ik), J_ijab_[ik], U_kj, false, false, false);
+            // temp_a->add(linalg::triplet(U_ik, J_ijab_[kj], S_PNO(kj, ij), false, false, false));
             temp_a->scale(-0.5);
             R_iajb[ij]->add(temp_a);
         }
@@ -2407,7 +2486,9 @@ void DLPNOCCSD::lccsd_iterations() {
         compute_R_iajb(R_iajb, Rn_iajb);
 
         // Step 5: Compute R2 residual for weak pairs
-        compute_R_iajb_weak(R_iajb);
+        if (weak_pair_residual_) {
+            compute_R_iajb_weak(R_iajb);
+        }
 
         // Get rms of R_iajb
 #pragma omp parallel for schedule(dynamic, 1)
@@ -2533,12 +2614,10 @@ void DLPNOCCSD::dispersion_correction() {
 
     double de_disp_weak = 0.0;
 
-    bool tight = options_.get_str("PNO_CONVERGENCE") == "TIGHT" || options_.get_str("PNO_CONVERGENCE") == "VERY_TIGHT";
-
 #pragma omp parallel for schedule(dynamic, 1) reduction(+ : de_disp_weak)
     for (int ij_weak = 0; ij_weak < n_weak_pairs; ++ij_weak) {
         auto &[i, j] = ij_to_i_j_weak_[ij_weak];
-        int ij = i_j_to_ij_[i][j];
+        int ij = i_j_to_ij_[i][j], ii = i_j_to_ij_[i][i], jj = i_j_to_ij_[j][j];
         int ji = ij_to_ji_[ij];
 
         if (i > j) continue;
@@ -2548,31 +2627,92 @@ void DLPNOCCSD::dispersion_correction() {
 
         auto R_ij = std::make_shared<Matrix>(n_pno_[ij], n_pno_[ij]);
 
+        // Form extended domain
+        SharedMatrix S_ij;
+        std::vector<int> pair_ext_domain;
+        if (low_memory_overlap_) {
+            for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
+                int k = lmopair_to_lmos_[ij][k_ij];
+                for (int l_ij = 0; l_ij < nlmo_ij; ++l_ij) {
+                    int l = lmopair_to_lmos_[ij][l_ij];
+                    int kl = i_j_to_ij_[k][l];
+                    if (kl == -1 || n_pno_[kl] == 0) continue;
+                    pair_ext_domain = merge_lists(pair_ext_domain, lmopair_to_paos_[kl]);
+                } // end k
+            } // end l
+            S_ij = submatrix_rows_and_cols(*S_pao_, pair_ext_domain, lmopair_to_paos_[ij]);
+            S_ij = linalg::doublet(S_ij, X_pno_[ij], false, false);
+        } // end if
+
+        // T2^2 contributions
         for (int k_ij = 0; k_ij < nlmo_ij; ++k_ij) {
             int k = lmopair_to_lmos_[ij][k_ij];
             int ik = i_j_to_ij_[i][k], kj = i_j_to_ij_[k][j];
 
-            // D1
-            R_ij->add(linalg::triplet(K_ij_kj_[ij][k_ij], Tt_iajb_[kj], S_PNO(kj, ij), false, false, false));
-            R_ij->add(linalg::triplet(S_PNO(ij, ik), Tt_iajb_[ik], K_ij_kj_[ji][k_ij], false, false, true));
+            auto T_ik_g = linalg::triplet(S_PNO(ij, ik), T_iajb_[ik], S_PNO(ik, ij));
+            auto T_kj_g = linalg::triplet(S_PNO(ij, kj), T_iajb_[kj], S_PNO(kj, ij));
 
-            auto temp_a = linalg::triplet(J_ij_kj_[ij][k_ij], Tt_iajb_[kj], S_PNO(kj, ij), false, false, false);
-            temp_a->add(linalg::triplet(S_PNO(ij, ik), Tt_iajb_[ik], J_ij_kj_[ji][k_ij], false, false, true));
-            temp_a->scale(-0.5);
-            R_ij->add(temp_a);
+            for (int l_ij = 0; l_ij < nlmo_ij; ++l_ij) {
+                int l = lmopair_to_lmos_[ij][l_ij];
+                int kl = i_j_to_ij_[k][l], il = i_j_to_ij_[i][l], lj = i_j_to_ij_[l][j];
+                int li = ij_to_ji_[il];
+                if (kl == -1) continue;
 
-            if (tight) {
-                // C1
-                R_ij->subtract(linalg::triplet(S_PNO(ij, kj), T_iajb_[kj], J_ij_kj_[ij][k_ij], false, false, true));
-                R_ij->subtract(linalg::triplet(J_ij_kj_[ji][k_ij], T_iajb_[ik], S_PNO(ik, ij), false, false, false));
-                
-                temp_a = linalg::triplet(J_ij_kj_[ij][k_ij], T_iajb_[kj], S_PNO(kj, ij), false, true, false);
-                temp_a->add(linalg::triplet(S_PNO(ij, ik), T_iajb_[ik], J_ij_kj_[ji][k_ij], false, true, true));
-                temp_a->scale(-0.5);
+                // B2
+                SharedMatrix S_kl_ij = (low_memory_overlap_) ? 
+                            linalg::doublet(X_pno_[kl], submatrix_rows(*S_ij, index_list(pair_ext_domain, lmopair_to_paos_[kl])), true, false) : S_PNO(kl, ij);
+
+                auto T_kl = linalg::triplet(S_kl_ij, T_iajb_[kl], S_kl_ij, true, false, false);
+                T_kl->scale(linalg::triplet(S_kl_ij, T_iajb_[ij], S_kl_ij, false, false, true)->vector_dot(K_iajb_[kl]));
+                R_ij->add(T_kl);
+
+                // C2
+                auto T_il = linalg::triplet(S_PNO(kl, il), T_iajb_[il], S_PNO(il, ij));
+                auto T_lj = linalg::triplet(S_PNO(ij, lj), T_iajb_[lj], S_PNO(lj, kl));
+                auto T_ik = linalg::triplet(S_PNO(kl, ik), T_iajb_[ik], S_PNO(ik, ij));
+                auto T_kj = linalg::triplet(S_PNO(ij, kj), T_iajb_[kj], S_PNO(kj, kl));
+
+                auto temp_a = linalg::triplet(T_il, K_iajb_[kl], T_kj, true, false, true);
+                temp_a->add(linalg::triplet(T_ik, K_iajb_[kl], T_lj, true, true, true));
+                temp_a->scale(0.25);
                 R_ij->add(temp_a);
+
+                temp_a = linalg::triplet(T_lj, K_iajb_[kl], T_ik, false, false, false);
+                temp_a->add(linalg::triplet(T_kj, K_iajb_[kl], T_il, false, true, false));
+                temp_a->scale(0.5);
+                R_ij->add(temp_a);
+
+                // D2
+                auto U_ik = linalg::triplet(S_PNO(ij, ik), Tt_iajb_[ik], S_PNO(ik, kl));
+                auto U_il = linalg::triplet(S_PNO(ij, il), Tt_iajb_[il], S_PNO(il, kl));
+                auto U_kj = linalg::triplet(S_PNO(kl, kj), Tt_iajb_[kj], S_PNO(kj, ij));
+                auto U_lj = linalg::triplet(S_PNO(kl, lj), Tt_iajb_[lj], S_PNO(lj, ij));
+
+                temp_a = linalg::triplet(U_il, L_iajb_[kl], U_kj, false, true, false);
+                temp_a->add(linalg::triplet(U_ik, L_iajb_[kl], U_lj, false, false, false));
+                temp_a->scale(0.25);
+                R_ij->add(temp_a);
+
+                // E2
+                auto T_ij = linalg::doublet(T_iajb_[ij], S_kl_ij, false, true);
+                auto U_kl = linalg::doublet(S_kl_ij, Tt_iajb_[kl], true, false);
+                R_ij->subtract(linalg::triplet(T_ij, K_iajb_[kl], U_kl, false, false, true));
+                T_ij = linalg::doublet(S_kl_ij, T_iajb_[ij], false, false);
+                R_ij->subtract(linalg::triplet(U_kl, K_iajb_[kl], T_ij, false, true, false));
+
+                // G2
+                auto T_ik_clone = T_ik_g->clone();
+                auto U_lj_g = linalg::triplet(S_PNO(kl, lj), Tt_iajb_[lj], S_PNO(lj, kl));
+                T_ik_clone->scale(U_lj_g->vector_dot(K_iajb_[kl]->transpose()));
+                R_ij->subtract(T_ik_clone);
+
+                auto T_kj_clone = T_kj_g->clone();
+                auto U_li_g = linalg::triplet(S_PNO(kl, li), Tt_iajb_[li], S_PNO(li, kl));
+                T_kj_clone->scale(U_li_g->vector_dot(K_iajb_[kl]->transpose()));
+                R_ij->subtract(T_kj_clone);
             }
         }
-
+        
         for (int a_ij = 0; a_ij < n_pno_[ij]; ++a_ij) {
             for (int b_ij = 0; b_ij < n_pno_[ij]; ++b_ij) {
                 (*R_ij)(a_ij, b_ij) /= (-(*e_pno_[ij])(a_ij) - (*e_pno_[ij])(b_ij) + (*F_lmo_)(i, i) + (*F_lmo_)(j, j));
@@ -2590,8 +2730,6 @@ void DLPNOCCSD::dispersion_correction() {
 double DLPNOCCSD::compute_energy() {
 
     timer_on("DLPNO-CCSD");
-
-    disp_correct_ = options_.get_bool("DISPERSION_CORRECTION");
 
     print_header();
 
