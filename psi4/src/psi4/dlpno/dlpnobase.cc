@@ -69,15 +69,15 @@ void DLPNOBase::common_init() {
     T_CUT_PNO_ = options_.get_double("T_CUT_PNO");
     T_CUT_TRACE_ = options_.get_double("T_CUT_TRACE");
     T_CUT_ENERGY_ = options_.get_double("T_CUT_ENERGY");
+    T_CUT_PROJ_ = options_.get_double("T_CUT_PROJ");
     T_CUT_PNO_MP2_ = options_.get_double("T_CUT_PNO_MP2");
     T_CUT_TRACE_MP2_ = options_.get_double("T_CUT_TRACE_MP2");
     T_CUT_ENERGY_MP2_ = options_.get_double("T_CUT_ENERGY_MP2");
+    T_CUT_PROJ_MP2_ = options_.get_double("T_CUT_PROJ_MP2");
     T_CUT_PNO_DIAG_SCALE_ = options_.get_double("T_CUT_PNO_DIAG_SCALE");
     T_CUT_DO_ = options_.get_double("T_CUT_DO");
     T_CUT_PAIRS_ = options_.get_double("T_CUT_PAIRS");
     T_CUT_MKN_ = options_.get_double("T_CUT_MKN");
-    T_CUT_EIG_ = options_.get_double("T_CUT_EIG");
-    T_CUT_SVD_ = options_.get_double("T_CUT_SVD");
     T_CUT_TNO_ = options_.get_double("T_CUT_TNO");
     T_CUT_PRE_ = options_.get_double("T_CUT_PRE");
 
@@ -101,7 +101,6 @@ void DLPNOBase::common_init() {
     const bool T_CUT_PAIRS_changed = options_["T_CUT_PAIRS"].has_changed();
     const bool T_CUT_MKN_changed = options_["T_CUT_MKN"].has_changed();
     const bool T_CUT_PRE_changed = options_["T_CUT_PRE"].has_changed();
-    const bool PRESCREENING_changed = options_["PRESCREENING_ALGORITHM"].has_changed();
 
     // if not, values are determined by the user-friendly "PNO_CONVERGENCE"
     if (algorithm_ == MP2) {
@@ -127,10 +126,8 @@ void DLPNOBase::common_init() {
             if (!T_CUT_ENERGY_MP2_changed) T_CUT_ENERGY_MP2_ = 0.99;
             if (!T_CUT_DO_changed) T_CUT_DO_ = 2e-2;
             if (!DIAG_SCALE_changed) T_CUT_PNO_DIAG_SCALE_ = 3e-2;
-            // if (!DIAG_SCALE_changed) T_CUT_PNO_DIAG_SCALE_ = 1e-3;
             if (!T_CUT_PAIRS_changed) T_CUT_PAIRS_ = 1e-3;
             if (!T_CUT_MKN_changed) T_CUT_MKN_ = 1e-3;
-            if (!PRESCREENING_changed) options_.set_str("DLPNO", "PRESCREENING_ALGORITHM", "SC_LMP2");
         } else if (options_.get_str("PNO_CONVERGENCE") == "NORMAL") {
             if (!T_CUT_PNO_changed) T_CUT_PNO_ = 3.33e-7;
             if (!T_CUT_TRACE_changed) T_CUT_TRACE_ = 0.99;
@@ -141,7 +138,6 @@ void DLPNOBase::common_init() {
             if (!DIAG_SCALE_changed) T_CUT_PNO_DIAG_SCALE_ = 1e-3;
             if (!T_CUT_PAIRS_changed) T_CUT_PAIRS_ = 1e-4;
             if (!T_CUT_MKN_changed) T_CUT_MKN_ = 1e-3;
-            if (!PRESCREENING_changed) options_.set_str("DLPNO", "PRESCREENING_ALGORITHM", "SC_LMP2");
         } else if (options_.get_str("PNO_CONVERGENCE") == "TIGHT") {
             if (!T_CUT_PNO_changed) T_CUT_PNO_ = 1e-7;
             if (!T_CUT_TRACE_changed) T_CUT_TRACE_ = 0.999;
@@ -152,7 +148,6 @@ void DLPNOBase::common_init() {
             if (!DIAG_SCALE_changed) T_CUT_PNO_DIAG_SCALE_ = 1e-3;
             if (!T_CUT_PAIRS_changed) T_CUT_PAIRS_ = 1e-5;
             if (!T_CUT_MKN_changed) T_CUT_MKN_ = 1e-3;
-            if (!PRESCREENING_changed) options_.set_str("DLPNO", "PRESCREENING_ALGORITHM", "FULL_LMP2");
         } else if (options_.get_str("PNO_CONVERGENCE") == "VERY_TIGHT") {
             if (!T_CUT_PNO_changed) T_CUT_PNO_ = 1e-8;
             if (!T_CUT_TRACE_changed) T_CUT_TRACE_ = 0.999;
@@ -163,7 +158,6 @@ void DLPNOBase::common_init() {
             if (!DIAG_SCALE_changed) T_CUT_PNO_DIAG_SCALE_ = 1e-3;
             if (!T_CUT_PAIRS_changed) T_CUT_PAIRS_ = 1e-6;
             if (!T_CUT_MKN_changed) T_CUT_MKN_ = 1e-4;
-            if (!PRESCREENING_changed) options_.set_str("DLPNO", "PRESCREENING_ALGORITHM", "FULL_LMP2");
         }
         if (!T_CUT_PRE_changed) T_CUT_PRE_ = std::min(T_CUT_PRE_, 0.01 * T_CUT_PAIRS_);
     }
@@ -325,12 +319,7 @@ void DLPNOBase::setup_orbitals() {
     }
     timer_off("Local MOs");
 
-    auto mints = MintsHelper(basisset_, options_);
-    auto H_ao = mints.ao_potential();
-    H_ao->add(mints.ao_kinetic());
-
     F_lmo_ = linalg::triplet(C_lmo_, reference_wavefunction_->Fa(), C_lmo_, true, false, false);
-    H_lmo_ = linalg::triplet(C_lmo_, H_ao, C_lmo_, true, false, false);
 
     timer_on("Projected AOs");
 
@@ -346,10 +335,6 @@ void DLPNOBase::setup_orbitals() {
     }
     S_pao_ = linalg::triplet(C_pao_, reference_wavefunction_->S(), C_pao_, true, false, false);
     F_pao_ = linalg::triplet(C_pao_, reference_wavefunction_->Fa(), C_pao_, true, false, false);
-    H_pao_ = linalg::triplet(C_pao_, H_ao, C_pao_, true, false, false);
-
-    H_lmo_pao_ = linalg::triplet(C_lmo_, H_ao, C_pao_, true, false, false);
-    F_lmo_pao_ = linalg::triplet(C_lmo_, reference_wavefunction_->Fa(), C_pao_, true, false, false);
 
     timer_off("Projected AOs");
 
@@ -890,41 +875,6 @@ void DLPNOBase::prep_sparsity(bool initial, bool last) {
             }
         }
     } // end if
-
-    lmopair_lmo_to_riatom_lmo_.clear();
-    lmopair_pao_to_riatom_pao_.clear();
-
-    lmopair_lmo_to_riatom_lmo_.resize(n_lmo_pairs);
-    lmopair_pao_to_riatom_pao_.resize(n_lmo_pairs);
-
-#pragma omp parallel for
-    for (int ij = 0; ij < n_lmo_pairs; ++ij) {
-        int naux_ij = lmopair_to_ribfs_[ij].size();
-        lmopair_lmo_to_riatom_lmo_[ij].resize(naux_ij);
-        lmopair_pao_to_riatom_pao_[ij].resize(naux_ij);
-
-        for (int q_ij = 0; q_ij < naux_ij; q_ij++) {
-            int q = lmopair_to_ribfs_[ij][q_ij];
-            int centerq = ribasis_->function_to_center(q);
-
-            int nlmo_ij = lmopair_to_lmos_[ij].size();
-            int npao_ij = lmopair_to_paos_[ij].size();
-            lmopair_lmo_to_riatom_lmo_[ij][q_ij].resize(nlmo_ij);
-            lmopair_pao_to_riatom_pao_[ij][q_ij].resize(npao_ij);
-
-            for (int m_ij = 0; m_ij < nlmo_ij; m_ij++) {
-                int m = lmopair_to_lmos_[ij][m_ij];
-                int m_sparse = riatom_to_lmos_ext_dense_[centerq][m];
-                lmopair_lmo_to_riatom_lmo_[ij][q_ij][m_ij] = m_sparse;
-            }
-
-            for (int a_ij = 0; a_ij < npao_ij; a_ij++) {
-                int a = lmopair_to_paos_[ij][a_ij];
-                int a_sparse = riatom_to_paos_ext_dense_[centerq][a];
-                lmopair_pao_to_riatom_pao_[ij][q_ij][a_ij] = a_sparse;
-            }
-        }
-    }
 }
 
 void DLPNOBase::compute_qij() {

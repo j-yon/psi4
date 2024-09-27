@@ -164,9 +164,9 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
 
     /*- Psi4 dies if energy does not converge. !expert -*/
     options.add_bool("DIE_IF_NOT_CONVERGED", true);
-    /*- Integral package to use. If compiled with ERD or Simint support, change this option to use them; LibInt is used
+    /*- Integral package to use. If compiled with Simint support, change this option to use them; LibInt2 is used
        otherwise. -*/
-    options.add_str("INTEGRAL_PACKAGE", "LIBINT2", "ERD LIBINT1 SIMINT LIBINT2");
+    options.add_str("INTEGRAL_PACKAGE", "LIBINT2", "LIBINT2 SIMINT");
 #ifdef USING_BrianQC
     /*- Whether to enable using the BrianQC GPU module -*/
     options.add_bool("BRIANQC_ENABLE", false);
@@ -272,7 +272,25 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
     /*- How many NOONS to print -- used in libscf_solver/uhf.cc and libmints/oeprop.cc -*/
     options.add_str("PRINT_NOONS", "3");
 
-    ///MBIS Options (libmints/oeprop.cc)
+    /// Tensor Hypercontration (THC) Options (libmints/thc_eri.cc)
+
+    /*- Use DF approximation when computing LS-THC factorization? -*/
+    options.add_bool("LS_THC_DF", true);
+    /*- Number of spherical points in LS-THC grid -*/
+    options.add_int("LS_THC_SPHERICAL_POINTS", 50);
+    /*- Number of radial points in LS-THC grid -*/
+    options.add_int("LS_THC_RADIAL_POINTS", 10);
+    /*- Screening criteria for basis function values on LS-THC grids !expert -*/
+    options.add_double("LS_THC_BASIS_TOLERANCE", 1.0E-10);
+    /*- Grid weights cutoff for LS-THC grids !expert -*/
+    options.add_double("LS_THC_WEIGHTS_TOLERANCE", 1.0E-12);
+    /*- Pruning scheme for LS-THC grids !expert -*/
+    options.add_str("LS_THC_PRUNING_SCHEME", "ROBUST", 
+                        "ROBUST TREUTLER NONE FLAT P_GAUSSIAN D_GAUSSIAN P_SLATER D_SLATER LOG_GAUSSIAN LOG_SLATER NONE");
+    /*- Tolerance for pseudoinversion of grid point overlap matrix (Parrish 2012 eq. 30) !expert -*/
+    options.add_double("LS_THC_S_EPSILON", 1.0E-10);
+
+    /// MBIS Options (libmints/oeprop.cc)
 
     /*- Maximum Number of MBIS Iterations -*/
     options.add_int("MBIS_MAXITER", 500);
@@ -2531,12 +2549,8 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_str("DLPNO_LOCAL_ORBITALS", "BOYS", "BOYS PIPEK_MEZEY NONE");
         /*- Maximum number of iterations to determine the MP2 amplitudes. -*/
         options.add_int("DLPNO_MAXITER", 50);
-        /*- Use T1-transformed Hamiltonian for DLPNO-CCSD? -*/
-        options.add_bool("DLPNO_T1_HAMILTONIAN", true);
         /*- Which DLPNO Algorithm to run !expert*/
         options.add_str("DLPNO_ALGORITHM", "CCSD", "MP2 CCSD CCSD(T)");
-        /*- Use PAO SCALE APPROXIMATION FOR PAO-LMP2 prescreening? !expert -*/
-        options.add_bool("APPROX_PAO_LMP2", false);
         /*- Use T0 approximation for DLPNO-CCSD(T)? !expert*/
         options.add_bool("T0_APPROXIMATION", false);
 
@@ -2548,11 +2562,8 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_double("T_CUT_TRACE", 0.999);
         /*- Pair energy tolerance for removing PNOs !expert -*/
         options.add_double("T_CUT_ENERGY", 0.997);
-        /*- Use projection approximation for linear (i a | j b) integrals in LCCSD? !expert -*/
-        options.add_bool("PROJECT_K", false);
-        /*- Use projection approximation for linear (i j | a b) integrals in LCCSD?
-            [This is HIGHLY not recommended] !expert -*/
-        options.add_bool("PROJECT_J", false);
+        /*- Projection error tolerance for removing PNOs !expert -*/
+        options.add_double("T_CUT_PROJ", 0.06);
         /*- Perform "dispersion correction" for neglected weak pairs? !expert -*/
         options.add_bool("DISPERSION_CORRECTION", false);
         /*- Use low memory PNO overlap algorithm? !expert -*/
@@ -2569,6 +2580,8 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_double("T_CUT_TRACE_MP2", 0.9999);
         /*- Pair energy tolerance for removing PNOs (for MP2 prescreening) !expert -*/
         options.add_double("T_CUT_ENERGY_MP2", 0.999);
+        /*- Projection error tolerance for removing PNOs (for MP2 prescreening) !expert -*/
+        options.add_double("T_CUT_PROJ_MP2", 0.05);
         /*- How much to scale T_CUT_PNO by for diagonal PNOs !expert */
         options.add_double("T_CUT_PNO_DIAG_SCALE", 3e-2);
         /*- DOI threshold for including PAO (u) in domain of LMO (i) !expert -*/
@@ -2597,8 +2610,6 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_double("S_CUT", 1e-8);
         /*- Fock matrix threshold for treating ampltudes as coupled during local MP2 iterations !expert -*/
         options.add_double("F_CUT", 1e-5);
-        /*- Use full LMP2 pre-screening for determining weak pairs and strong pairs, as well as PNO truncation error !expert -*/
-        options.add_str("PRESCREENING_ALGORITHM", "SC_LMP2", "SC_LMP2 FULL_LMP2");
         /*- Occupation number threshold for removing TNOs !expert -*/
         options.add_double("T_CUT_TNO", 1e-9);
         /*- T_CUT_TNO scaling for strong triplets in the iterative (T) algorithm !expert -*/
@@ -2617,8 +2628,6 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_double("T_CUT_MKN_TRIPLES", 1e-2);
         /*- LMO/PAO threshold for the (T) algorithm -*/
         options.add_double("T_CUT_DO_TRIPLES", 1e-2);
-        /*- Scale (T0) energy using MP2 truncation error estimate? !expert */
-        options.add_bool("SCALE_T0", false);
         /*- Fock matrix threshold for treating ampltudes as coupled during local (T) iterations !expert -*/
         options.add_double("F_CUT_T", 1e-3);
         /*- Energy difference in which to stop considering triples in iterative (T) */

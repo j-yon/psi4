@@ -52,7 +52,7 @@ enum AlgorithmType { MP2, CCSD, CCSD_T };
 
 // Equations refer to Pinski et al. (JCP 143, 034108, 2015; DOI: 10.1063/1.4926879)
 
-class DLPNOBase : public Wavefunction {
+class PSI_API DLPNOBase : public Wavefunction {
     protected:
       /// what quantum chemistry module are we running
       AlgorithmType algorithm_;
@@ -64,12 +64,16 @@ class DLPNOBase : public Wavefunction {
       double T_CUT_TRACE_;
       /// pair energy threshold for PNO truncation
       double T_CUT_ENERGY_;
+      /// projection error threshold for PNO truncation
+      double T_CUT_PROJ_;
       /// threshold for PNO truncation for MP2 pairs (for DLPNO-CC methods)
       double T_CUT_PNO_MP2_;
       /// trace threshold for PNO truncation for MP2 pairs (for DLPNO-CC methods)
       double T_CUT_TRACE_MP2_;
       /// pair energy threshold for PNO truncation for MP2 pairs (for DLPNO-CC methods)
       double T_CUT_ENERGY_MP2_;
+      /// projection error threshold for PNO truncation for MP2 pairs (for DLPNO-CC methods)
+      double T_CUT_PROJ_MP2_;
       /// tolerance to separate pairs into CCSD and MP2 pairs
       double T_CUT_PAIRS_;
       /// tolerance to separate MP2 pairs in between crude and refined prescreening
@@ -78,10 +82,6 @@ class DLPNOBase : public Wavefunction {
       double T_CUT_PRE_;
       /// tolerance for local density fitting (by Mulliken population)
       double T_CUT_MKN_;
-      /// tolerance for eigenvalue decomposition of (Q|u_t v_t) integrals
-      double T_CUT_EIG_;
-      /// tolerance for singular value decomposition of ERI quantities
-      double T_CUT_SVD_;
       /// T_CUT_PNO scaling factor for diagonal PNOs
       double T_CUT_PNO_DIAG_SCALE_;
       /// Tolerance for TNO truncation (by occupation number)
@@ -95,17 +95,11 @@ class DLPNOBase : public Wavefunction {
       /// localized molecular orbitals (LMOs)
       SharedMatrix C_lmo_;
       SharedMatrix F_lmo_;
-      SharedMatrix H_lmo_;
 
       /// projected atomic orbitals (PAOs)
       SharedMatrix C_pao_;
       SharedMatrix F_pao_;
       SharedMatrix S_pao_;
-      SharedMatrix H_pao_;
-
-      // LMO/PAO Hamiltonian (Used in T1-Hamiltonian CCSD)
-      SharedMatrix H_lmo_pao_;
-      SharedMatrix F_lmo_pao_;
 
       /// differential overlap integrals (EQ 4)
       SharedMatrix DOI_ij_; // LMO/LMO
@@ -150,7 +144,7 @@ class DLPNOBase : public Wavefunction {
       double e_lmp2_trunc_; ///< LMP2 energy computed with (truncated) PNOs (Strong Pairs Only)
       double de_lmp2_eliminated_; ///< LMP2 correction for eliminated pairs (surviving pairs after dipole screening that
       // are neither weak nor strong)
-      double de_lmp2_weak_; ///< LMP2 correction for weak pairs (only for CC)
+      double de_weak_; ///< Energy contribution for weak pairs
       double de_disp_weak_; ///< weak pair dispersion correction
       double de_pno_total_; ///< energy correction for PNO truncation
       double de_pno_total_os_; ///< energy correction for PNO truncation
@@ -268,7 +262,7 @@ class DLPNOBase : public Wavefunction {
       double compute_energy() override;
 };
 
-class DLPNOMP2 : public DLPNOBase {
+class PSI_API DLPNOMP2 : public DLPNOBase {
    protected:
     /// PNO overlap integrals
     std::vector<std::vector<SharedMatrix>> S_pno_ij_kj_; ///< pno overlaps
@@ -298,7 +292,7 @@ class DLPNOMP2 : public DLPNOBase {
     double compute_energy() override;
 };
 
-class DLPNOCCSD : public DLPNOBase {
+class PSI_API DLPNOCCSD : public DLPNOBase {
    protected:
     /// Use low memory algorithm to store PNO overlaps?
     bool low_memory_overlap_;
@@ -318,6 +312,7 @@ class DLPNOCCSD : public DLPNOBase {
 
     /// PNO overlap integrals
     std::vector<std::vector<SharedMatrix>> S_pno_ij_kj_; ///< pno overlaps
+    std::vector<std::vector<SharedMatrix>> S_pno_ij_nn_; ///< pno overlaps
     std::vector<std::vector<SharedMatrix>> S_pno_ij_mn_; ///< pno overlaps
 
     /// Coupled-cluster amplitudes
@@ -335,6 +330,9 @@ class DLPNOCCSD : public DLPNOBase {
     std::vector<std::vector<int>> i_j_to_ij_weak_;
     std::vector<std::pair<int,int>> ij_to_i_j_weak_;
     std::vector<int> ij_to_ji_weak_;
+
+    // => Additional helpful sparse maps <= //
+    SparseMap lmopair_to_paos_ext_;
 
     // => CCSD Integrals <= //
 
@@ -371,6 +369,7 @@ class DLPNOCCSD : public DLPNOBase {
     std::vector<SharedMatrix> Fai_;
     std::vector<SharedMatrix> Fab_;
 
+    double e_lmp2_; ///< raw (uncorrected) local MP2 correlation energy
     double e_lccsd_; ///< raw (uncorrected) local CCSD correlation energy
 
     /// Returns the appropriate overlap matrix given two LMO pairs
@@ -387,6 +386,8 @@ class DLPNOCCSD : public DLPNOBase {
 
     /// Runs preceeding DLPNO-MP2 computation before DLPNO-CCSD iterations
     void pno_lmp2_iterations();
+    /// Recompute PNOs after DLPNO-MP2 converges
+    void recompute_pnos();
 
     /// compute PNO/PNO overlap matrices for DLPNO-CCSD
     void compute_pno_overlaps();
@@ -400,35 +401,29 @@ class DLPNOCCSD : public DLPNOBase {
 
     // => CCSD intermediates <= //
 
-    /// compute Fmi intermediate (Madriaga Eq. 40)
-    SharedMatrix compute_Fmi(const std::vector<SharedMatrix>& tau_tilde);
-    /// compute Fbe intermediate (of diagonal LMO pair ii) (Madriaga Eq. 39)
-    std::vector<SharedMatrix> compute_Fbe(const std::vector<SharedMatrix>& tau_tilde);
-    /// compute Fme intermediate (of diagonal LMO pair mm) (Madriaga Eq. 41)
-    std::vector<SharedMatrix> compute_Fme();
-    /// compute Wmnij intermediate (Madriaga Eq. 43)
-    std::vector<SharedMatrix> compute_Wmnij(const std::vector<SharedMatrix>& tau);
-    /// compute Wmbej intermediate (Madriaga Eq. 44)
-    std::vector<SharedMatrix> compute_Wmbej(const std::vector<SharedMatrix>& tau_bar);
-    /// compute Wmbje intermediate (Madriaga Eq. 45)
-    std::vector<SharedMatrix> compute_Wmbje(const std::vector<SharedMatrix>& tau_bar);
+    /// Jiang Equation 82
+    std::vector<SharedMatrix> compute_beta();
+    /// Jiang Equation 83
+    std::vector<SharedMatrix> compute_gamma();
+    /// Jiang Equation 84
+    std::vector<SharedMatrix> compute_delta();
+    /// Jiang Equation 86
+    SharedMatrix compute_Fkj_double_tilde();
 
-    // => T1-CCSD intermediates
-    std::vector<SharedMatrix> compute_B_tilde();
-    std::vector<SharedMatrix> compute_C_tilde();
-    std::vector<SharedMatrix> compute_D_tilde();
-    std::vector<SharedMatrix> compute_E_tilde();
-    SharedMatrix compute_G_tilde();
+    /// compute T1-dressed DF integrals (Jiang Eq. 91-92)
+    void t1_ints();
+    /// compute T1-dressed Fock matrix intermediates (Jiang Eq. 94-101)
+    void t1_fock();
+
+    /// computes singles residuals in LCCSD equations, using pre-allocated memory (Jiang Eq. 32)
+    void compute_R_ia(std::vector<SharedMatrix>& R_ia, std::vector<std::vector<SharedMatrix>>& R_ia_buffer);
+    /// computes doubles residuals for weak pairs (Schwilk SI Eq. 11)
+    void compute_R_iajb_weak(std::vector<SharedMatrix>& R_iajb);
+    /// computes doubles residuals in LCCSD equations, using pre-allocated memory (Jiang Eq. 19)
+    void compute_R_iajb(std::vector<SharedMatrix>& R_iajb, std::vector<SharedMatrix>& Rn_iajb);
 
     /// iteratively solve local CCSD equations
     void lccsd_iterations();
-
-    /// compute T1-dressed DF integrals
-    void t1_ints();
-    /// compute T1-dressed Fock matrix intermediates
-    void t1_fock();
-    /// local CCSD equations (with the T1-transformation)
-    void t1_lccsd_iterations();
     /// Do "dispersion correction" for weak pairs?
     void dispersion_correction();
 
@@ -443,8 +438,8 @@ class DLPNOCCSD : public DLPNOBase {
     double compute_energy() override;
 };
 
-class DLPNOCCSD_T : public DLPNOCCSD {
-   private:
+class PSI_API DLPNOCCSD_T : public DLPNOCCSD {
+   protected:
     // Sparsity information
     // WARNING: Only unique triplets are used
     SparseMap lmotriplet_to_ribfs_; ///< which ribfs are on an LMO triplet (i, j, k)
@@ -474,18 +469,19 @@ class DLPNOCCSD_T : public DLPNOCCSD {
     /// final energies
     double de_lccsd_t_screened_; ///< energy contribution from screened triplets
     double e_lccsd_t_; ///< local (T) correlation energy
+    double E_T_; ///< raw iterative (T) energy at weaker triples cutoffs
 
-    /// Recompute PNOs (Pair Natural Orbitals) using CCSD densities
-    void recompute_pnos();
     /// Create sparsity maps for triples
     void triples_sparsity(bool prescreening);
     /// Create TNOs (Triplet Natural Orbitals) for DLPNO-(T)
-    void tno_transform(bool scale_triples, double tno_tolerance);
+    void tno_transform(double tno_tolerance);
     /// Sort triplets to split between "strong" and "weak" triplets (for (T) iterations)
     void sort_triplets(double e_total);
 
+    /// A helper function to transform TNO-like quantities
+    SharedMatrix matmul_3d(SharedMatrix A, SharedMatrix X, int dim_old, int dim_new);
     /// Returns a symmetrized version of that matrix (in i <= j <= k ordering)
-    inline SharedMatrix triples_permuter(const SharedMatrix& X, int i, int j, int k, bool reverse=false);
+    SharedMatrix triples_permuter(const SharedMatrix& X, int i, int j, int k, bool reverse=false);
     /// compute (T) iteration energy
     double compute_t_iteration_energy();
 
