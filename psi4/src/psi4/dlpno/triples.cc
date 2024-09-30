@@ -760,7 +760,9 @@ double DLPNOCCSD_T::compute_lccsd_t0(bool store_amplitudes) {
             auto K_ovvv = K_ovvv_list[idx]->clone();
 
             K_ovvv->reshape(ntno_ijk * ntno_ijk, n_pno_[kj]);
-            Wperms[idx]->add(linalg::doublet(K_ovvv, T_kj, false, true));
+            K_ovvv = linalg::doublet(K_ovvv, T_kj, false, true);
+            K_ovvv->reshape(ntno_ijk, ntno_ijk * ntno_ijk);
+            Wperms[idx]->add(K_ovvv);
 
             for (int l_ijk = 0; l_ijk < lmotriplet_to_lmos_[ijk].size(); ++l_ijk) {
                 int l = lmotriplet_to_lmos_[ijk][l_ijk];
