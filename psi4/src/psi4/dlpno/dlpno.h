@@ -50,12 +50,16 @@ enum VirtualStorage { CORE, DIRECT };
 
 enum AlgorithmType { MP2, CCSD, CCSD_T };
 
+enum class WeakPairAlgorithm { MP2, TWO_VIRT, CEPA0, CCD };
+
 // Equations refer to Pinski et al. (JCP 143, 034108, 2015; DOI: 10.1063/1.4926879)
 
 class PSI_API DLPNOBase : public Wavefunction {
     protected:
       /// what quantum chemistry module are we running
       AlgorithmType algorithm_;
+      /// what algorithm to use for computing weak pair amplitudes
+      WeakPairAlgorithm weak_pair_algorithm_;
       /// threshold for PAO domain size
       double T_CUT_DO_;
       /// threshold for PNO truncation
@@ -64,16 +68,12 @@ class PSI_API DLPNOBase : public Wavefunction {
       double T_CUT_TRACE_;
       /// pair energy threshold for PNO truncation
       double T_CUT_ENERGY_;
-      /// projection error threshold for PNO truncation
-      double T_CUT_PROJ_;
       /// threshold for PNO truncation for MP2 pairs (for DLPNO-CC methods)
       double T_CUT_PNO_MP2_;
       /// trace threshold for PNO truncation for MP2 pairs (for DLPNO-CC methods)
       double T_CUT_TRACE_MP2_;
       /// pair energy threshold for PNO truncation for MP2 pairs (for DLPNO-CC methods)
       double T_CUT_ENERGY_MP2_;
-      /// projection error threshold for PNO truncation for MP2 pairs (for DLPNO-CC methods)
-      double T_CUT_PROJ_MP2_;
       /// tolerance to separate pairs into CCSD and MP2 pairs
       double T_CUT_PAIRS_;
       /// tolerance to separate MP2 pairs in between crude and refined prescreening
@@ -86,12 +86,6 @@ class PSI_API DLPNOBase : public Wavefunction {
       double T_CUT_PNO_DIAG_SCALE_;
       /// Tolerance for TNO truncation (by occupation number)
       double T_CUT_TNO_;
-      /// Use projectio criterion for PNO selection?
-      bool pno_proj_select_;
-      /// Do weak pair dispersion correction? (CCSD)
-      bool disp_correct_;
-      /// Perform weak pair residual updates?
-      bool weak_pair_residual_;
 
       /// auxiliary basis
       std::shared_ptr<BasisSet> ribasis_;
@@ -151,7 +145,6 @@ class PSI_API DLPNOBase : public Wavefunction {
       double de_lmp2_eliminated_; ///< LMP2 correction for eliminated pairs (surviving pairs after dipole screening that
       // are neither weak nor strong)
       double de_weak_; ///< Energy contribution for weak pairs
-      double de_disp_weak_; ///< weak pair dispersion correction
       double de_pno_total_; ///< energy correction for PNO truncation
       double de_pno_total_os_; ///< energy correction for PNO truncation
       double de_pno_total_ss_; ///< energy correction for PNO truncation

@@ -82,6 +82,7 @@ void DLPNOCCSD_T::print_header() {
     outfile->Printf("    T_CUT_TNO_PRE (T0)         = %6.3e \n", options_.get_double("T_CUT_TNO_PRE"));
     outfile->Printf("    T_CUT_DO_TRIPLES_PRE (T0)  = %6.3e \n", options_.get_double("T_CUT_DO_TRIPLES_PRE"));
     outfile->Printf("    T_CUT_MKN_TRIPLES_PRE (T0) = %6.3e \n", options_.get_double("T_CUT_MKN_TRIPLES_PRE"));
+    outfile->Printf("    TRIPLES_MAX_WEAK_PAIRS     = %6d   \n", options_.get_int("TRIPLES_MAX_WEAK_PAIRS"));
     if (!t0_only) {
         outfile->Printf("    T_CUT_TNO_STRONG (T)       = %6.3e \n", t_cut_tno * t_cut_tno_strong_scale);
         outfile->Printf("    T_CUT_TNO_WEAK (T)         = %6.3e \n", t_cut_tno * t_cut_tno_weak_scale);
@@ -124,6 +125,8 @@ void DLPNOCCSD_T::triples_sparsity(bool prescreening) {
     int n_lmo_pairs = ij_to_i_j_.size();
     int npao = C_pao_->colspi(0);
 
+    int MAX_WEAK_PAIRS = options_.get_int("TRIPLES_MAX_WEAK_PAIRS");
+
     if (prescreening) {
         int ijk = 0;
         // Every pair contains at least two strong pairs
@@ -141,7 +144,7 @@ void DLPNOCCSD_T::triples_sparsity(bool prescreening) {
                 if (ik_weak != -1) weak_pair_count += 1;
                 if (kj_weak != -1) weak_pair_count += 1;
 
-                if (weak_pair_count > 2) continue;
+                if (weak_pair_count > MAX_WEAK_PAIRS) continue;
 
                 ijk_to_i_j_k_.push_back(std::make_tuple(i, j, k));
                 i_j_k_to_ijk_[i * naocc * naocc + j * naocc + k] = ijk;
@@ -1299,7 +1302,7 @@ double DLPNOCCSD_T::compute_energy() {
     }
 
     double e_scf = reference_wavefunction_->energy();
-    double e_ccsd_t_corr = e_lccsd_t_ + de_weak_ + de_disp_weak_ + de_lmp2_eliminated_ + de_dipole_ + de_pno_total_;
+    double e_ccsd_t_corr = e_lccsd_t_ + de_weak_ + de_lmp2_eliminated_ + de_dipole_ + de_pno_total_;
     double e_ccsd_t_total = e_scf + e_ccsd_t_corr;
 
     set_scalar_variable("CCSD(T) CORRELATION ENERGY", e_ccsd_t_corr);
@@ -1324,8 +1327,8 @@ double DLPNOCCSD_T::compute_energy() {
 }
 
 void DLPNOCCSD_T::print_results() {
-    double e_dlpno_ccsd = e_lccsd_ + de_weak_ + de_lmp2_eliminated_ + de_pno_total_ + de_dipole_ + de_disp_weak_;
-    double e_total = e_lccsd_t_ + de_weak_ + de_lmp2_eliminated_ + de_pno_total_ + de_dipole_ + de_disp_weak_;
+    double e_dlpno_ccsd = e_lccsd_ + de_weak_ + de_lmp2_eliminated_ + de_pno_total_ + de_dipole_;
+    double e_total = e_lccsd_t_ + de_weak_ + de_lmp2_eliminated_ + de_pno_total_ + de_dipole_;
     outfile->Printf("  \n");
     outfile->Printf("  Total DLPNO-CCSD(T) Correlation Energy: %16.12f \n", e_total);
     outfile->Printf("    DLPNO-CCSD Contribution:              %16.12f \n", e_dlpno_ccsd);
@@ -1333,7 +1336,7 @@ void DLPNOCCSD_T::print_results() {
     outfile->Printf("    Screened Triplets Contribution:       %16.12f \n", de_lccsd_t_screened_);
     outfile->Printf("    Andy Jiang... FOR THREEEEEEEEEEE!!!\n\n\n");
     outfile->Printf("  @Total DLPNO-CCSD(T) Energy: %16.12f \n",
-                    variables_["SCF TOTAL ENERGY"] + de_weak_ + de_lmp2_eliminated_ + e_lccsd_t_ + de_pno_total_ + de_dipole_ + de_disp_weak_);
+                    variables_["SCF TOTAL ENERGY"] + de_weak_ + de_lmp2_eliminated_ + e_lccsd_t_ + de_pno_total_ + de_dipole_);
 }
 
 }  // namespace dlpno
