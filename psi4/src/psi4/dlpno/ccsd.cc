@@ -220,14 +220,12 @@ void DLPNOCCSD::compute_pno_overlaps() {
 }
 
 void DLPNOCCSD::estimate_memory() {
-    outfile->Printf("  ==> DLPNO-CCSD Memory Estimate <== \n\n");
+    outfile->Printf("  ==> DLPNO-CCSD Memory Requirements <== \n\n");
 
     int naocc = i_j_to_ij_.size();
     int n_lmo_pairs = ij_to_i_j_.size();
 
-    low_memory_overlap_ = options_.get_bool("LOW_MEMORY_OVERLAP");
-
-    size_t pno_overlap_memory = 0;
+    size_t low_overlap_memory = 0, pno_overlap_memory = 0;
 #pragma omp parallel for schedule(dynamic, 1) reduction(+ : pno_overlap_memory)
     for (int ij = 0; ij < n_lmo_pairs; ++ij) {
         int i, j;
@@ -242,11 +240,13 @@ void DLPNOCCSD::estimate_memory() {
 
             if (kj != -1) {
                 pno_overlap_memory += n_pno_[ij] * n_pno_[kj];
+                low_overlap_memory += n_pno_[ij] * n_pno_[kj];
             }
 
             if (i <= j && lmopair_to_lmos_dense_[ij][k] != -1) {
                 int kk = i_j_to_ij_[k][k];
                 pno_overlap_memory += n_pno_[ij] * n_pno_[kk];
+                low_overlap_memory += n_pno_[ij] * n_pno_[kk];
             }
         }
 
@@ -309,7 +309,12 @@ void DLPNOCCSD::estimate_memory() {
         }
     }
 
+    // TODO: This is currently NOT supported, make this a viable option in the future;
+    write_qab_pao_ = false;
     if (write_qab_pao_) qab_memory_ = 0;
+
+    low_memory_overlap_ = options_.get_bool("LOW_MEMORY_OVERLAP");
+    if (low_memory_overlap_) pno_overlap_memory = low_overlap_memory;
 
     write_qia_pno_ = options_.get_bool("WRITE_QIA_PNO");
     if (write_qia_pno_) qov = 0;
@@ -319,7 +324,7 @@ void DLPNOCCSD::estimate_memory() {
 
     const size_t total_df_memory = qij_memory_ + qia_memory_ + qab_memory_;
     const size_t total_pno_int_memory = oooo + ooov + oovv + oovv_large + ovvv + qov + qvv;
-    const size_t total_memory = total_df_memory + pno_overlap_memory + total_pno_int_memory;
+    size_t total_memory = total_df_memory + pno_overlap_memory + total_pno_int_memory;
 
     // 2^30 bytes per GiB
     outfile->Printf("    (q | i j) integrals        : %.3f [GiB]\n", qij_memory_ * pow(2.0, -30) * sizeof(double));
@@ -335,6 +340,67 @@ void DLPNOCCSD::estimate_memory() {
     outfile->Printf("    PNO/PNO overlaps           : %.3f [GiB]\n\n", pno_overlap_memory * pow(2.0, -30) * sizeof(double));
     outfile->Printf("    Total Memory Given         : %.3f [GiB]\n", memory_ * pow(2.0, -30));
     outfile->Printf("    Total Memory Required      : %.3f [GiB]\n\n", total_memory * pow(2.0, -30) * sizeof(double));
+
+    // Memory checks!!!
+    bool memory_changed = false;
+
+    if (total_memory * sizeof(double) > 0.75 * memory_) {
+        outfile->Printf("  Total Required Memory is more than 75%% of Available Memory!\n");
+        outfile->Printf("    Attempting to switch to semi-direct low memory PNO overlap algorithm...\n");
+
+        total_memory += (low_overlap_memory - pno_overlap_memory);
+        low_memory_overlap_ = true;
+        memory_changed = true;
+        pno_overlap_memory = low_overlap_memory;
+        outfile->Printf("    Required Memory Reduced to %.3f [GiB]\n\n", total_memory * pow(2.0, -30) * sizeof(double));
+    }
+
+    if (total_memory * sizeof(double) > 0.75 * memory_) {
+        outfile->Printf("  Total Required Memory is (still) more than 75%% of Available Memory!\n");
+        outfile->Printf("    Attempting to switch to disk IO for (Q_{ij}|m_{ij} a_{ij}) integrals...\n");
+
+        total_memory -= qov;
+        write_qia_pno_ = true;
+        memory_changed = true;
+        qov = 0L;
+        outfile->Printf("    Required Memory Reduced to %.3f [GiB]\n\n", total_memory * pow(2.0, -30) * sizeof(double));
+    }
+
+    if (total_memory * sizeof(double) > 0.75 * memory_) {
+        outfile->Printf("  Total Required Memory is (still) more than 75%% of Available Memory!\n");
+        outfile->Printf("    Attempting to switch to disk IO for (Q_{ij}|a_{ij} b_{ij}) integrals...\n");
+
+        total_memory -= qvv;
+        write_qab_pno_ = true;
+        memory_changed = true;
+        qvv = 0L;
+        outfile->Printf("    Required Memory Reduced to %.3f [GiB]\n\n", total_memory * pow(2.0, -30) * sizeof(double));
+    }
+
+    if (total_memory * sizeof(double) > 0.75 * memory_) {
+        outfile->Printf("  Total Required Memory is (still) more than 75%% of Available Memory!\n");
+        outfile->Printf("    We exhausted all of our options!!! This computation cannot continue...\n");
+
+        throw PSIEXCEPTION("   Too little memory given for DLPNO-CCSD Algorithm!");
+    }
+
+    if (memory_changed) {
+        outfile->Printf("  ==> (Updated) DLPNO-CCSD Memory Requirements <== \n\n");
+
+        outfile->Printf("    (q | i j) integrals        : %.3f [GiB]\n", qij_memory_ * pow(2.0, -30) * sizeof(double));
+        outfile->Printf("    (q | i a) integrals        : %.3f [GiB]\n", qia_memory_ * pow(2.0, -30) * sizeof(double));
+        outfile->Printf("    (q | a b) integrals        : %.3f [GiB]\n", qab_memory_ * pow(2.0, -30) * sizeof(double));
+        outfile->Printf("    (m i | n j)                : %.3f [GiB]\n", oooo * pow(2.0, -30) * sizeof(double));
+        outfile->Printf("    (i j | k c_{ij})           : %.3f [GiB]\n", ooov * pow(2.0, -30) * sizeof(double));
+        outfile->Printf("    (i a_{ij} | j b_{ij})      : %.3f [GiB]\n", oovv * pow(2.0, -30) * sizeof(double));
+        outfile->Printf("    (i k | a_{ij} b_{kj})      : %.3f [GiB]\n", oovv_large * pow(2.0, -30) * sizeof(double));
+        outfile->Printf("    (i a_{ij} | b_{ij} c_{ij}) : %.3f [GiB]\n", ovvv * pow(2.0, -30) * sizeof(double));
+        outfile->Printf("    (Q_{ij}|m_{ij} a_{ij})     : %.3f [GiB]\n", qov * pow(2.0, -30) * sizeof(double));
+        outfile->Printf("    (Q_{ij}|a_{ij} b_{ij})     : %.3f [GiB]\n", qvv * pow(2.0, -30) * sizeof(double));
+        outfile->Printf("    PNO/PNO overlaps           : %.3f [GiB]\n\n", pno_overlap_memory * pow(2.0, -30) * sizeof(double));
+        outfile->Printf("    Total Memory Given         : %.3f [GiB]\n", memory_ * pow(2.0, -30));
+        outfile->Printf("    Total Memory Required      : %.3f [GiB]\n\n", total_memory * pow(2.0, -30) * sizeof(double));
+    }
 
     if (low_memory_overlap_) {
         outfile->Printf("    Using low memory PNO overlap algorithm...  \n\n");
@@ -653,6 +719,14 @@ void DLPNOCCSD::pno_lmp2_iterations() {
     // 2^30 bytes per GiB
     outfile->Printf("    PNO/PNO overlaps       : %.3f [GiB]\n", pno_overlap_memory * pow(2.0, -30) * sizeof(double));
     outfile->Printf("    Total Memory Given     : %.3f [GiB]\n\n", memory_ * pow(2.0, -30));
+
+    if (pno_overlap_memory * sizeof(double) > 0.9 * memory_) {
+        outfile->Printf("  Total Required Memory is more than 90%% of Available Memory!\n");
+        outfile->Printf("    We exhausted all of our options!!! This computation cannot continue...\n");
+        outfile->Printf("    Pro Tip: Try adjusting the T_CUT_PNO_MP2, T_CUT_TRACE_MP2, and/or T_CUT_ENERGY_MP2 parameters\n");
+
+        throw PSIEXCEPTION("  Too little memory given for PNO-LMP2 Algorithm!");
+    }
 
     std::vector<std::vector<SharedMatrix>> S_pno_ij_ik(n_lmo_pairs);
     std::vector<std::vector<SharedMatrix>> S_pno_ij_kj(n_lmo_pairs);
@@ -1180,6 +1254,9 @@ void DLPNOCCSD::compute_cc_integrals() {
         psio_->open(PSIF_DLPNO_QAB_PNO, PSIO_OPEN_NEW);
     }
 
+    std::time_t time_start = std::time(nullptr);
+    std::time_t time_lap = std::time(nullptr);
+
 #pragma omp parallel for schedule(dynamic, 1) reduction(+ : qvv_memory) reduction(+ : qvv_svd_memory)
     for (int ij = 0; ij < n_lmo_pairs; ++ij) {
         int i, j;
@@ -1506,6 +1583,16 @@ void DLPNOCCSD::compute_cc_integrals() {
         }
 
         if (thread == 0) timer_off("DLPNO-CCSD: Contract Integrals");
+
+        if (thread == 0) {
+            std::time_t time_curr = std::time(nullptr);
+            int time_elapsed = (int) time_curr - (int) time_lap;
+            if (time_elapsed > 60) {
+                outfile->Printf("  Time Elapsed from last checkpoint %4d (s), Progress %2d %%, Integrals for (%4d / %4d) Pairs Computed\n", time_elapsed, 
+                                    (100 * ij) / n_lmo_pairs, ij, n_lmo_pairs);
+                time_lap = std::time(nullptr);
+            }
+        }
     }
 
     // Antisymmetrize K_mbij integrals
@@ -1523,6 +1610,10 @@ void DLPNOCCSD::compute_cc_integrals() {
         L_bar_[ij]->scale(2.0);
         L_bar_[ij]->subtract(K_bar_[ji]);
     }
+
+    std::time_t time_stop = std::time(nullptr);
+    int time_elapsed = (int) time_stop - (int) time_start;
+    outfile->Printf("    Integral Computation Complete!!! Time Elapsed: %4d seconds\n\n", time_elapsed);
 }
 
 void DLPNOCCSD::t1_ints() {

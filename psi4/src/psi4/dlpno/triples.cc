@@ -473,7 +473,7 @@ void DLPNOCCSD_T::tno_transform(double t_cut_tno) {
 }
 
 void DLPNOCCSD_T::estimate_memory() {
-    outfile->Printf("\n  ==> DLPNO-(T) Memory Estimate <== \n\n");
+    outfile->Printf("\n  ==> DLPNO-(T) Memory Requirements <== \n\n");
 
     int n_lmo_triplets = ijk_to_i_j_k_.size();
 
@@ -482,6 +482,10 @@ void DLPNOCCSD_T::estimate_memory() {
     for (int ijk = 0; ijk < n_lmo_triplets; ++ijk) {
         tno_total_memory += n_tno_[ijk] * n_tno_[ijk] * n_tno_[ijk];
     }
+
+    write_amplitudes_ = options_.get_bool("WRITE_TRIPLES");
+    if (write_amplitudes_) tno_total_memory = 0;
+
     size_t total_memory = qij_memory_ + qia_memory_ + qab_memory_ + 3 * tno_total_memory;
 
     outfile->Printf("    (q | i j) integrals    : %.3f [GiB]\n", qij_memory_ * pow(2.0, -30) * sizeof(double));
@@ -493,10 +497,40 @@ void DLPNOCCSD_T::estimate_memory() {
     outfile->Printf("    Total Memory Given     : %.3f [GiB]\n", memory_ * pow(2.0, -30));
     outfile->Printf("    Total Memory Required  : %.3f [GiB]\n\n", total_memory * pow(2.0, -30) * sizeof(double));
 
-    write_amplitudes_ = options_.get_bool("WRITE_TRIPLES");
+    // Memory checks!!!
+    bool memory_changed = false;
+
+    if (total_memory * sizeof(double) > 0.9 * memory_) {
+        outfile->Printf("  Total Required Memory is more than 90%% of Available Memory!\n");
+        outfile->Printf("    Attempting to switch to disk IO for triples-like quantities...\n");
+
+        total_memory -= 3 * tno_total_memory;
+        write_amplitudes_ = true;
+        memory_changed = true;
+        tno_total_memory = 0;
+        outfile->Printf("    Required Memory Reduced to %.3f [GiB]\n\n", total_memory * pow(2.0, -30) * sizeof(double));
+    }
+
+    if (total_memory * sizeof(double) > 0.9 * memory_) {
+        outfile->Printf("  Total Required Memory is (still) more than 90%% of Available Memory!\n");
+        throw PSIEXCEPTION("   Too little memory given for DLPNO-(T) Algorithm!");
+    }
+
+    if (memory_changed) {
+        outfile->Printf("\n  ==> (Updated) DLPNO-(T) Memory Requirements <== \n\n");
+        outfile->Printf("    (q | i j) integrals    : %.3f [GiB]\n", qij_memory_ * pow(2.0, -30) * sizeof(double));
+        outfile->Printf("    (q | i a) integrals    : %.3f [GiB]\n", qia_memory_ * pow(2.0, -30) * sizeof(double));
+        outfile->Printf("    (q | a b) integrals    : %.3f [GiB]\n", qab_memory_ * pow(2.0, -30) * sizeof(double));
+        outfile->Printf("    W_{ijk}^{abc}          : %.3f [GiB]\n", tno_total_memory * pow(2.0, -30) * sizeof(double));
+        outfile->Printf("    V_{ijk}^{abc}          : %.3f [GiB]\n", tno_total_memory * pow(2.0, -30) * sizeof(double));
+        outfile->Printf("    T_{ijk}^{abc}          : %.3f [GiB]\n", tno_total_memory * pow(2.0, -30) * sizeof(double));
+        outfile->Printf("    Total Memory Given     : %.3f [GiB]\n", memory_ * pow(2.0, -30));
+        outfile->Printf("    Total Memory Required  : %.3f [GiB]\n\n", total_memory * pow(2.0, -30) * sizeof(double));
+    }
 
     if (write_amplitudes_) {
-        outfile->Printf("    Writing all X_{ijk}^{abc} quantities to disk...\n\n");
+        outfile->Printf("    Writing all X_{ijk}^{abc} quantities to disk...\n");
+        outfile->Printf("    Warning! Disk algorithm for X_{ijk}^{abc} quantities is currently NOT optimized!\n\n");
     } else {
         outfile->Printf("    Storing all X_{ijk}^{abc} quantities in RAM...\n\n");
     }
@@ -523,6 +557,9 @@ double DLPNOCCSD_T::compute_lccsd_t0(bool store_amplitudes) {
 
     e_ijk_.clear();
     e_ijk_.resize(n_lmo_triplets, 0.0);
+
+    std::time_t time_start = std::time(nullptr);
+    std::time_t time_lap = std::time(nullptr);
 
 #pragma omp parallel for schedule(dynamic) reduction(+ : E_T0)
     for (int ijk = 0; ijk < n_lmo_triplets; ++ijk) {
@@ -883,9 +920,23 @@ double DLPNOCCSD_T::compute_lccsd_t0(bool store_amplitudes) {
 #pragma omp critical
             T_ijk->save(psio_, PSIF_DLPNO_TRIPLES, psi::Matrix::Full);
         }
+
+        if (thread == 0) {
+            std::time_t time_curr = std::time(nullptr);
+            int time_elapsed = (int) time_curr - (int) time_lap;
+            if (time_elapsed > 60) {
+                outfile->Printf("  Time Elapsed from last checkpoint %4d (s), Progress %2d %%, Amplitudes for (%6d / %6d) Triplets Computed\n", time_elapsed, 
+                                    (100 * ijk) / n_lmo_triplets, ijk, n_lmo_triplets);
+                time_lap = std::time(nullptr);
+            }
+        }
     }
 
     timer_off("LCCSD(T0)");
+
+    std::time_t time_stop = std::time(nullptr);
+    int time_elapsed = (int) time_stop - (int) time_start;
+    outfile->Printf("    (Relavent) Semicanonical LCCSD(T0) Computation Complete!!! Time Elapsed: %4d seconds\n\n", time_elapsed);
 
     return E_T0;
 }
