@@ -1267,7 +1267,6 @@ double DLPNOCCSD_T::compute_energy() {
     double e_dlpno_ccsd = DLPNOCCSD::compute_energy();
 
     // Clear CCSD integrals
-    /*
     K_mnij_.clear();
     K_bar_.clear();
     K_bar_chem_.clear();
@@ -1287,8 +1286,8 @@ double DLPNOCCSD_T::compute_energy() {
     i_Qa_ij_.clear();
     i_Qa_t1_.clear();
     S_pno_ij_kj_.clear();
+    S_pno_ij_kk_.clear();
     S_pno_ij_mn_.clear();
-    */
 
     print_header();
 
