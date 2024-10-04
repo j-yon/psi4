@@ -1286,7 +1286,7 @@ double DLPNOCCSD_T::compute_energy() {
     i_Qa_ij_.clear();
     i_Qa_t1_.clear();
     S_pno_ij_kj_.clear();
-    S_pno_ij_kk_.clear();
+    S_pno_ij_nn_.clear();
     S_pno_ij_mn_.clear();
 
     print_header();
