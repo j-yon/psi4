@@ -70,21 +70,15 @@ void DLPNOBase::common_init() {
     T_CUT_PNO_ = options_.get_double("T_CUT_PNO");
     T_CUT_TRACE_ = options_.get_double("T_CUT_TRACE");
     T_CUT_ENERGY_ = options_.get_double("T_CUT_ENERGY");
-    T_CUT_PROJ_ = options_.get_double("T_CUT_PROJ");
     T_CUT_PNO_MP2_ = options_.get_double("T_CUT_PNO_MP2");
     T_CUT_TRACE_MP2_ = options_.get_double("T_CUT_TRACE_MP2");
     T_CUT_ENERGY_MP2_ = options_.get_double("T_CUT_ENERGY_MP2");
-    T_CUT_PROJ_MP2_ = options_.get_double("T_CUT_PROJ_MP2");
     T_CUT_PNO_DIAG_SCALE_ = options_.get_double("T_CUT_PNO_DIAG_SCALE");
     T_CUT_DO_ = options_.get_double("T_CUT_DO");
     T_CUT_PAIRS_ = options_.get_double("T_CUT_PAIRS");
     T_CUT_MKN_ = options_.get_double("T_CUT_MKN");
     T_CUT_TNO_ = options_.get_double("T_CUT_TNO");
     T_CUT_PRE_ = options_.get_double("T_CUT_PRE");
-
-    pno_proj_select_ = options_.get_bool("PNO_PROJECTION_SELECTION");
-    disp_correct_ = options_.get_bool("DISPERSION_CORRECTION");
-    weak_pair_residual_ = options_.get_bool("WEAK_PAIR_RESIDUAL");
 
     if (options_.get_str("DLPNO_ALGORITHM") == "MP2") {
         algorithm_ = MP2;
@@ -94,23 +88,28 @@ void DLPNOBase::common_init() {
         algorithm_ = CCSD_T;
     }
 
+    if (options_.get_str("WEAK_PAIR_ALGORITHM") == "MP2") {
+        weak_pair_algorithm_ = WeakPairAlgorithm::MP2;
+    } else if (options_.get_str("WEAK_PAIR_ALGORITHM") == "TWO_VIRT") {
+        weak_pair_algorithm_ = WeakPairAlgorithm::TWO_VIRT;
+    } else if (options_.get_str("WEAK_PAIR_ALGORITHM") == "CEPA0") {
+        weak_pair_algorithm_ = WeakPairAlgorithm::CEPA0;
+    } else if (options_.get_str("WEAK_PAIR_ALGORITHM") == "CCD") {
+        weak_pair_algorithm_ = WeakPairAlgorithm::CCD;
+    }
+
     // did the user manually change expert level options?
     const bool T_CUT_PNO_changed = options_["T_CUT_PNO"].has_changed();
     const bool T_CUT_TRACE_changed = options_["T_CUT_TRACE"].has_changed();
     const bool T_CUT_ENERGY_changed = options_["T_CUT_ENERGY"].has_changed();
-    const bool T_CUT_PROJ_changed = options_["T_CUT_PROJ"].has_changed();
     const bool T_CUT_PNO_MP2_changed = options_["T_CUT_PNO_MP2"].has_changed();
     const bool T_CUT_TRACE_MP2_changed = options_["T_CUT_TRACE_MP2"].has_changed();
     const bool T_CUT_ENERGY_MP2_changed = options_["T_CUT_ENERGY_MP2"].has_changed();
-    const bool T_CUT_PROJ_MP2_changed = options_["T_CUT_PROJ_MP2"].has_changed();
     const bool DIAG_SCALE_changed = options_["T_CUT_PNO_DIAG_SCALE"].has_changed();
     const bool T_CUT_DO_changed = options_["T_CUT_DO"].has_changed();
     const bool T_CUT_PAIRS_changed = options_["T_CUT_PAIRS"].has_changed();
     const bool T_CUT_MKN_changed = options_["T_CUT_MKN"].has_changed();
     const bool T_CUT_PRE_changed = options_["T_CUT_PRE"].has_changed();
-    const bool DISP_changed = options_["DISPERSION_CORRECTION"].has_changed();
-    const bool PROJ_changed = options_["PNO_PROJECTION_SELECTION"].has_changed();
-    const bool WEAK_RESIDUAL_changed = options_["WEAK_PAIR_RESIDUAL"].has_changed();
 
     // if not, values are determined by the user-friendly "PNO_CONVERGENCE"
     if (algorithm_ == MP2) {
@@ -132,10 +131,8 @@ void DLPNOBase::common_init() {
             if (!T_CUT_PNO_changed) T_CUT_PNO_ = 1e-6;
             if (!T_CUT_TRACE_changed) T_CUT_TRACE_ = 0.9;
             if (!T_CUT_ENERGY_changed) T_CUT_ENERGY_ = 0.9;
-            if (!T_CUT_PROJ_changed) T_CUT_PROJ_ = 0.10;
             if (!T_CUT_TRACE_MP2_changed) T_CUT_TRACE_MP2_ = 0.99;
             if (!T_CUT_ENERGY_MP2_changed) T_CUT_ENERGY_MP2_ = 0.99;
-            if (!T_CUT_PROJ_MP2_changed) T_CUT_PROJ_MP2_ = 0.08;
             if (!T_CUT_DO_changed) T_CUT_DO_ = 2e-2;
             if (!DIAG_SCALE_changed) T_CUT_PNO_DIAG_SCALE_ = 3e-2;
             if (!T_CUT_PAIRS_changed) T_CUT_PAIRS_ = 1e-3;
@@ -144,10 +141,8 @@ void DLPNOBase::common_init() {
             if (!T_CUT_PNO_changed) T_CUT_PNO_ = 3.33e-7;
             if (!T_CUT_TRACE_changed) T_CUT_TRACE_ = 0.99;
             if (!T_CUT_ENERGY_changed) T_CUT_ENERGY_ = 0.99;
-            if (!T_CUT_PROJ_changed) T_CUT_PROJ_ = 0.08;
             if (!T_CUT_TRACE_MP2_changed) T_CUT_TRACE_MP2_ = 0.999;
             if (!T_CUT_ENERGY_MP2_changed) T_CUT_ENERGY_MP2_ = 0.997;
-            if (!T_CUT_PROJ_MP2_changed) T_CUT_PROJ_MP2_ = 0.07;
             if (!T_CUT_DO_changed) T_CUT_DO_ = 1e-2;
             if (!DIAG_SCALE_changed) T_CUT_PNO_DIAG_SCALE_ = 3e-2;
             if (!T_CUT_PAIRS_changed) T_CUT_PAIRS_ = 1e-4;
@@ -156,10 +151,8 @@ void DLPNOBase::common_init() {
             if (!T_CUT_PNO_changed) T_CUT_PNO_ = 1e-7;
             if (!T_CUT_TRACE_changed) T_CUT_TRACE_ = 0.999;
             if (!T_CUT_ENERGY_changed) T_CUT_ENERGY_ = 0.997;
-            if (!T_CUT_PROJ_changed) T_CUT_PROJ_ = 0.07;
             if (!T_CUT_TRACE_MP2_changed) T_CUT_TRACE_MP2_ = 0.9999;
             if (!T_CUT_ENERGY_MP2_changed) T_CUT_ENERGY_MP2_ = 0.999;
-            if (!T_CUT_PROJ_MP2_changed) T_CUT_PROJ_MP2_ = 0.05;
             if (!T_CUT_DO_changed) T_CUT_DO_ = 5e-3;
             if (!DIAG_SCALE_changed) T_CUT_PNO_DIAG_SCALE_ = 3e-2;
             if (!T_CUT_PAIRS_changed) T_CUT_PAIRS_ = 1e-5;
@@ -168,10 +161,8 @@ void DLPNOBase::common_init() {
             if (!T_CUT_PNO_changed) T_CUT_PNO_ = 1e-8;
             if (!T_CUT_TRACE_changed) T_CUT_TRACE_ = 0.999;
             if (!T_CUT_ENERGY_changed) T_CUT_ENERGY_ = 0.997;
-            if (!T_CUT_PROJ_changed) T_CUT_PROJ_ = 0.06;
             if (!T_CUT_TRACE_MP2_changed) T_CUT_TRACE_MP2_ = 0.9999;
             if (!T_CUT_ENERGY_MP2_changed) T_CUT_ENERGY_MP2_ = 0.999;
-            if (!T_CUT_PROJ_MP2_changed) T_CUT_PROJ_MP2_ = 0.05;
             if (!T_CUT_DO_changed) T_CUT_DO_ = 5e-3;
             if (!DIAG_SCALE_changed) T_CUT_PNO_DIAG_SCALE_ = 3e-2;
             if (!T_CUT_PAIRS_changed) T_CUT_PAIRS_ = 1e-6;
@@ -184,12 +175,6 @@ void DLPNOBase::common_init() {
     // Answer: Yes, this is what they do in ORCA
     if (!options_["T_CUT_PNO_MP2"].has_changed()) T_CUT_PNO_MP2_ = T_CUT_PNO_ * 0.01;
     T_CUT_PAIRS_MP2_ = std::min(1.0e-6, T_CUT_PAIRS_ * 0.1);
-
-    // Turn off projection criterion if not specified
-    if (!pno_proj_select_) {
-        T_CUT_PROJ_MP2_ = 0.0;
-        T_CUT_PROJ_ = 0.0;
-    }
 
     name_ = "DLPNO";
     module_ = "dlpno";

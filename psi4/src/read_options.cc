@@ -2562,14 +2562,8 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_double("T_CUT_TRACE", 0.999);
         /*- Pair energy tolerance for removing PNOs !expert -*/
         options.add_double("T_CUT_ENERGY", 0.997);
-        /*- Projection error tolerance for removing PNOs !expert -*/
-        options.add_double("T_CUT_PROJ", 0.07);
-        /*- Perform "dispersion correction" for neglected weak pairs? !expert -*/
-        options.add_bool("DISPERSION_CORRECTION", false);
-        /*- Do add back linear T1 and T2 contributions for weak pair amplitudes? !expert -*/
-        options.add_bool("WEAK_PAIR_RESIDUAL", true);
-        /*- Add the "projection error" criterion when selectring PNOs !expert -*/
-        options.add_bool("PNO_PROJECTION_SELECTION", false);
+        /*- Which algorithm to use when computing weak pair amplitudes? !expert -*/
+        options.add_str("WEAK_PAIR_ALGORITHM", "CEPA0", "MP2 TWO_VIRT CEPA0 CCD");
         /*- Use low memory PNO overlap algorithm? !expert -*/
         options.add_bool("LOW_MEMORY_OVERLAP", false);
         /*- AO ERI Schwarz Screening tolerance for building DF ints in DLPNO !expert -*/
@@ -2584,8 +2578,6 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_double("T_CUT_TRACE_MP2", 0.9999);
         /*- Pair energy tolerance for removing PNOs (for MP2 prescreening) !expert -*/
         options.add_double("T_CUT_ENERGY_MP2", 0.999);
-        /*- Projection error tolerance for removing PNOs (for MP2 prescreening) !expert -*/
-        options.add_double("T_CUT_PROJ_MP2", 0.05);
         /*- How much to scale T_CUT_PNO by for diagonal PNOs !expert */
         options.add_double("T_CUT_PNO_DIAG_SCALE", 3e-2);
         /*- DOI threshold for including PAO (u) in domain of LMO (i) !expert -*/
@@ -2616,6 +2608,8 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_double("F_CUT", 1e-5);
         /*- Occupation number threshold for removing TNOs !expert -*/
         options.add_double("T_CUT_TNO", 1e-9);
+        /*- Maximum number of weak pairs in (ij, jk, ik) to consider when forming triplet ijk !expert -*/
+        options.add_int("TRIPLES_MAX_WEAK_PAIRS", 2);
         /*- T_CUT_TNO scaling for strong triplets in the iterative (T) algorithm !expert -*/
         options.add_double("T_CUT_TNO_STRONG_SCALE", 10.0);
         /*- T_CUT_TNO scaling for weak triplets in the iterative (T) algorithm !expert -*/

@@ -82,6 +82,7 @@ void DLPNOCCSD_T::print_header() {
     outfile->Printf("    T_CUT_TNO_PRE (T0)         = %6.3e \n", options_.get_double("T_CUT_TNO_PRE"));
     outfile->Printf("    T_CUT_DO_TRIPLES_PRE (T0)  = %6.3e \n", options_.get_double("T_CUT_DO_TRIPLES_PRE"));
     outfile->Printf("    T_CUT_MKN_TRIPLES_PRE (T0) = %6.3e \n", options_.get_double("T_CUT_MKN_TRIPLES_PRE"));
+    outfile->Printf("    TRIPLES_MAX_WEAK_PAIRS     = %6d   \n", options_.get_int("TRIPLES_MAX_WEAK_PAIRS"));
     if (!t0_only) {
         outfile->Printf("    T_CUT_TNO_STRONG (T)       = %6.3e \n", t_cut_tno * t_cut_tno_strong_scale);
         outfile->Printf("    T_CUT_TNO_WEAK (T)         = %6.3e \n", t_cut_tno * t_cut_tno_weak_scale);
@@ -124,6 +125,8 @@ void DLPNOCCSD_T::triples_sparsity(bool prescreening) {
     int n_lmo_pairs = ij_to_i_j_.size();
     int npao = C_pao_->colspi(0);
 
+    int MAX_WEAK_PAIRS = options_.get_int("TRIPLES_MAX_WEAK_PAIRS");
+
     if (prescreening) {
         int ijk = 0;
         // Every pair contains at least two strong pairs
@@ -141,7 +144,7 @@ void DLPNOCCSD_T::triples_sparsity(bool prescreening) {
                 if (ik_weak != -1) weak_pair_count += 1;
                 if (kj_weak != -1) weak_pair_count += 1;
 
-                if (weak_pair_count > 2) continue;
+                if (weak_pair_count > MAX_WEAK_PAIRS) continue;
 
                 ijk_to_i_j_k_.push_back(std::make_tuple(i, j, k));
                 i_j_k_to_ijk_[i * naocc * naocc + j * naocc + k] = ijk;
@@ -470,7 +473,7 @@ void DLPNOCCSD_T::tno_transform(double t_cut_tno) {
 }
 
 void DLPNOCCSD_T::estimate_memory() {
-    outfile->Printf("\n  ==> DLPNO-(T) Memory Estimate <== \n\n");
+    outfile->Printf("\n  ==> DLPNO-(T) Memory Requirements <== \n\n");
 
     int n_lmo_triplets = ijk_to_i_j_k_.size();
 
@@ -479,6 +482,10 @@ void DLPNOCCSD_T::estimate_memory() {
     for (int ijk = 0; ijk < n_lmo_triplets; ++ijk) {
         tno_total_memory += n_tno_[ijk] * n_tno_[ijk] * n_tno_[ijk];
     }
+
+    write_amplitudes_ = options_.get_bool("WRITE_TRIPLES");
+    if (write_amplitudes_) tno_total_memory = 0;
+
     size_t total_memory = qij_memory_ + qia_memory_ + qab_memory_ + 3 * tno_total_memory;
 
     outfile->Printf("    (q | i j) integrals    : %.3f [GiB]\n", qij_memory_ * pow(2.0, -30) * sizeof(double));
@@ -490,10 +497,40 @@ void DLPNOCCSD_T::estimate_memory() {
     outfile->Printf("    Total Memory Given     : %.3f [GiB]\n", memory_ * pow(2.0, -30));
     outfile->Printf("    Total Memory Required  : %.3f [GiB]\n\n", total_memory * pow(2.0, -30) * sizeof(double));
 
-    write_amplitudes_ = options_.get_bool("WRITE_TRIPLES");
+    // Memory checks!!!
+    bool memory_changed = false;
+
+    if (total_memory * sizeof(double) > 0.9 * memory_) {
+        outfile->Printf("  Total Required Memory is more than 90%% of Available Memory!\n");
+        outfile->Printf("    Attempting to switch to disk IO for triples-like quantities...\n");
+
+        total_memory -= 3 * tno_total_memory;
+        write_amplitudes_ = true;
+        memory_changed = true;
+        tno_total_memory = 0;
+        outfile->Printf("    Required Memory Reduced to %.3f [GiB]\n\n", total_memory * pow(2.0, -30) * sizeof(double));
+    }
+
+    if (total_memory * sizeof(double) > 0.9 * memory_) {
+        outfile->Printf("  Total Required Memory is (still) more than 90%% of Available Memory!\n");
+        throw PSIEXCEPTION("   Too little memory given for DLPNO-(T) Algorithm!");
+    }
+
+    if (memory_changed) {
+        outfile->Printf("\n  ==> (Updated) DLPNO-(T) Memory Requirements <== \n\n");
+        outfile->Printf("    (q | i j) integrals    : %.3f [GiB]\n", qij_memory_ * pow(2.0, -30) * sizeof(double));
+        outfile->Printf("    (q | i a) integrals    : %.3f [GiB]\n", qia_memory_ * pow(2.0, -30) * sizeof(double));
+        outfile->Printf("    (q | a b) integrals    : %.3f [GiB]\n", qab_memory_ * pow(2.0, -30) * sizeof(double));
+        outfile->Printf("    W_{ijk}^{abc}          : %.3f [GiB]\n", tno_total_memory * pow(2.0, -30) * sizeof(double));
+        outfile->Printf("    V_{ijk}^{abc}          : %.3f [GiB]\n", tno_total_memory * pow(2.0, -30) * sizeof(double));
+        outfile->Printf("    T_{ijk}^{abc}          : %.3f [GiB]\n", tno_total_memory * pow(2.0, -30) * sizeof(double));
+        outfile->Printf("    Total Memory Given     : %.3f [GiB]\n", memory_ * pow(2.0, -30));
+        outfile->Printf("    Total Memory Required  : %.3f [GiB]\n\n", total_memory * pow(2.0, -30) * sizeof(double));
+    }
 
     if (write_amplitudes_) {
-        outfile->Printf("    Writing all X_{ijk}^{abc} quantities to disk...\n\n");
+        outfile->Printf("    Writing all X_{ijk}^{abc} quantities to disk...\n");
+        outfile->Printf("    Warning! Disk algorithm for X_{ijk}^{abc} quantities is currently NOT optimized!\n\n");
     } else {
         outfile->Printf("    Storing all X_{ijk}^{abc} quantities in RAM...\n\n");
     }
@@ -520,6 +557,9 @@ double DLPNOCCSD_T::compute_lccsd_t0(bool store_amplitudes) {
 
     e_ijk_.clear();
     e_ijk_.resize(n_lmo_triplets, 0.0);
+
+    std::time_t time_start = std::time(nullptr);
+    std::time_t time_lap = std::time(nullptr);
 
 #pragma omp parallel for schedule(dynamic) reduction(+ : E_T0)
     for (int ijk = 0; ijk < n_lmo_triplets; ++ijk) {
@@ -880,9 +920,23 @@ double DLPNOCCSD_T::compute_lccsd_t0(bool store_amplitudes) {
 #pragma omp critical
             T_ijk->save(psio_, PSIF_DLPNO_TRIPLES, psi::Matrix::Full);
         }
+
+        if (thread == 0) {
+            std::time_t time_curr = std::time(nullptr);
+            int time_elapsed = (int) time_curr - (int) time_lap;
+            if (time_elapsed > 60) {
+                outfile->Printf("  Time Elapsed from last checkpoint %4d (s), Progress %2d %%, Amplitudes for (%6d / %6d) Triplets Computed\n", time_elapsed, 
+                                    (100 * ijk) / n_lmo_triplets, ijk, n_lmo_triplets);
+                time_lap = std::time(nullptr);
+            }
+        }
     }
 
     timer_off("LCCSD(T0)");
+
+    std::time_t time_stop = std::time(nullptr);
+    int time_elapsed = (int) time_stop - (int) time_start;
+    outfile->Printf("    (Relavent) Semicanonical LCCSD(T0) Computation Complete!!! Time Elapsed: %4d seconds\n\n", time_elapsed);
 
     return E_T0;
 }
@@ -1213,7 +1267,6 @@ double DLPNOCCSD_T::compute_energy() {
     double e_dlpno_ccsd = DLPNOCCSD::compute_energy();
 
     // Clear CCSD integrals
-    /*
     K_mnij_.clear();
     K_bar_.clear();
     K_bar_chem_.clear();
@@ -1233,8 +1286,8 @@ double DLPNOCCSD_T::compute_energy() {
     i_Qa_ij_.clear();
     i_Qa_t1_.clear();
     S_pno_ij_kj_.clear();
+    S_pno_ij_nn_.clear();
     S_pno_ij_mn_.clear();
-    */
 
     print_header();
 
@@ -1299,7 +1352,7 @@ double DLPNOCCSD_T::compute_energy() {
     }
 
     double e_scf = reference_wavefunction_->energy();
-    double e_ccsd_t_corr = e_lccsd_t_ + de_weak_ + de_disp_weak_ + de_lmp2_eliminated_ + de_dipole_ + de_pno_total_;
+    double e_ccsd_t_corr = e_lccsd_t_ + de_weak_ + de_lmp2_eliminated_ + de_dipole_ + de_pno_total_;
     double e_ccsd_t_total = e_scf + e_ccsd_t_corr;
 
     set_scalar_variable("CCSD(T) CORRELATION ENERGY", e_ccsd_t_corr);
@@ -1324,8 +1377,8 @@ double DLPNOCCSD_T::compute_energy() {
 }
 
 void DLPNOCCSD_T::print_results() {
-    double e_dlpno_ccsd = e_lccsd_ + de_weak_ + de_lmp2_eliminated_ + de_pno_total_ + de_dipole_ + de_disp_weak_;
-    double e_total = e_lccsd_t_ + de_weak_ + de_lmp2_eliminated_ + de_pno_total_ + de_dipole_ + de_disp_weak_;
+    double e_dlpno_ccsd = e_lccsd_ + de_weak_ + de_lmp2_eliminated_ + de_pno_total_ + de_dipole_;
+    double e_total = e_lccsd_t_ + de_weak_ + de_lmp2_eliminated_ + de_pno_total_ + de_dipole_;
     outfile->Printf("  \n");
     outfile->Printf("  Total DLPNO-CCSD(T) Correlation Energy: %16.12f \n", e_total);
     outfile->Printf("    DLPNO-CCSD Contribution:              %16.12f \n", e_dlpno_ccsd);
@@ -1333,7 +1386,7 @@ void DLPNOCCSD_T::print_results() {
     outfile->Printf("    Screened Triplets Contribution:       %16.12f \n", de_lccsd_t_screened_);
     outfile->Printf("    Andy Jiang... FOR THREEEEEEEEEEE!!!\n\n\n");
     outfile->Printf("  @Total DLPNO-CCSD(T) Energy: %16.12f \n",
-                    variables_["SCF TOTAL ENERGY"] + de_weak_ + de_lmp2_eliminated_ + e_lccsd_t_ + de_pno_total_ + de_dipole_ + de_disp_weak_);
+                    variables_["SCF TOTAL ENERGY"] + de_weak_ + de_lmp2_eliminated_ + e_lccsd_t_ + de_pno_total_ + de_dipole_);
 }
 
 }  // namespace dlpno
