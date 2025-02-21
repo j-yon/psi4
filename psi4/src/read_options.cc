@@ -2636,6 +2636,12 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_str("DOI_PRUNING_SCHEME", "ROBUST", 
                         "ROBUST TREUTLER NONE FLAT P_GAUSSIAN D_GAUSSIAN P_SLATER D_SLATER LOG_GAUSSIAN LOG_SLATER NONE");
 
+        /*- Temporary options for crystals -*/
+        /*- Number of dimer replicas -*/
+        options.add_int("REPLICAS", 1);
+        /*- Minimum monomer separation -*/
+        options.add_double("MIN_SEP", 1.0);
+
     }
     if (name == "PSIMRCC" || options.read_globals()) {
         /*- MODULEDESCRIPTION Performs multireference coupled cluster computations.  This theory
