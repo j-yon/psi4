@@ -1420,23 +1420,58 @@ Tensor<double, 3> DLPNOCCSDT::matmul_3d_einsums(const Tensor<double, 3> &A, cons
     return A_new;
 }
 
-Tensor<double, 3> DLPNOCCSDT::triples_permuter_einsums(const Tensor<double, 3> &X, int i, int j, int k) {
+Tensor<double, 3> DLPNOCCSDT::triples_permuter_einsums(const Tensor<double, 3> &X, int i, int j, int k, bool reverse) {
     /*- Generates equivalent amplitude T_jik, T_kji, ..., etc. from T_ijk (restricted by index i <= j <= k) -*/
+    /*- Returns a permuted order based on the operations it takes to get i <= j <= k (forward or reverse) -*/
+    // Jiang 2025 Eq. 81-86, reverse Eq. 91-96
     Tensor<double, 3> Xperm = X;
 
-    if (i <= k && k <= j && i <= j) {
-        permute(Indices{index::a, index::b, index::c}, &Xperm, Indices{index::a, index::c, index::b}, X);
-    } else if (j <= i && i <= k && j <= k) {
-        permute(Indices{index::a, index::b, index::c}, &Xperm, Indices{index::b, index::a, index::c}, X);
-    } else if (j <= k && k <= i && j <= i) {
-        permute(Indices{index::a, index::b, index::c}, &Xperm, Indices{index::b, index::c, index::a}, X);
-    } else if (k <= i && i <= j && k <= j) {
-        permute(Indices{index::a, index::b, index::c}, &Xperm, Indices{index::c, index::a, index::b}, X);
-    } else if (k <= j && j <= i && k <= i) {
-        permute(Indices{index::a, index::b, index::c}, &Xperm, Indices{index::c, index::b, index::a}, X);
+    if (!reverse) {
+        if (i <= k && k <= j && i <= j) {
+            permute(Indices{index::a, index::b, index::c}, &Xperm, Indices{index::a, index::c, index::b}, X);
+        } else if (j <= i && i <= k && j <= k) {
+            permute(Indices{index::a, index::b, index::c}, &Xperm, Indices{index::b, index::a, index::c}, X);
+        } else if (j <= k && k <= i && j <= i) {
+            permute(Indices{index::a, index::b, index::c}, &Xperm, Indices{index::b, index::c, index::a}, X);
+        } else if (k <= i && i <= j && k <= j) {
+            permute(Indices{index::a, index::b, index::c}, &Xperm, Indices{index::c, index::a, index::b}, X);
+        } else if (k <= j && j <= i && k <= i) {
+            permute(Indices{index::a, index::b, index::c}, &Xperm, Indices{index::c, index::b, index::a}, X);
+        }
+    } else {
+        if (i <= k && k <= j && i <= j) {
+            permute(Indices{index::a, index::c, index::b}, &Xperm, Indices{index::a, index::b, index::c}, X);
+        } else if (j <= i && i <= k && j <= k) {
+            permute(Indices{index::b, index::a, index::c}, &Xperm, Indices{index::a, index::b, index::c}, X);
+        } else if (j <= k && k <= i && j <= i) {
+            permute(Indices{index::b, index::c, index::a}, &Xperm, Indices{index::a, index::b, index::c}, X);
+        } else if (k <= i && i <= j && k <= j) {
+            permute(Indices{index::c, index::a, index::b}, &Xperm, Indices{index::a, index::b, index::c}, X);
+        } else if (k <= j && j <= i && k <= i) {
+            permute(Indices{index::c, index::b, index::a}, &Xperm, Indices{index::a, index::b, index::c}, X);
+        }
     }
 
     return Xperm;
+}
+
+inline int DLPNOCCSDT::triples_permutation_idx(int i, int j, int k) {
+
+    int idx = 0;
+    
+    if (i <= k && k <= j && i <= j) {
+        idx = 1;
+    } else if (j <= i && i <= k && j <= k) {
+        idx = 2;
+    } else if (j <= k && k <= i && j <= i) {
+        idx = 3;
+    } else if (k <= i && i <= j && k <= j) {
+        idx = 4;
+    } else if (k <= j && j <= i && k <= i) {
+        idx = 5;
+    }
+
+    return idx;
 }
 
 void DLPNOCCSDT::print_header() {

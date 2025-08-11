@@ -606,7 +606,9 @@ class DLPNOCCSDT : public DLPNOCCSD_T {
     /// Helper function for transforming amplitudes from one TNO space to another
     Tensor<double, 3> matmul_3d_einsums(const Tensor<double, 3> &A, const SharedMatrix &X, int dim_old, int dim_new);
     /// Helper function for managing permutational symmetry in triples amplitudes
-    Tensor<double, 3> triples_permuter_einsums(const Tensor<double, 3> &X, int i, int j, int k);
+    Tensor<double, 3> triples_permuter_einsums(const Tensor<double, 3> &X, int i, int j, int k, bool reverse=false);
+    /// Returns a permutation index for the order of i, j, k (e.g. (i <= j <= k) = 0; (i <= k <= j) = 1, ..., (k <= j <= i) = 5)
+    inline int triples_permutation_idx(int i, int j, int k);
 
     /// computes singles residuals in LCCSDT equations
     void compute_R_ia_triples(std::vector<SharedMatrix>& R_ia, std::vector<std::vector<SharedMatrix>>& R_ia_buffer);
@@ -702,6 +704,48 @@ class DLPNOCCSDT_Q : public DLPNOCCSDT {
     ~DLPNOCCSDT_Q() override;
 
     double compute_energy() override;
+};
+
+class DLPNOCCSDTQ : public DLPNOCCSDT_Q {
+   protected:
+    // DF domain integrals
+    std::vector<std::array<Tensor<double, 3>, 4>> q_io_list_; ///< (Q_{ijkl} | [i, j, k, l] m_{ijkl})
+    std::vector<std::array<Tensor<double, 2>, 4>> q_iv_list_; ///< (Q_{ijkl} | [i, j, k, l] a_{ijkl})
+    std::vector<Tensor<double, 3>> q_ov_ijkl_; ///< (Q_{ijkl} | m_{ijkl} a_{ijkl})
+    std::vector<Tensor<double, 3>> q_vv_ijkl_; ///< (Q_{ijkl} | a_{ijkl} b_{ijkl})
+
+    /// Encapsulates the reading in of (Q_{ijkl} | m_{ijkl} a_{ijkl})
+    inline Tensor<double, 3> QIA_QNO(const int ijkl);
+    /// Encapsulates the reading in of (Q_{ijkl} | a_{ijkl} b_{ijkl})
+    inline Tensor<double, 3> QAB_QNO(const int ijkl);
+
+    // Write expensive integrals (Q_{ijkl} | m_{ijkl} a_{ijkl}) and (Q_{ijkl} | a_{ijkl} b_{ijkl}) to disk (true by default)!
+    bool disk_ints_quads_;
+    // How much of the original quadruples amplitude to keep
+    double damping_ratio_;
+
+    // Singles Amplitudes projected onto QNO space of ijkl
+    std::vector<Tensor<double, 2>> T_n_ijkl_;
+
+    /// computes doubles residual in LCCSDTQ equations
+    void compute_R_ijab_quads(std::vector<SharedMatrix>& R_iajb, std::vector<SharedMatrix>& Rn_iajb, std::vector<std::vector<SharedMatrix>>& R_iajb_buffer);
+    /// computes triples residual in LCCSDTQ equations
+    void compute_R_ijkabc_quads(std::vector<SharedMatrix>& R_iajbkc);
+    /// computes quadruples residual equations in LCCSDTQ equations
+    void compute_R_ijklabcd(std::vector<SharedMatrix>& R_ijklabcd);
+
+    void print_header();
+    void estimate_memory();
+    void compute_integrals();
+    void compute_qno_overlaps();
+    void lccsdtq_iterations();
+    void print_results();
+
+    public:
+     DLPNOCCSDTQ(SharedWavefunction ref_wfn, Options& options);
+     ~DLPNOCCSDTQ() override;
+
+     double compute_energy() override;
 };
 
 }
