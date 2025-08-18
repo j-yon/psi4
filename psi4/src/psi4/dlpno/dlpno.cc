@@ -74,11 +74,12 @@ void DLPNO::common_init() {
     T_CUT_TRACE_MP2_ = options_.get_double("T_CUT_TRACE_MP2");
     T_CUT_ENERGY_MP2_ = options_.get_double("T_CUT_ENERGY_MP2");
     T_CUT_PNO_DIAG_SCALE_ = options_.get_double("T_CUT_PNO_DIAG_SCALE");
-    
+
     // LMO and Auxiliary space truncation parameters
     T_CUT_DO_ = options_.get_double("T_CUT_DO");
     T_CUT_MKN_ = options_.get_double("T_CUT_MKN");
     T_CUT_PAIRS_ = options_.get_double("T_CUT_PAIRS");
+    T_CUT_PAIRS_MP2_ = options_.get_double("T_CUT_PAIRS_MP2");
     T_CUT_PRE_ = options_.get_double("T_CUT_PRE");
 
     // TNO Truncation cutoff for (T)
@@ -105,6 +106,7 @@ void DLPNO::common_init() {
     const bool T_CUT_DO_changed = options_["T_CUT_DO"].has_changed();
     const bool T_CUT_MKN_changed = options_["T_CUT_MKN"].has_changed();
     const bool T_CUT_PAIRS_changed = options_["T_CUT_PAIRS"].has_changed();
+    const bool T_CUT_PAIRS_MP2_changed = options_["T_CUT_PAIRS_MP2"].has_changed();
     const bool T_CUT_PRE_changed = options_["T_CUT_PRE"].has_changed();
 
     // if not, values are determined by the user-friendly "PNO_CONVERGENCE"
@@ -126,7 +128,7 @@ void DLPNO::common_init() {
             if (!T_CUT_DO_changed) T_CUT_DO_ = 5e-3;
             if (!T_CUT_MKN_changed) T_CUT_MKN_ = 1e-4;
         }
-    } else { // Coupled-cluster defaults
+    } else {  // Coupled-cluster defaults
         if (options_.get_str("PNO_CONVERGENCE") == "LOOSE") {
             if (!T_CUT_PNO_changed) T_CUT_PNO_ = 1e-6;
             if (!T_CUT_TRACE_changed) T_CUT_TRACE_ = 0.9;
@@ -136,6 +138,7 @@ void DLPNO::common_init() {
             if (!T_CUT_DO_changed) T_CUT_DO_ = 2e-2;
             if (!T_DIAG_SCALE_changed) T_CUT_PNO_DIAG_SCALE_ = 3e-2;
             if (!T_CUT_PAIRS_changed) T_CUT_PAIRS_ = 1e-3;
+            if (!T_CUT_PAIRS_MP2_changed) T_CUT_PAIRS_MP2_ = 1e-5;
             if (!T_CUT_MKN_changed) T_CUT_MKN_ = 1e-3;
         } else if (options_.get_str("PNO_CONVERGENCE") == "NORMAL") {
             if (!T_CUT_PNO_changed) T_CUT_PNO_ = 3.33e-7;
@@ -146,6 +149,7 @@ void DLPNO::common_init() {
             if (!T_CUT_DO_changed) T_CUT_DO_ = 1e-2;
             if (!T_DIAG_SCALE_changed) T_CUT_PNO_DIAG_SCALE_ = 3e-2;
             if (!T_CUT_PAIRS_changed) T_CUT_PAIRS_ = 1e-4;
+            if (!T_CUT_PAIRS_MP2_changed) T_CUT_PAIRS_MP2_ = 1e-6;
             if (!T_CUT_MKN_changed) T_CUT_MKN_ = 1e-3;
         } else if (options_.get_str("PNO_CONVERGENCE") == "TIGHT") {
             if (!T_CUT_PNO_changed) T_CUT_PNO_ = 1e-7;
@@ -156,6 +160,7 @@ void DLPNO::common_init() {
             if (!T_CUT_DO_changed) T_CUT_DO_ = 5e-3;
             if (!T_DIAG_SCALE_changed) T_CUT_PNO_DIAG_SCALE_ = 3e-2;
             if (!T_CUT_PAIRS_changed) T_CUT_PAIRS_ = 1e-5;
+            if (!T_CUT_PAIRS_MP2_changed) T_CUT_PAIRS_MP2_ = 1e-6;
             if (!T_CUT_MKN_changed) T_CUT_MKN_ = 1e-3;
         } else if (options_.get_str("PNO_CONVERGENCE") == "VERY_TIGHT") {
             if (!T_CUT_PNO_changed) T_CUT_PNO_ = 1e-8;
@@ -166,6 +171,7 @@ void DLPNO::common_init() {
             if (!T_CUT_DO_changed) T_CUT_DO_ = 5e-3;
             if (!T_DIAG_SCALE_changed) T_CUT_PNO_DIAG_SCALE_ = 3e-2;
             if (!T_CUT_PAIRS_changed) T_CUT_PAIRS_ = 1e-6;
+            if (!T_CUT_PAIRS_MP2_changed) T_CUT_PAIRS_MP2_ = 1e-7;
             if (!T_CUT_MKN_changed) T_CUT_MKN_ = 1e-4;
         }
         if (!T_CUT_PRE_changed) T_CUT_PRE_ = std::min(T_CUT_PRE_, 0.01 * T_CUT_PAIRS_);
@@ -376,25 +382,26 @@ void DLPNO::compute_overlap_ints() {
     // Create a grid for the DOI integrals
     std::map<std::string, std::string> grid_init_str_options = {
         {"DFT_PRUNING_SCHEME", options_.get_str("DOI_PRUNING_SCHEME")},
-        {"DFT_RADIAL_SCHEME",  "TREUTLER"},
+        {"DFT_RADIAL_SCHEME", "TREUTLER"},
         {"DFT_NUCLEAR_SCHEME", "TREUTLER"},
-        {"DFT_GRID_NAME",      ""},
-        {"DFT_BLOCK_SCHEME",   "OCTREE"},
+        {"DFT_GRID_NAME", ""},
+        {"DFT_BLOCK_SCHEME", "OCTREE"},
     };
     std::map<std::string, int> grid_init_int_options = {
-        {"DFT_SPHERICAL_POINTS", options_.get_int("DOI_SPHERICAL_POINTS")}, 
-        {"DFT_RADIAL_POINTS",    options_.get_int("DOI_RADIAL_POINTS")},
+        {"DFT_SPHERICAL_POINTS", options_.get_int("DOI_SPHERICAL_POINTS")},
+        {"DFT_RADIAL_POINTS", options_.get_int("DOI_RADIAL_POINTS")},
         {"DFT_BLOCK_MIN_POINTS", 100},
         {"DFT_BLOCK_MAX_POINTS", 256},
     };
     std::map<std::string, double> grid_init_float_options = {
-        {"DFT_BASIS_TOLERANCE",   options_.get_double("DOI_BASIS_TOLERANCE")}, 
-        {"DFT_BS_RADIUS_ALPHA",   1.0},
-        {"DFT_PRUNING_ALPHA",     1.0},
-        {"DFT_BLOCK_MAX_RADIUS",  3.0},
+        {"DFT_BASIS_TOLERANCE", options_.get_double("DOI_BASIS_TOLERANCE")},
+        {"DFT_BS_RADIUS_ALPHA", 1.0},
+        {"DFT_PRUNING_ALPHA", 1.0},
+        {"DFT_BLOCK_MAX_RADIUS", 3.0},
         {"DFT_WEIGHTS_TOLERANCE", 1e-15},
     };
-    auto grid = DFTGrid(molecule_, basisset_, grid_init_int_options, grid_init_str_options, grid_init_float_options, options_);
+    auto grid =
+        DFTGrid(molecule_, basisset_, grid_init_int_options, grid_init_str_options, grid_init_float_options, options_);
     timer_off("Construct Grid");
 
     size_t nthread = 1;
@@ -593,7 +600,6 @@ void DLPNO::compute_dipole_ints() {
     }
 }
 
-
 void DLPNO::prep_sparsity(bool initial, bool final) {
     int natom = molecule_->natom();
     int nbf = basisset_->nbf();
@@ -663,7 +669,7 @@ void DLPNO::prep_sparsity(bool initial, bool final) {
                 }
             }
         }
-    } // end if
+    }  // end if
 
     // map from LMO to local virtual domain (PAOs)
     // locality determined via differential overlap integrals
@@ -717,7 +723,7 @@ void DLPNO::prep_sparsity(bool initial, bool final) {
             std::tie(i, j) = ij_to_i_j_[ij];
             ij_to_ji_.push_back(i_j_to_ij_[j][i]);
         }
-    } // end if
+    }  // end if
 
     print_aux_domains();
     print_pao_domains();
@@ -769,7 +775,7 @@ void DLPNO::prep_sparsity(bool initial, bool final) {
                 m_ij++;
             }
         }
-    } // end ij
+    }  // end ij
 
     print_aux_pair_domains();
     print_lmo_pair_domains();
@@ -803,7 +809,7 @@ void DLPNO::prep_sparsity(bool initial, bool final) {
             }
             pao_to_atoms_[u] = block_list(pao_to_bfs_[u], bf_to_atom);
         }
-    } // end if
+    }  // end if
 
     if (!final) {
         // determine maps to extended LMO domains, which are the union of an LMO's domain with domains
@@ -860,7 +866,7 @@ void DLPNO::prep_sparsity(bool initial, bool final) {
                 riatom_to_atoms2_dense_[a_ri][a_bf] = true;
             }
         }
-    } // end if
+    }  // end if
 }
 
 void DLPNO::compute_qij() {
@@ -934,7 +940,8 @@ void DLPNO::compute_qij() {
                 if (N < M && MN_symmetry) continue;
 
                 // AO ERI Screening
-                if (J_metric_shell_diag_[Q] * eris[thread]->shell_pair_value(M, N) < ints_tolerance * ints_tolerance) continue;
+                if (J_metric_shell_diag_[Q] * eris[thread]->shell_pair_value(M, N) < ints_tolerance * ints_tolerance)
+                    continue;
 
                 eris[thread]->compute_shell(Q, 0, M, N);
                 const double* buffer = eris[thread]->buffer();
@@ -962,16 +969,17 @@ void DLPNO::compute_qij() {
                     }
                 }
 
-            } // N loop
-        } // M loop
+            }  // N loop
+        }  // M loop
 
         auto C_lmo_slice = submatrix_rows_and_cols(*SC_lmo, riatom_to_bfs1_[centerQ], riatom_to_lmos_ext_[centerQ]);
-        auto S_aa = submatrix_rows_and_cols(*reference_wavefunction_->S(), riatom_to_bfs1_[centerQ], riatom_to_bfs1_[centerQ]);
+        auto S_aa =
+            submatrix_rows_and_cols(*reference_wavefunction_->S(), riatom_to_bfs1_[centerQ], riatom_to_bfs1_[centerQ]);
         C_DGESV_wrapper(S_aa, C_lmo_slice);
 
         // (mn|Q) C_mi C_nj ->(ij|Q)
         for (size_t q = 0; q < nq; q++) {
-            qij_[qstart+q] = linalg::triplet(C_lmo_slice, qij_[qstart+q], C_lmo_slice, true, false, false);
+            qij_[qstart + q] = linalg::triplet(C_lmo_slice, qij_[qstart + q], C_lmo_slice, true, false, false);
         }
     }
 
@@ -1052,7 +1060,8 @@ void DLPNO::compute_qia() {
                 if (N < M && MN_symmetry) continue;
 
                 // AO ERI Screening
-                if (J_metric_shell_diag_[Q] * eris[thread]->shell_pair_value(M, N) < ints_tolerance * ints_tolerance) continue;
+                if (J_metric_shell_diag_[Q] * eris[thread]->shell_pair_value(M, N) < ints_tolerance * ints_tolerance)
+                    continue;
 
                 eris[thread]->compute_shell(Q, 0, M, N);
                 const double* buffer = eris[thread]->buffer();
@@ -1077,7 +1086,7 @@ void DLPNO::compute_qia() {
                 }
 
             }  // N loop
-        }      // M loop
+        }  // M loop
 
         auto C_pao_slice = submatrix_rows_and_cols(*C_pao_, riatom_to_bfs2_[centerQ], riatom_to_paos_ext_[centerQ]);
 
@@ -1086,8 +1095,7 @@ void DLPNO::compute_qia() {
         //// Boughton and Pulay 1992 JCC, Equation 3
 
         // Solve for C_lmo_slice such that S[local,local] @ C_lmo_slice ~= S[local,all] @ C_lmo_
-        auto C_lmo_slice =
-            submatrix_rows_and_cols(*SC_lmo, riatom_to_bfs1_[centerQ], riatom_to_lmos_ext_[centerQ]);
+        auto C_lmo_slice = submatrix_rows_and_cols(*SC_lmo, riatom_to_bfs1_[centerQ], riatom_to_lmos_ext_[centerQ]);
         auto S_aa =
             submatrix_rows_and_cols(*reference_wavefunction_->S(), riatom_to_bfs1_[centerQ], riatom_to_bfs1_[centerQ]);
         C_DGESV_wrapper(S_aa, C_lmo_slice);
@@ -1110,7 +1118,6 @@ void DLPNO::compute_qia() {
 
     timer_off("(K|L)");
 }
-
 
 void DLPNO::compute_qab() {
     timer_on("(mn|K)->(ab|K)");
@@ -1142,13 +1149,12 @@ void DLPNO::compute_qab() {
                 int v_idx = riatom_to_paos_ext_dense_[Qatom][v];
                 if (v_idx == -1 || u > v) continue;
 
-                if (fabs(DOI_uv_->get(u,v)) > T_CUT_DO_uv) {
-                    riatom_to_pao_pairs_[Qatom].push_back(std::make_pair(u,v));
+                if (fabs(DOI_uv_->get(u, v)) > T_CUT_DO_uv) {
+                    riatom_to_pao_pairs_[Qatom].push_back(std::make_pair(u, v));
                     riatom_to_pao_pairs_dense_[Qatom][u][v] = uv_idx;
                     riatom_to_pao_pairs_dense_[Qatom][v][u] = uv_idx;
                     ++uv_idx;
                 }
-
             }
         }
     }
@@ -1217,7 +1223,8 @@ void DLPNO::compute_qab() {
                 if (N < M && MN_symmetry) continue;
 
                 // AO ERI Screening
-                if (J_metric_shell_diag_[Q] * eris[thread]->shell_pair_value(M, N) < ints_tolerance * ints_tolerance) continue;
+                if (J_metric_shell_diag_[Q] * eris[thread]->shell_pair_value(M, N) < ints_tolerance * ints_tolerance)
+                    continue;
 
                 eris[thread]->compute_shell(Q, 0, M, N);
                 const double* buffer = eris[thread]->buffer();
@@ -1246,7 +1253,7 @@ void DLPNO::compute_qab() {
                 }
 
             }  // N loop
-        } // M loop
+        }  // M loop
 
         auto C_pao_slice = submatrix_rows_and_cols(*C_pao_, riatom_to_bfs2_[centerQ], riatom_to_paos_ext_[centerQ]);
 
@@ -1256,7 +1263,7 @@ void DLPNO::compute_qab() {
             SharedMatrix qab_temp = std::make_shared<Matrix>(riatom_to_pao_pairs_[centerQ].size(), 1);
 
             for (int uv = 0; uv < riatom_to_pao_pairs_[centerQ].size(); ++uv) {
-                auto &[u, v] = riatom_to_pao_pairs_[centerQ][uv];
+                auto& [u, v] = riatom_to_pao_pairs_[centerQ][uv];
                 int u_idx = riatom_to_paos_ext_dense_[centerQ][u], v_idx = riatom_to_paos_ext_dense_[centerQ][v];
                 qab_temp->set(uv, 0, qab_[qstart + q]->get(u_idx, v_idx));
                 ++qab_doubles;
@@ -1266,7 +1273,8 @@ void DLPNO::compute_qab() {
     }
 
     qab_memory_ = qab_doubles;
-    outfile->Printf("    PAO/PAO Integral Memory After Screening: %.3f [GiB]\n\n", qab_doubles * pow(2.0, -30) * sizeof(double));
+    outfile->Printf("    PAO/PAO Integral Memory After Screening: %.3f [GiB]\n\n",
+                    qab_doubles * pow(2.0, -30) * sizeof(double));
 
     timer_off("(mn|K)->(ab|K)");
 }
@@ -1308,8 +1316,8 @@ void DLPNO::pno_transform() {
     X_pno_.resize(n_lmo_pairs);    // global PAOs -> canonical PNOs
     e_pno_.resize(n_lmo_pairs);    // PNO orbital energies
 
-    n_pno_.resize(n_lmo_pairs);   // number of pnos
-    de_pno_.resize(n_lmo_pairs);  // PNO truncation error
+    n_pno_.resize(n_lmo_pairs);      // number of pnos
+    de_pno_.resize(n_lmo_pairs);     // PNO truncation error
     de_pno_os_.resize(n_lmo_pairs);  // opposite-spin contributions to de_pno_
     de_pno_ss_.resize(n_lmo_pairs);  // same-spin contributions to de_pno_
 
@@ -1340,10 +1348,12 @@ void DLPNO::pno_transform() {
             for (int a_ij = 0; a_ij < npao_ij; a_ij++) {
                 int a = lmopair_to_paos_[ij][a_ij];
                 // riatom_to_lmos_ext_dense_ and riatom_to_paos_ext_dense are guaranteed to not be -1, by construction
-                // since the auxiliary index q is derived from the lmo pair ij, and corresponding PAOs of pair ij are guaranteed
-                // to be in the local, extended domain of the riatom
-                i_qa->set(q_ij, a_ij, qia_[q]->get(riatom_to_lmos_ext_dense_[centerq][i], riatom_to_paos_ext_dense_[centerq][a]));
-                j_qa->set(q_ij, a_ij, qia_[q]->get(riatom_to_lmos_ext_dense_[centerq][j], riatom_to_paos_ext_dense_[centerq][a]));
+                // since the auxiliary index q is derived from the lmo pair ij, and corresponding PAOs of pair ij are
+                // guaranteed to be in the local, extended domain of the riatom
+                i_qa->set(q_ij, a_ij,
+                          qia_[q]->get(riatom_to_lmos_ext_dense_[centerq][i], riatom_to_paos_ext_dense_[centerq][a]));
+                j_qa->set(q_ij, a_ij,
+                          qia_[q]->get(riatom_to_lmos_ext_dense_[centerq][j], riatom_to_paos_ext_dense_[centerq][a]));
             }
         }
 
@@ -1372,8 +1382,9 @@ void DLPNO::pno_transform() {
         auto T_pao_ij = K_pao_ij->clone();
         for (int a = 0; a < npao_can_ij; ++a) {
             for (int b = 0; b < npao_can_ij; ++b) {
-                T_pao_ij->set(a, b, T_pao_ij->get(a, b) /
-                                        (-e_pao_ij->get(b) + -e_pao_ij->get(a) + F_lmo_->get(i, i) + F_lmo_->get(j, j)));
+                T_pao_ij->set(a, b,
+                              T_pao_ij->get(a, b) /
+                                  (-e_pao_ij->get(b) + -e_pao_ij->get(a) + F_lmo_->get(i, i) + F_lmo_->get(j, j)));
             }
         }
 
@@ -1494,14 +1505,14 @@ void DLPNO::pno_transform() {
 
 void DLPNO::print_aux_domains() {
     size_t total_atoms = 0, min_atoms = lmo_to_riatoms_[0].size(), max_atoms = 0;
-    for (const auto &atom_list : lmo_to_riatoms_) {
+    for (const auto& atom_list : lmo_to_riatoms_) {
         total_atoms += atom_list.size();
         min_atoms = std::min(min_atoms, atom_list.size());
         max_atoms = std::max(max_atoms, atom_list.size());
     }
 
     size_t total_bfs = 0, min_bfs = lmo_to_ribfs_[0].size(), max_bfs = 0;
-    for (const auto &bf_list : lmo_to_ribfs_) {
+    for (const auto& bf_list : lmo_to_ribfs_) {
         total_bfs += bf_list.size();
         min_bfs = std::min(min_bfs, bf_list.size());
         max_bfs = std::max(max_bfs, bf_list.size());
@@ -1517,14 +1528,14 @@ void DLPNO::print_aux_domains() {
 
 void DLPNO::print_pao_domains() {
     size_t total_atoms = 0, min_atoms = lmo_to_paoatoms_[0].size(), max_atoms = 0;
-    for (const auto &atom_list : lmo_to_paoatoms_) {
+    for (const auto& atom_list : lmo_to_paoatoms_) {
         total_atoms += atom_list.size();
         min_atoms = std::min(min_atoms, atom_list.size());
         max_atoms = std::max(max_atoms, atom_list.size());
     }
 
     size_t total_paos = 0, min_paos = lmo_to_paos_[0].size(), max_paos = 0;
-    for (const auto &pao_list : lmo_to_paos_) {
+    for (const auto& pao_list : lmo_to_paos_) {
         total_paos += pao_list.size();
         min_paos = std::min(min_paos, pao_list.size());
         max_paos = std::max(max_paos, pao_list.size());
@@ -1652,5 +1663,5 @@ void DLPNO::print_pao_pair_domains() {
 
 double DLPNO::compute_energy() { return 0.0; }
 
-}
-}
+}  // namespace dlpno
+}  // namespace psi

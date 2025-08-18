@@ -2651,6 +2651,8 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
 
         /*- The tolerance to decide between "MP2 Pairs" and "CCSD Pairs" after the initial pair prescreening -*/
         options.add_double("T_CUT_PAIRS", 1e-5);
+        /*- The tolerance to decide between "Semicanonical MP2 Pairs" and "Iterative MP2 Pairs" after the initial pair prescreening -*/
+        options.add_double("T_CUT_PAIRS_MP2", 1e-6);
         /*- How much to scale T_CUT_PNO by for diagonal PNOs !expert */
         options.add_double("T_CUT_PNO_DIAG_SCALE", 3e-2);
         /*- Occupation trace sum threshold for removing PNOs !expert -*/
