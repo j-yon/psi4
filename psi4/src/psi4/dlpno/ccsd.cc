@@ -315,7 +315,7 @@ void DLPNOCCSD::estimate_memory() {
     write_qab_pno_ = options_.get_bool("WRITE_QAB_PNO");
     
 
-    if (algorithm_ == DLPNOMethod::CCSDT || algorithm_ == DLPNOMethod::CCSDT_Q) {
+    if (algorithm_ == DLPNOMethod::CCSDT || algorithm_ == DLPNOMethod::CCSDT_Q || algorithm_ == DLPNOMethod::CCSDTQ) {
         if (!options_["LOW_MEMORY_OVERLAP"].has_changed()) {
             outfile->Printf("  LOW_MEMORY_OVERLAP set to true to conserve memory for post-CCSD(T) computation!\n\n");
             low_memory_overlap_ = true;

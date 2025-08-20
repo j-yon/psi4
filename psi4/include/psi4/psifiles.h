@@ -287,6 +287,8 @@
 #define PSIF_DLPNO_QIA_TNO       314  /*- A PSIO file to store all (AUX | LMO TNO) integrals in a DLPNO computation -*/
 #define PSIF_DLPNO_QAB_TNO       315  /*- A PSIO file to store all (AUX | TNO TNO) integrals in a DLPNO computation -*/
 #define PSIF_DLPNO_S_TNO         316  /*- A PSIO file to store all overlap integrals involving TNOs -*/
+#define PSIF_DLPNO_QIA_QNO       317  /*- A PSIO file to store all (AUX | LMO QNO) integrals in a DLPNO computation -*/
+#define PSIF_DLPNO_QAB_QNO       318  /*- A PSIO file to store all (AUX | QNO QNO) integrals in a DLPNO computation -*/
 
 // following four are not completely managed by PSIO and starting number resettable through CI_FILE_START option
 #define PSIF_CI_HD_FILE          350  /*- DETCI H diagonal -*/

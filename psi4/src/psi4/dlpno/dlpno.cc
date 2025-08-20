@@ -94,6 +94,8 @@ void DLPNO::common_init() {
         algorithm_ = DLPNOMethod::CCSDT;
     } else if (options_.get_str("DLPNO_ALGORITHM") == "CCSDT(Q)") {
         algorithm_ = DLPNOMethod::CCSDT_Q;
+    } else if (options_.get_str("DLPNO_ALGORITHM") == "CCSDTQ") {
+        algorithm_ = DLPNOMethod::CCSDTQ;
     } else {
         throw PSIEXCEPTION("Requested DLPNO algorithm has NOT been implemented yet");
     }
@@ -174,7 +176,7 @@ void DLPNO::common_init() {
         }
 
         // Tighter cutoffs for post-CCSD(T) methods, essentially very tight with T_CUT_PAIRS 1.0e-8
-        if (algorithm_ == DLPNOMethod::CCSDT || algorithm_ == DLPNOMethod::CCSDT_Q) {
+        if (algorithm_ == DLPNOMethod::CCSDT || algorithm_ == DLPNOMethod::CCSDT_Q || algorithm_ == DLPNOMethod::CCSDTQ) {
             if (!T_CUT_PNO_changed) T_CUT_PNO_ = 1e-8;
             if (!T_CUT_TRACE_changed) T_CUT_TRACE_ = 0.999;
             if (!T_CUT_ENERGY_changed) T_CUT_ENERGY_ = 0.997;

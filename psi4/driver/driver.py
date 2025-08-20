@@ -266,6 +266,8 @@ def energy(name, **kwargs):
     | dlpno-ccsdt             | local CCSDT (full triples) with pair natural orbital domains (DLPNO) :ref:`[manual] <sec:dlpnoccsdt_q>`                               |
     +-----------------------------------------------------------------------------------------------------------------------------------------------------------------+
     | dlpno-ccsdt(q)          | local CCSDT(Q) with pair natural orbital domains (DLPNO) :ref:`[manual] <sec:dlpnoccsdt_q>`                                           |
+    +-----------------------------------------------------------------------------------------------------------------------------------------------------------------+
+    | dlpno-ccsdtq            | local CCSDTQ (full quadruples) with pair natural orbital domains :ref:`[manual] <sec:dlpnoccsdtq>`                                    |
     +-------------------------+---------------------------------------------------------------------------------------------------------------------------------------+
     | cc3                     | approximate CC singles, doubles, and triples (CC3) :ref:`[manual] <sec:cc>` :ref:`[details] <dd_cc3>`                                 |
     +-------------------------+---------------------------------------------------------------------------------------------------------------------------------------+

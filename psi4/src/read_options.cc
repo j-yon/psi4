@@ -2614,7 +2614,7 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         /*- SUBSECTION Expert Options -*/
 
         /*- Which DLPNO Algorithm to run (not set by user) !expert -*/
-        options.add_str("DLPNO_ALGORITHM", "CCSD(T)", "MP2 CCSD CCSD(T) CCSDT CCSDT(Q)");
+        options.add_str("DLPNO_ALGORITHM", "CCSD(T)", "MP2 CCSD CCSD(T) CCSDT CCSDT(Q) CCSDTQ");
         /*- Use T0 approximation for DLPNO-CCSD(T)? (not set explicitly), 
         triggered by indicating 'dlpno-ccsd(t0)' rather than 'dlpno-ccsd(t)' !expert -*/
         options.add_bool("T0_APPROXIMATION", false);
@@ -2737,6 +2737,8 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
 
         /*- Occupation number threshold for removing QNOs with full quadruples !expert -*/
         options.add_double("T_CUT_QNO_FULL", 3.33e-6);
+        /*- Damping factor on quadruples amplitude update in CCSDTQ iterations !expert -*/
+        options.add_double("QUADRUPLES_DAMPING_RATIO", 0.2);
 
         /*- SUBSECTION Memory Control Options -*/
 
@@ -2752,6 +2754,8 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_bool("DLPNO_CCSDT_DISK_OVERLAP", true);
         /*- Write expensive DLPNO-CCSDT TNO integrals to disk? !expert -*/
         options.add_bool("DLPNO_CCSDT_DISK_INTS", true);
+        /*- Write expensive DLPNO-CCSDTQ QNO integrals to disk? !expert -*/
+        options.add_double("DLPNO_CCSDTQ_DISK_INTS", true);
 
         /*- SUBSECTION DOI Grid Options -*/
 

@@ -1455,7 +1455,7 @@ Tensor<double, 3> DLPNOCCSDT::triples_permuter_einsums(const Tensor<double, 3> &
     return Xperm;
 }
 
-inline int DLPNOCCSDT::triples_permutation_idx(int i, int j, int k) {
+int DLPNOCCSDT::triples_permutation_idx(int i, int j, int k) {
 
     int idx = 0;
     
@@ -1855,7 +1855,7 @@ void DLPNOCCSDT::compute_integrals() {
     } // end ijk
 }
 
-inline Tensor<double, 3> DLPNOCCSDT::QIA_TNO(const int ijk) {
+Tensor<double, 3> DLPNOCCSDT::QIA_TNO(const int ijk) {
     if (disk_ints_) {
         int naux_ijk = lmotriplet_to_ribfs_[ijk].size();
         int nlmo_ijk = lmotriplet_to_lmos_[ijk].size();
@@ -1875,7 +1875,7 @@ inline Tensor<double, 3> DLPNOCCSDT::QIA_TNO(const int ijk) {
     return q_ov_[ijk];
 }
 
-inline Tensor<double, 3> DLPNOCCSDT::QAB_TNO(const int ijk) {
+Tensor<double, 3> DLPNOCCSDT::QAB_TNO(const int ijk) {
     if (disk_ints_) {
         int naux_ijk = lmotriplet_to_ribfs_[ijk].size();
         int ntno_ijk = n_tno_[ijk];
@@ -3726,28 +3726,41 @@ double DLPNOCCSDT::compute_energy() {
     timer_off("DLPNO-CCSDT : LCCSDT iterations");
 
     if (write_qia_pno_) {
-        // Integrals deleted for now
-        // TODO: keep for DLPNO-CCSDTQ when implemented
-        psio_->close(PSIF_DLPNO_QIA_PNO, 0);
+        // Integrals deleted if CCSDT is the last iterative CC method used in sequence
+        if (algorithm_ != DLPNOMethod::CCSDTQ) {
+            psio_->close(PSIF_DLPNO_QIA_PNO, 0);
+        } else {
+            psio_->close(PSIF_DLPNO_QIA_PNO, 1);
+        }
     }
 
     if (write_qab_pno_) {
-        // Integrals deleted for now
-        // TODO: keep for DLPNO-CCSDTQ when implemented
-        psio_->close(PSIF_DLPNO_QAB_PNO, 0);
+        // Integrals deleted if CCSDT is the last iterative CC method used in sequence
+        if (algorithm_ != DLPNOMethod::CCSDTQ) {
+            psio_->close(PSIF_DLPNO_QAB_PNO, 0);
+        } else {
+            psio_->close(PSIF_DLPNO_QAB_PNO, 1);
+        }
     }
 
     if (disk_overlap_) {
-        // Integrals deleted for now
-        // TODO: keep for DLPNO-CCSDTQ when implemented
-        psio_->close(PSIF_DLPNO_S_TNO, 0);
+        // Integrals deleted if CCSDT is the last iterative CC method used in sequence
+        if (algorithm_ != DLPNOMethod::CCSDTQ) {
+            psio_->close(PSIF_DLPNO_S_TNO, 0);
+        } else {
+            psio_->close(PSIF_DLPNO_S_TNO, 1);
+        }
     }
 
     if (disk_ints_) {
-        // Integrals deleted for now
-        // TODO: keep for DLPNO-CCSDTQ when implemented
-        psio_->close(PSIF_DLPNO_QIA_TNO, 0);
-        psio_->close(PSIF_DLPNO_QAB_TNO, 0);
+        // Integrals deleted if CCSDT is the last iterative CC method used in sequence
+        if (algorithm_ != DLPNOMethod::CCSDTQ) {
+            psio_->close(PSIF_DLPNO_QIA_TNO, 0);
+            psio_->close(PSIF_DLPNO_QAB_TNO, 0);
+        } else {
+            psio_->close(PSIF_DLPNO_QIA_TNO, 1);
+            psio_->close(PSIF_DLPNO_QAB_TNO, 1);
+        }
     }
 
     einsums::profile::finalize();

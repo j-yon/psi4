@@ -171,6 +171,7 @@ procedures = {
         'dlpno-ccsdt'   : proc.run_dlpnoccsdt,
         'dlpno-ccsdt(q0)': proc.run_dlpnoccsdt_q,
         'dlpno-ccsdt(q)': proc.run_dlpnoccsdt_q,
+        'dlpno-ccsdtq'  : proc.run_dlpnoccsdtq,
         'efp'           : proc.run_efp,
         'dmrg-scf'      : proc.run_dmrgscf,
         'dmrg-caspt2'   : proc.run_dmrgscf,
