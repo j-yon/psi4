@@ -386,7 +386,7 @@ class PSI_API DLPNOCCSD : public DLPNO {
     /// Returns the appropriate overlap matrix given two LMO pairs
     inline SharedMatrix S_PNO(const int ij, const int mn);
     /// Encapsulates the reading in of (Q_{ij}|m_{ij} a_{ij}) integrals (regardless of core or disk)
-    inline std::vector<SharedMatrix> QIA_PNO(const int ij);
+    std::vector<SharedMatrix> QIA_PNO(const int ij);
     /// Encapsulates the reading in of (Q_{ij}|a_{ij} b_{ij}) integrals (regardless of core or disk)
     inline std::vector<SharedMatrix> QAB_PNO(const int ij);
 
@@ -730,10 +730,15 @@ class DLPNOCCSDTQ : public DLPNOCCSDT_Q {
 
     // Singles Amplitudes projected onto QNO space of ijkl
     std::vector<Tensor<double, 2>> T_n_ijkl_;
+    // Quadruples Amplitudes of ijkl projected onto PNO space of last two pairs
+    std::vector<Tensor<double, 2>> T_ijkl_kl_;
 
     // Helper functions to form quadruples intermediates
     inline Tensor<double, 4> alpha_ijkl_helper(const Tensor<double, 4>& T_ijkl);
     inline Tensor<double, 4> beta_ijkl_helper(const Tensor<double, 4>& alpha_ijkl);
+
+    /// compute the expensive term in M_{ejk}^{abc}
+    std::vector<Tensor<double, 4>> alpha_M_contribution();
 
     /// computes doubles residual in LCCSDTQ equations
     void compute_R_iajb_quads(std::vector<SharedMatrix>& R_iajb, std::vector<SharedMatrix>& Rn_iajb, std::vector<std::vector<SharedMatrix>>& R_iajb_buffer);

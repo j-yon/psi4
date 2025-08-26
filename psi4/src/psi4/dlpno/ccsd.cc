@@ -107,7 +107,7 @@ inline SharedMatrix DLPNOCCSD::S_PNO(const int ij, const int mn) {
     }
 }
 
-inline std::vector<SharedMatrix> DLPNOCCSD::QIA_PNO(const int ij) {
+std::vector<SharedMatrix> DLPNOCCSD::QIA_PNO(const int ij) {
     auto &[i, j] = ij_to_i_j_[ij];
     int pair_idx = (i > j) ? ij_to_ji_[ij] : ij;
 

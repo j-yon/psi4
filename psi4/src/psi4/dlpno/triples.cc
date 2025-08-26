@@ -2476,9 +2476,12 @@ void DLPNOCCSDT::compute_R_iajbkc_cc3(std::vector<SharedMatrix>& R_iajbkc) {
         auto j_ijk = std::find(lmotriplet_to_lmos_[ijk].begin(), lmotriplet_to_lmos_[ijk].end(), j) - lmotriplet_to_lmos_[ijk].begin();
         auto k_ijk = std::find(lmotriplet_to_lmos_[ijk].begin(), lmotriplet_to_lmos_[ijk].end(), k) - lmotriplet_to_lmos_[ijk].begin();
 
-        Tensor<double, 1> T_i = (T_n_ijk_[ijk])(i_ijk, All);
-        Tensor<double, 1> T_j = (T_n_ijk_[ijk])(j_ijk, All);
-        Tensor<double, 1> T_k = (T_n_ijk_[ijk])(k_ijk, All);
+        Tensor<double, 1> T_i("T_i", ntno_ijk);
+        ::memcpy(T_i.data(), &(T_n_ijk_[ijk])(i_ijk, 0), ntno_ijk * sizeof(double));
+        Tensor<double, 1> T_j("T_j", ntno_ijk);
+        ::memcpy(T_j.data(), &(T_n_ijk_[ijk])(j_ijk, 0), ntno_ijk * sizeof(double));
+        Tensor<double, 1> T_k("T_k", ntno_ijk);
+        ::memcpy(T_k.data(), &(T_n_ijk_[ijk])(k_ijk, 0), ntno_ijk * sizeof(double));
 
         Tensor<double, 2> q_iv_t1 = q_iv_[ijk];
         einsum(1.0, Indices{index::Q, index::a}, &q_iv_t1, -1.0, Indices{index::Q, index::l}, q_io_[ijk], Indices{index::l, index::a}, T_n_ijk_[ijk]);
@@ -2619,9 +2622,12 @@ void DLPNOCCSDT::compute_R_iajbkc(std::vector<SharedMatrix>& R_iajbkc) {
         auto j_ijk = std::find(lmotriplet_to_lmos_[ijk].begin(), lmotriplet_to_lmos_[ijk].end(), j) - lmotriplet_to_lmos_[ijk].begin();
         auto k_ijk = std::find(lmotriplet_to_lmos_[ijk].begin(), lmotriplet_to_lmos_[ijk].end(), k) - lmotriplet_to_lmos_[ijk].begin();
 
-        Tensor<double, 1> T_i = (T_n_ijk_[ijk])(i_ijk, All);
-        Tensor<double, 1> T_j = (T_n_ijk_[ijk])(j_ijk, All);
-        Tensor<double, 1> T_k = (T_n_ijk_[ijk])(k_ijk, All);
+        Tensor<double, 1> T_i("T_i", ntno_ijk);
+        ::memcpy(T_i.data(), &(T_n_ijk_[ijk])(i_ijk, 0), ntno_ijk * sizeof(double));
+        Tensor<double, 1> T_j("T_j", ntno_ijk);
+        ::memcpy(T_j.data(), &(T_n_ijk_[ijk])(j_ijk, 0), ntno_ijk * sizeof(double));
+        Tensor<double, 1> T_k("T_k", ntno_ijk);
+        ::memcpy(T_k.data(), &(T_n_ijk_[ijk])(k_ijk, 0), ntno_ijk * sizeof(double));
 
         Tensor<double, 2> q_iv_t1 = q_iv_[ijk];
         einsum(1.0, Indices{index::Q, index::a}, &q_iv_t1, -1.0, Indices{index::Q, index::l}, q_io_[ijk], Indices{index::l, index::a}, T_n_ijk_[ijk]);
