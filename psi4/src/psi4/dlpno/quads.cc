@@ -2447,6 +2447,48 @@ std::vector<Tensor<double, 4>> DLPNOCCSDTQ::alpha_M_contribution() {
     return M_alpha_list;
 }
 
+std::vector<std::vector<Tensor<double, 4>>> DLPNOCCSDTQ::form_T_mnkl_pno() {
+
+    int naocc = i_j_to_ij_.size();
+    size_t n_lmo_pairs = ij_to_i_j_.size();
+    size_t n_lmo_triplets = ijk_to_i_j_k_.size();
+    size_t n_lmo_quadruplets = ijkl_to_i_j_k_l_.size();
+
+    // Stored as kl, mn
+    std::vector<std::vector<Tensor<double, 4>>> T_mnkl_pno_list(n_lmo_pairs);
+
+    // Loop over all pairs
+#pragma omp parallel for schedule(dynamic, 1)
+    for (int kl = 0; kl < n_lmo_pairs; ++kl) {
+        auto &[k, l] = ij_to_i_j_[kl];
+        // number of LMOs in the quadruplet domain
+        const int nlmo_kl = lmopair_to_lmos_[kl].size();
+        // number of PNOs in the quadruplet domain
+        const int npno_kl = n_pno_[kl];
+
+        T_mnkl_pno_list[kl].resize(n_lmo_pairs);
+
+        for (int m_kl = 0; m_kl < nlmo_kl; ++m_kl) {
+            int m = lmopair_to_lmos_[kl][m_kl];
+            for (int n_kl = 0; n_kl < nlmo_kl; ++n_kl) {
+                int n = lmopair_to_lmos_[kl][n_kl];
+                int mn = i_j_to_ij_[m][n];
+                int mnkl_idx = m * std::pow(naocc, 3) + n * std::pow(naocc, 2) + k * naocc + l;
+                int mnkl = i_j_k_l_to_ijkl_.count(mnkl_idx) ? i_j_k_l_to_ijkl_[mnkl_idx] : -1;
+
+                if (mn == -1 || mnkl == -1) continue;
+
+                auto S_mnkl_kl = submatrix_rows_and_cols(*S_pao_, lmoquadruplet_to_paos_[mnkl], lmopair_to_paos_[kl]);
+                S_mnkl_kl = linalg::triplet(X_qno_[mnkl], S_mnkl_kl, X_pno_[kl], true, false, false);
+
+                T_mnkl_pno_list[kl][mn] = matmul_4d(quadruples_permuter(T_iajbkcld_[mnkl], m, n, k, l), 
+                        S_mnkl_kl->transpose(), n_qno_[mnkl], n_pno_[kl]);
+            } // end n_kl
+        } // end m_kl
+    } // end kl
+
+    return T_mnkl_pno_list;
+}
 
 void DLPNOCCSDTQ::compute_R_iajbkcld(std::vector<Tensor<double, 4>>& R_iajbkcld) {
 
@@ -2462,6 +2504,8 @@ void DLPNOCCSDTQ::compute_R_iajbkcld(std::vector<Tensor<double, 4>>& R_iajbkcld)
         Indices{c, d, a, b}, Indices{c, d, b, a}, Indices{d, a, b, c}, Indices{d, a, c, b}, Indices{d, b, a, c}, Indices{d, b, c, a}, 
         Indices{d, c, a, b}, Indices{d, c, b, a});
 
+    // Compute expensive T_mnkl terms
+    std::vector<std::vector<Tensor<double, 4>>> T_mnkl_pno_list = form_T_mnkl_pno();
     // Compute expensive alpha M contribution
     std::vector<Tensor<double, 4>> M_alpha_list = alpha_M_contribution();
 
@@ -2774,7 +2818,9 @@ void DLPNOCCSDTQ::compute_R_iajbkcld(std::vector<Tensor<double, 4>>& R_iajbkcld)
             int i = ijkl_list[i_idx];
             for (int j_idx = 0; j_idx < FOUR; ++j_idx) {
                 int j = ijkl_list[j_idx];
-                T_mnij_list[i_idx * FOUR + j_idx] = Tensor<double, 6>("T_mnij", nlmo_ijkl, nlmo_ijkl, nqno_ijkl, nqno_ijkl, nqno_ijkl, nqno_ijkl);
+                int ij = i_j_to_ij_[i][j];
+
+                T_mnij_list[i_idx * FOUR + j_idx] = Tensor<double, 6>("T_mnij", nlmo_ijkl, nlmo_ijkl, n_pno_[ij], n_pno_[ij], n_pno_[ij], n_pno_[ij]);
                 T_mnij_list[i_idx * FOUR + j_idx].zero();
 
                 for (int m_ijkl = 0; m_ijkl < nlmo_ijkl; ++m_ijkl) {
@@ -2782,15 +2828,13 @@ void DLPNOCCSDTQ::compute_R_iajbkcld(std::vector<Tensor<double, 4>>& R_iajbkcld)
 
                     for (int n_ijkl = 0; n_ijkl < nlmo_ijkl; ++n_ijkl) {
                         int n = lmoquadruplet_to_lmos_[ijkl][n_ijkl];
+                        int mn = i_j_to_ij_[m][n];
                         int mnij_idx = m * std::pow(naocc, 3) + n * std::pow(naocc, 2) + i * naocc + j;
                         int mnij = i_j_k_l_to_ijkl_.count(mnij_idx) ? i_j_k_l_to_ijkl_[mnij_idx] : -1;
-                        if (mnij == -1) continue;
-
-                        auto S_ijkl_mnij = submatrix_rows_and_cols(*S_pao_, lmoquadruplet_to_paos_[ijkl], lmoquadruplet_to_paos_[mnij]);
-                        S_ijkl_mnij = linalg::triplet(X_qno_[ijkl], S_ijkl_mnij, X_qno_[mnij], true, false, false);
+                        if (mn == -1 || mnij == -1) continue;
                         
-                        Tensor<double, 4> T_mnij = matmul_4d(quadruples_permuter(T_iajbkcld_[mnij], m, n, i, j), S_ijkl_mnij, n_qno_[mnij], n_qno_[ijkl]);
-                        ::memcpy(&T_mnij_list[i_idx * FOUR + j_idx](m_ijkl, n_ijkl, 0, 0, 0, 0), T_mnij.data(), nqno_ijkl * nqno_ijkl * nqno_ijkl * nqno_ijkl * sizeof(double));
+                        Tensor<double, 4> T_mnij = T_mnkl_pno_list[ij][mn];
+                        ::memcpy(&T_mnij_list[i_idx * FOUR + j_idx](m_ijkl, n_ijkl, 0, 0, 0, 0), T_mnij.data(), n_pno_[ij] * n_pno_[ij] * n_pno_[ij] * n_pno_[ij] * sizeof(double));
                     } // end n
                 } // end m
             } // end j_idx
@@ -3309,6 +3353,10 @@ void DLPNOCCSDTQ::compute_R_iajbkcld(std::vector<Tensor<double, 4>>& R_iajbkcld)
             auto &[i_idx, j_idx, k_idx, l_idx] = quad_perms_long[perm_idx];
             int i = ijkl_list[i_idx], j = ijkl_list[j_idx], k = ijkl_list[k_idx], l = ijkl_list[l_idx];
             int ijkl_idx = i * std::pow(naocc, 3) + j * std::pow(naocc, 2) + k * naocc + l;
+            int kl = i_j_to_ij_[k][l];
+
+            auto S_ijkl_kl = submatrix_rows_and_cols(*S_pao_, lmoquadruplet_to_paos_[ijkl], lmopair_to_paos_[kl]);
+            S_ijkl_kl = linalg::triplet(X_qno_[ijkl], S_ijkl_kl, X_pno_[kl], true, false, false);
 
             // ADD THINGS INTO QUADRUPLES RESIDUAL
             if (!R_ijkl_list.count(ijkl_idx)) {
@@ -3318,6 +3366,7 @@ void DLPNOCCSDTQ::compute_R_iajbkcld(std::vector<Tensor<double, 4>>& R_iajbkcld)
                 // => Buffer used to keep track of contributions <= //
                 Tensor<double, 4> R_ijkl_buffer_a("R_ijkl_buffer_a", nqno_ijkl, nqno_ijkl, nqno_ijkl, nqno_ijkl);
                 Tensor<double, 4> R_ijkl_buffer_b("R_ijkl_buffer_b", nqno_ijkl, nqno_ijkl, nqno_ijkl, nqno_ijkl);
+                Tensor<double, 4> R_ijkl_buffer_c("R_ijkl_buffer_c", n_pno_[kl], n_pno_[kl], n_pno_[kl], n_pno_[kl]);
 
                 // Jiang and Matthews Eq. 8 (0.5 * A_{ej}^{ab} T_{ikl}^{ecd})
                 int ikl_dense = i * naocc * naocc + k * naocc + l;
@@ -3363,8 +3412,9 @@ void DLPNOCCSDTQ::compute_R_iajbkcld(std::vector<Tensor<double, 4>>& R_iajbkcld)
                 R_ijkl_perm += R_ijkl_buffer_b;
 
                 // Jiang and Matthews Eq. 18 0.25 * G_{ij}^{mn} T_{mnkl}^{abcd}
-                einsum(1.0, Indices{index::a, index::b, index::c, index::d}, &R_ijkl_perm, 0.25, Indices{index::m, index::n, index::a, index::b, index::c, index::d},
+                einsum(0.0, Indices{index::a, index::b, index::c, index::d}, &R_ijkl_buffer_c, 0.25, Indices{index::m, index::n, index::a, index::b, index::c, index::d},
                         T_mnij_list[k_idx * FOUR + l_idx], Indices{index::m, index::n}, G_ijmn_list[i_idx * FOUR + j_idx]);
+                R_ijkl_perm += matmul_4d(R_ijkl_buffer_c, S_ijkl_kl, n_pno_[kl], n_qno_[ijkl]);
 
                 // Jiang and Matthews Eq. 20 0.25 * H_{ef}^{ab} T_{ijkl}^{efcd}
                 einsum(1.0, Indices{index::a, index::b, index::c, index::d}, &R_ijkl_perm, 0.25, Indices{index::e, index::f, index::a, index::b}, H_efab,

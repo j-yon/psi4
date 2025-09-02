@@ -737,6 +737,10 @@ class DLPNOCCSDTQ : public DLPNOCCSDT_Q {
     inline Tensor<double, 4> alpha_ijkl_helper(const Tensor<double, 4>& T_ijkl);
     inline Tensor<double, 4> beta_ijkl_helper(const Tensor<double, 4>& alpha_ijkl);
 
+    /// form the special T_{mnkl}^{abcd} integrals over the PNO domain of kl
+    /// (to reduce cost of G_{ij}^{mn} T_{mnkl}^{abcd} term
+    std::vector<std::vector<Tensor<double, 4>>> form_T_mnkl_pno();
+
     /// compute the expensive term in M_{ejk}^{abc}
     std::vector<Tensor<double, 4>> alpha_M_contribution();
 
