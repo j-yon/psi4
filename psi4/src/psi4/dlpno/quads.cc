@@ -2150,7 +2150,7 @@ void DLPNOCCSDTQ::compute_R_iajbkc_quads(std::vector<SharedMatrix>& R_iajbkc) {
                     int mink = i_j_k_l_to_ijkl_.count(mink_idx) ? (i_j_k_l_to_ijkl_[mink_idx]) : -1;
                     if (mink == -1) continue;
 
-                    // Jiang and Matthews Eq. 6c -1/2 (me|nj) alpha_{mink}^{eabc}
+                    // Jiang and Matthews Eq. 6c -1/2 (me|nj) alpha_{mink}^{eabc} -> O(N^{10})
                     auto S_ijk_mink = submatrix_rows_and_cols(*S_pao_, lmotriplet_to_paos_[ijk], lmoquadruplet_to_paos_[mink]);
                     S_ijk_mink = linalg::triplet(X_tno_[ijk], S_ijk_mink, X_qno_[mink], true, false, false);
 
@@ -2380,6 +2380,7 @@ void DLPNOCCSDTQ::compute_R_iajbkc_quads(std::vector<SharedMatrix>& R_iajbkc) {
 }
 */
 
+// Jiang and Matthews Eq. 29b
 std::vector<Tensor<double, 4>> DLPNOCCSDTQ::alpha_M_contribution() {
 
     int naocc = i_j_to_ij_.size();
@@ -2689,7 +2690,7 @@ void DLPNOCCSDTQ::compute_R_iajbkcld(std::vector<Tensor<double, 4>>& R_iajbkcld)
         } // end i_idx
 
         Tensor<double, 4> T_mn("T_mn", nlmo_ijkl, nlmo_ijkl, nqno_ijkl, nqno_ijkl); {
-            // Project T_mi amplitudes from PNO space of mi to QNO space of ijkl
+            // Project T_mn amplitudes from PNO space of mn to QNO space of ijkl
             T_mn.zero();
             for (int m_ijkl = 0; m_ijkl < nlmo_ijkl; ++m_ijkl) {
                 int m = lmoquadruplet_to_lmos_[ijkl][m_ijkl];
@@ -2708,6 +2709,7 @@ void DLPNOCCSDTQ::compute_R_iajbkcld(std::vector<Tensor<double, 4>>& R_iajbkcld)
         }
 
         std::array<Tensor<double, 5>, 4> T_mni_list; // Project T_mni amplitudes from TNO space of mni to QNO space of ijkl
+        // Warning: this term is freaking expensive (O(N^{10}) worst case)
         for (int i_idx = 0; i_idx < FOUR; ++i_idx) {
             int i = ijkl_list[i_idx];
             T_mni_list[i_idx] = Tensor<double, 5>("T_mni", nlmo_ijkl, nlmo_ijkl, nqno_ijkl, nqno_ijkl, nqno_ijkl);
@@ -2724,7 +2726,7 @@ void DLPNOCCSDTQ::compute_R_iajbkcld(std::vector<Tensor<double, 4>>& R_iajbkcld)
                     auto S_ijkl_mni = submatrix_rows_and_cols(*S_pao_, lmoquadruplet_to_paos_[ijkl], lmotriplet_to_paos_[mni]);
                     S_ijkl_mni = linalg::triplet(X_qno_[ijkl], S_ijkl_mni, X_tno_[mni], true, false, false);
                     auto T_mni = matmul_3d_einsums(triples_permuter_einsums(T_iajbkc_clone_[mni], m, n, i), 
-                                                    S_ijkl_mni, n_tno_[mni], n_qno_[ijkl]);
+                                                    S_ijkl_mni, n_tno_[mni], n_qno_[ijkl]); // O(N^{10}) // (a, b, c) (c, C)
                     
                     ::memcpy(&T_mni_list[i_idx](m_ijkl, n_ijkl, 0, 0, 0), T_mni.data(), nqno_ijkl * nqno_ijkl * nqno_ijkl * sizeof(double));
                 } // end n_ijkl
@@ -2774,7 +2776,7 @@ void DLPNOCCSDTQ::compute_R_iajbkcld(std::vector<Tensor<double, 4>>& R_iajbkcld)
         // Quadruples amplitude intermediates
         std::unordered_map<int, Tensor<double, 5>> T_nijk_map;
         std::unordered_map<int, Tensor<double, 5>> T_injk_map;
-        std::unordered_map<int, Tensor<double, 5>> alpha_nijk_map;
+        std::unordered_map<int, Tensor<double, 5>> alpha_nijk_map; // Worst case: 24 * N^{10}
 
         einsums::for_sequence<24UL>([&](auto perm_idx) {
             auto &[i_idx, j_idx, k_idx, l_idx] = quad_perms_long[perm_idx];
@@ -2796,7 +2798,7 @@ void DLPNOCCSDTQ::compute_R_iajbkcld(std::vector<Tensor<double, 4>>& R_iajbkcld)
 
                 auto S_ijkl_nijk = submatrix_rows_and_cols(*S_pao_, lmoquadruplet_to_paos_[ijkl], lmoquadruplet_to_paos_[nijk]);
                 S_ijkl_nijk = linalg::triplet(X_qno_[ijkl], S_ijkl_nijk, X_qno_[nijk], true, false, false);
-
+                
                 Tensor<double, 4> T_nijk = matmul_4d(quadruples_permuter(T_iajbkcld_[nijk], n, i, j, k), S_ijkl_nijk, n_qno_[nijk], n_qno_[ijkl]);
                 Tensor<double, 4> alpha_nijk = alpha_ijkl_helper(T_nijk);
                 Tensor<double, 4> T_injk("T_injk", nqno_ijkl, nqno_ijkl, nqno_ijkl, nqno_ijkl);
@@ -2808,11 +2810,7 @@ void DLPNOCCSDTQ::compute_R_iajbkcld(std::vector<Tensor<double, 4>>& R_iajbkcld)
             } // end n_ijkl
         });
 
-        // Warning, HIGHLY MEMORY INTENSIVE (overlap matrix also provided)
-        // auto S_ijkl = submatrix_rows_and_cols(*S_pao_, lmoquadruplet_to_paos_ext_[ijkl], lmoquadruplet_to_paos_[ijkl]);
-        // S_ijkl = linalg::doublet(S_ijkl, X_qno_[ijkl], false, false);
-
-        std::array<Tensor<double, 6>, 16> T_mnij_list;
+        std::array<Tensor<double, 6>, 16> T_mnij_list; // This is freaking 16 N^{10}
 
         for (int i_idx = 0; i_idx < FOUR; ++i_idx) {
             int i = ijkl_list[i_idx];
@@ -3142,7 +3140,7 @@ void DLPNOCCSDTQ::compute_R_iajbkcld(std::vector<Tensor<double, 4>>& R_iajbkcld)
                     einsum(1.0, Indices{index::m, index::e, index::a, index::b}, &I_eijmab_temp[i_idx * FOUR + j_idx], -1.0, 
                             Indices{index::m, index::e, index::n}, L_menj_t_list[i_idx], Indices{index::n, index::a, index::b}, T_mi_list[j_idx]);
 
-                    // Jiang Eq. 21c 0.25 [2(me|nf) - (mf|ne)] Z_{nij}^{fab}
+                    // Jiang Eq. 21c 0.25 [2(me|nf) - (mf|ne)] Z_{nij}^{fab} -> O(N^{10}) worst case
                     einsum(1.0, Indices{index::m, index::e, index::a, index::b}, &I_eijmab_temp[i_idx * FOUR + j_idx], 0.25,
                             Indices{index::m, index::e, index::n, index::f}, L_menf, Indices{index::n, index::f, index::a, index::b}, Z_mij_list[i_idx * FOUR + j_idx]);
                 } // end j_idx
@@ -3182,7 +3180,7 @@ void DLPNOCCSDTQ::compute_R_iajbkcld(std::vector<Tensor<double, 4>>& R_iajbkcld)
                     Tensor<double, 4> T_mij_t("T_mij_t", nlmo_ijkl, nqno_ijkl, nqno_ijkl, nqno_ijkl);
                     permute(Indices{index::n, index::f, index::a, index::b}, &T_mij_t, Indices{index::n, index::a, index::f, index::b}, T_mij_list[i_idx * FOUR + j_idx]);
 
-                    // Jiang Eq. 23c -0.5 (mf|ne) T_{nij}^{afb}
+                    // Jiang Eq. 23c -0.5 (mf|ne) T_{nij}^{afb} -> O(N^{10}) worst case
                     // (mf|ne) = 2.0 * (me|nf) - L_(menf) (Yay! We like to cheat!)
                     einsum(1.0, Indices{index::m, index::e, index::a, index::b}, &J_iejmab_list[i_idx * FOUR + j_idx], -1.0,
                             Indices{index::m, index::e, index::n, index::f}, g_menf, Indices{index::n, index::f, index::a, index::b}, T_mij_t);
@@ -3282,7 +3280,7 @@ void DLPNOCCSDTQ::compute_R_iajbkcld(std::vector<Tensor<double, 4>>& R_iajbkcld)
                 einsum(1.0, Indices{index::m, index::a, index::b}, &L_ijkabm_temp[perm_idx], -0.5,
                         Indices{index::m, index::n}, G_ijmn_list[k_idx * FOUR + i_idx], Indices{index::n, index::a, index::b}, T_mi_list[j_idx]);
 
-                // Jiang Eq. 27e 0.5 (me|nf) alpha_{nijk}^{fabe} 
+                // Jiang Eq. 27e 0.5 (me|nf) alpha_{nijk}^{fabe} -> O(N^{10})
                 Tensor<double, 5> alpha_nijk_perm("alpha_nijk_perm", nqno_ijkl, nlmo_ijkl, nqno_ijkl, nqno_ijkl, nqno_ijkl);
                 permute(Indices{index::e, index::n, index::f, index::a, index::b}, &alpha_nijk_perm, 
                         Indices{index::n, index::f, index::a, index::b, index::e}, alpha_nijk_map[perm_idx]);
@@ -3395,11 +3393,11 @@ void DLPNOCCSDTQ::compute_R_iajbkcld(std::vector<Tensor<double, 4>>& R_iajbkcld)
                 einsum(1.0, Indices{index::a, index::b, index::c, index::d}, &R_ijkl_perm, -1.0 / 6.0,
                         Indices{index::m, index::a, index::b, index::c, index::d}, T_nijk_map[jkl_perm_idx], Indices{index::m}, D_mi_list[i_idx]);
 
-                // Jiang and Matthews Eq. 14 (1/12 E_{ei}^{ma} alpha_{mjkl}^{ebcd})
+                // Jiang and Matthews Eq. 14 (1/12 E_{ei}^{ma} alpha_{mjkl}^{ebcd}) -> O(N^{10}) worst case
                 einsum(1.0, Indices{index::a, index::b, index::c, index::d}, &R_ijkl_perm, 1.0 / 12.0,
                         Indices{index::m, index::e, index::a}, E_eima_list[i_idx], Indices{index::m, index::e, index::b, index::c, index::d}, alpha_nijk_map[jkl_perm_idx]);
 
-                // Jiang and Matthews Eq. 16 -0.5 (0.5 + P_ab) F_{ie}^{ma} T_{jmkl}^{ebcd}
+                // Jiang and Matthews Eq. 16 -0.5 (0.5 + P_ab) F_{ie}^{ma} T_{jmkl}^{ebcd} -> O(N^{10}) worst case
                 einsum(0.0, Indices{index::a, index::b, index::c, index::d}, &R_ijkl_buffer_a, 1.0, 
                         Indices{index::m, index::e, index::a}, F_iema_list[i_idx], Indices{index::m, index::e, index::b, index::c, index::d}, T_injk_map[jkl_perm_idx]);
 
@@ -3411,20 +3409,20 @@ void DLPNOCCSDTQ::compute_R_iajbkcld(std::vector<Tensor<double, 4>>& R_iajbkcld)
                 R_ijkl_buffer_b *= -0.5;
                 R_ijkl_perm += R_ijkl_buffer_b;
 
-                // Jiang and Matthews Eq. 18 0.25 * G_{ij}^{mn} T_{mnkl}^{abcd}
+                // Jiang and Matthews Eq. 18 0.25 * G_{ij}^{mn} T_{mnkl}^{abcd} -> O(N^{10}) worst case
                 einsum(0.0, Indices{index::a, index::b, index::c, index::d}, &R_ijkl_buffer_c, 0.25, Indices{index::m, index::n, index::a, index::b, index::c, index::d},
                         T_mnij_list[k_idx * FOUR + l_idx], Indices{index::m, index::n}, G_ijmn_list[i_idx * FOUR + j_idx]);
                 R_ijkl_perm += matmul_4d(R_ijkl_buffer_c, S_ijkl_kl, n_pno_[kl], n_qno_[ijkl]);
 
-                // Jiang and Matthews Eq. 20 0.25 * H_{ef}^{ab} T_{ijkl}^{efcd}
+                // Jiang and Matthews Eq. 20 0.25 * H_{ef}^{ab} T_{ijkl}^{efcd} -> O(N^{10}) worst case
                 einsum(1.0, Indices{index::a, index::b, index::c, index::d}, &R_ijkl_perm, 0.25, Indices{index::e, index::f, index::a, index::b}, H_efab,
                         Indices{index::e, index::f, index::c, index::d}, T_ijkl);
 
-                // Jiang and Matthews Eq. 22 0.125 * I_{eij}^{mab} Z_{mkl}^{ecd}
+                // Jiang and Matthews Eq. 22 0.125 * I_{eij}^{mab} Z_{mkl}^{ecd} -> O(N^{10}) worst case
                 einsum(1.0, Indices{index::a, index::b, index::c, index::d}, &R_ijkl_perm, 0.125, Indices{index::m, index::e, index::a, index::b}, 
                         I_eijmab_list[i_idx * FOUR + j_idx], Indices{index::m, index::e, index::c, index::d}, Z_mij_list[k_idx * FOUR + l_idx]);
 
-                // Jiang and Matthews Eq. 24 -(0.5 + P_{ac}) J_{iej}^{mab} T_{mkl}^{ced}
+                // Jiang and Matthews Eq. 24 -(0.5 + P_{ac}) J_{iej}^{mab} T_{mkl}^{ced} -> O(N^{10}) worst case
                 Tensor<double, 4> T_mkl_t = T_mij_list[k_idx * FOUR + l_idx];
                 permute(Indices{index::m, index::e, index::c, index::d}, &T_mkl_t, Indices{index::m, index::c, index::e, index::d}, T_mij_list[k_idx * FOUR + l_idx]);
 
@@ -3438,7 +3436,7 @@ void DLPNOCCSDTQ::compute_R_iajbkcld(std::vector<Tensor<double, 4>>& R_iajbkcld)
                 R_ijkl_buffer_b *= -1.0;
                 R_ijkl_perm += R_ijkl_buffer_b;
 
-                // Jiang and Matthews Eq. 26 0.5 K_{ijk}^{amn} T_{mnl}^{bcd}
+                // Jiang and Matthews Eq. 26 0.5 K_{ijk}^{amn} T_{mnl}^{bcd} -> O(N^{10}) worst case
                 einsum(1.0, Indices{index::a, index::b, index::c, index::d}, &R_ijkl_perm, 0.5, Indices{index::a, index::m, index::n}, 
                         K_ijkamn_map[perm_idx], Indices{index::m, index::n, index::b, index::c, index::d}, T_mni_list[l_idx]);
 
