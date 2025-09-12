@@ -3369,16 +3369,19 @@ void DLPNOCCSDT::lccsdt_iterations() {
     std::vector<SharedMatrix> R_iajb(n_lmo_pairs);
     std::vector<SharedMatrix> R_iajbkc(n_lmo_triplets);
 
+#pragma omp parallel for
     for (int i = 0; i < naocc; ++i) {
         int ii = i_j_to_ij_[i][i];
         R_ia[i] = std::make_shared<Matrix>(n_pno_[ii], 1);
     }
 
+#pragma omp parallel for
     for (int ij = 0; ij < n_lmo_pairs; ++ij) {
         R_iajb[ij] = std::make_shared<Matrix>(n_pno_[ij], n_pno_[ij]);
         Rn_iajb[ij] = std::make_shared<Matrix>(n_pno_[ij], n_pno_[ij]);
     }
 
+#pragma omp parallel for
     for (int ijk_sorted = 0; ijk_sorted < n_lmo_triplets; ++ijk_sorted) {
         int ijk = sorted_triplets_[ijk_sorted];
         R_iajbkc[ijk] = std::make_shared<Matrix>(n_tno_[ijk], n_tno_[ijk] * n_tno_[ijk]);
@@ -3387,6 +3390,7 @@ void DLPNOCCSDT::lccsdt_iterations() {
     std::vector<std::vector<SharedMatrix>> R_ia_buffer(nthreads);
     std::vector<std::vector<SharedMatrix>> R_iajb_buffer(nthreads);
 
+#pragma omp parallel for
     for (int thread = 0; thread < nthreads; ++thread) {
         R_ia_buffer[thread].resize(naocc);
         R_iajb_buffer[thread].resize(n_lmo_pairs);
@@ -3417,8 +3421,9 @@ void DLPNOCCSDT::lccsdt_iterations() {
     int iteration = 1, max_iteration = options_.get_int("DLPNO_MAXITER");
     double e_curr = 0.0, e_prev = 0.0, e_weak = 0.0, r_curr1 = 0.0, r_curr2 = 0.0, r_curr3 = 0.0;
     bool e_converged = false, r_converged = false;
+    const int N_MICRO_ITER = options_.get_int("DLPNO_FULL_T_MICROITERATIONS");
 
-    DIISManager diis = DIISManager(options_.get_int("DIIS_MAX_VECS"), "LCCSDT DIIS", DIISManager::RemovalPolicy::LargestError, DIISManager::StoragePolicy::InCore);
+    DIISManager diis = DIISManager(options_.get_int("DIIS_MAX_VECS"), "LCCSDT DIIS", DIISManager::RemovalPolicy::OldestAdded, DIISManager::StoragePolicy::InCore);
 
     while (!(e_converged && r_converged)) {
         // RMS of residual per LMO orbital, for assessing convergence
@@ -3430,135 +3435,139 @@ void DLPNOCCSDT::lccsdt_iterations() {
 
         std::time_t time_start = std::time(nullptr);
 
-        // Create T_n_ij and T_n_ijk intermediates
-#pragma omp parallel for schedule(dynamic, 1)
-        for (int ij = 0; ij < n_lmo_pairs; ++ij) {
-            auto &[i, j] = ij_to_i_j_[ij];
+        for (int miter = 0; miter < N_MICRO_ITER; ++miter) {
 
-            int nlmo_ij = lmopair_to_lmos_[ij].size();
-            int npno_ij = n_pno_[ij];
-            int ij_idx = (i <= j) ? ij : ij_to_ji_[ij];
-            
-            T_n_ij_[ij] = std::make_shared<Matrix>(nlmo_ij, npno_ij);
+            // Create T_n_ij and T_n_ijk intermediates
+    #pragma omp parallel for schedule(dynamic, 1)
+            for (int ij = 0; ij < n_lmo_pairs; ++ij) {
+                auto &[i, j] = ij_to_i_j_[ij];
 
-            for (int n_ij = 0; n_ij < nlmo_ij; ++n_ij) {
-                int n = lmopair_to_lmos_[ij][n_ij];
-                int nn = i_j_to_ij_[n][n];
-                auto T_n_temp = linalg::doublet(S_pno_ij_nn_[ij_idx][n], T_ia_[n], false, false);
+                int nlmo_ij = lmopair_to_lmos_[ij].size();
+                int npno_ij = n_pno_[ij];
+                int ij_idx = (i <= j) ? ij : ij_to_ji_[ij];
                 
-                for (int a_ij = 0; a_ij < npno_ij; ++a_ij) {
-                    (*T_n_ij_[ij])(n_ij, a_ij) = (*T_n_temp)(a_ij, 0);
-                } // end a_ij
-            } // end n_ij
-        }
+                T_n_ij_[ij] = std::make_shared<Matrix>(nlmo_ij, npno_ij);
 
-#pragma omp parallel for schedule(dynamic, 1)
-        for (int ijk_sorted = 0; ijk_sorted < n_lmo_triplets; ++ijk_sorted) {
-            int ijk = sorted_triplets_[ijk_sorted];
-            auto &[i, j, k] = ijk_to_i_j_k_[ijk];
-            int nlmo_ijk = lmotriplet_to_lmos_[ijk].size();
+                for (int n_ij = 0; n_ij < nlmo_ij; ++n_ij) {
+                    int n = lmopair_to_lmos_[ij][n_ij];
+                    int nn = i_j_to_ij_[n][n];
+                    auto T_n_temp = linalg::doublet(S_pno_ij_nn_[ij_idx][n], T_ia_[n], false, false);
+                    
+                    for (int a_ij = 0; a_ij < npno_ij; ++a_ij) {
+                        (*T_n_ij_[ij])(n_ij, a_ij) = (*T_n_temp)(a_ij, 0);
+                    } // end a_ij
+                } // end n_ij
+            }
 
-            T_n_ijk_[ijk] = Tensor<double, 2>("T_n_ijk", nlmo_ijk, n_tno_[ijk]);
+    #pragma omp parallel for schedule(dynamic, 1)
+            for (int ijk_sorted = 0; ijk_sorted < n_lmo_triplets; ++ijk_sorted) {
+                int ijk = sorted_triplets_[ijk_sorted];
+                auto &[i, j, k] = ijk_to_i_j_k_[ijk];
+                int nlmo_ijk = lmotriplet_to_lmos_[ijk].size();
+
+                T_n_ijk_[ijk] = Tensor<double, 2>("T_n_ijk", nlmo_ijk, n_tno_[ijk]);
+                
+                for (int l_ijk = 0; l_ijk < nlmo_ijk; ++l_ijk) {
+                    int l = lmotriplet_to_lmos_[ijk][l_ijk];
+                    int ll = i_j_to_ij_[l][l];
+
+                    auto T_l_temp = linalg::doublet(S_ijk_ll_[ijk][l_ijk], T_ia_[l]);
+
+                    for (int a_ijk = 0; a_ijk < n_tno_[ijk]; ++a_ijk) {
+                        (T_n_ijk_[ijk])(l_ijk, a_ijk) = (*T_l_temp)(a_ijk, 0);
+                    }
+                } // end l_ijk
+            } // end ijk
             
-            for (int l_ijk = 0; l_ijk < nlmo_ijk; ++l_ijk) {
-                int l = lmotriplet_to_lmos_[ijk][l_ijk];
-                int ll = i_j_to_ij_[l][l];
+            // Create T_iajbkc_clone intermediate
+    #pragma omp parallel for schedule(dynamic, 1)
+            for (int ijk_sorted = 0; ijk_sorted < n_lmo_triplets; ++ijk_sorted) {
+                int ijk = sorted_triplets_[ijk_sorted];
+                auto &[i, j, k] = ijk_to_i_j_k_[ijk];
 
-                auto T_l_temp = linalg::doublet(S_ijk_ll_[ijk][l_ijk], T_ia_[l]);
+                T_iajbkc_clone_[ijk] = Tensor<double, 3>("T_ijk", n_tno_[ijk], n_tno_[ijk], n_tno_[ijk]);
+                ::memcpy(T_iajbkc_clone_[ijk].data(), T_iajbkc_[ijk]->get_pointer(), n_tno_[ijk] * n_tno_[ijk] * n_tno_[ijk] * sizeof(double));
 
+                U_iajbkc_[ijk] = Tensor<double, 3>("U_iajbkc", n_tno_[ijk], n_tno_[ijk], n_tno_[ijk]);
+                
                 for (int a_ijk = 0; a_ijk < n_tno_[ijk]; ++a_ijk) {
-                    (T_n_ijk_[ijk])(l_ijk, a_ijk) = (*T_l_temp)(a_ijk, 0);
+                    for (int b_ijk = 0; b_ijk < n_tno_[ijk]; ++b_ijk) {
+                        for (int c_ijk = 0; c_ijk < n_tno_[ijk]; ++c_ijk) {
+                            U_iajbkc_[ijk](a_ijk, b_ijk, c_ijk) = 4 * (*T_iajbkc_[ijk])(a_ijk, b_ijk * n_tno_[ijk] + c_ijk)
+                                - 2 * (*T_iajbkc_[ijk])(a_ijk, c_ijk * n_tno_[ijk] + b_ijk) - 2 * (*T_iajbkc_[ijk])(c_ijk, b_ijk * n_tno_[ijk] + a_ijk)
+                                - 2 * (*T_iajbkc_[ijk])(b_ijk, a_ijk * n_tno_[ijk] + c_ijk) + (*T_iajbkc_[ijk])(b_ijk, c_ijk * n_tno_[ijk] + a_ijk)
+                                + (*T_iajbkc_[ijk])(c_ijk, a_ijk * n_tno_[ijk] + b_ijk);
+                        }
+                    }
+                } // end c_ijk
+            } // end ijk
+
+            // T1-dress integrals and Fock matrices
+            t1_ints();
+            t1_fock();
+
+            // compute singles amplitude
+            timer_on("DLPNO-CCSDT : R_ia");
+            compute_R_ia_triples(R_ia, R_ia_buffer);
+            timer_off("DLPNO-CCSDT : R_ia");
+
+            // compute doubles amplitude
+            timer_on("DLPNO-CCSDT : R_iajb");
+            compute_R_iajb_triples(R_iajb, Rn_iajb, R_iajb_buffer);
+            timer_off("DLPNO-CCSDT : R_iajb");
+
+            // compute triples amplitude
+            timer_on("DLPNO-CCSDT : R_iajbkc");
+            if (miter == N_MICRO_ITER - 1) {
+                compute_R_iajbkc(R_iajbkc);
+            }
+            timer_off("DLPNO-CCSDT : R_iajbkc");
+
+            // Update singles amplitude
+    #pragma omp parallel for
+            for (int i = 0; i < naocc; ++i) {
+                int ii = i_j_to_ij_[i][i];
+                for (int a_ii = 0; a_ii < n_pno_[ii]; ++a_ii) {
+                    (*T_ia_[i])(a_ii, 0) -= (*R_ia[i])(a_ii, 0) / (e_pno_[ii]->get(a_ii) - F_lmo_->get(i,i));
                 }
-            } // end l_ijk
-        } // end ijk
+                R_ia_rms[i] = R_ia[i]->rms();
+            }
 
-        // Create T_iajbkc_clone intermediate
-#pragma omp parallel for schedule(dynamic, 1)
-        for (int ijk_sorted = 0; ijk_sorted < n_lmo_triplets; ++ijk_sorted) {
-            int ijk = sorted_triplets_[ijk_sorted];
-            auto &[i, j, k] = ijk_to_i_j_k_[ijk];
-
-            T_iajbkc_clone_[ijk] = Tensor<double, 3>("T_ijk", n_tno_[ijk], n_tno_[ijk], n_tno_[ijk]);
-            ::memcpy(T_iajbkc_clone_[ijk].data(), T_iajbkc_[ijk]->get_pointer(), n_tno_[ijk] * n_tno_[ijk] * n_tno_[ijk] * sizeof(double));
-
-            U_iajbkc_[ijk] = Tensor<double, 3>("U_iajbkc", n_tno_[ijk], n_tno_[ijk], n_tno_[ijk]);
-            
-            for (int a_ijk = 0; a_ijk < n_tno_[ijk]; ++a_ijk) {
-                for (int b_ijk = 0; b_ijk < n_tno_[ijk]; ++b_ijk) {
-                    for (int c_ijk = 0; c_ijk < n_tno_[ijk]; ++c_ijk) {
-                        U_iajbkc_[ijk](a_ijk, b_ijk, c_ijk) = 4 * (*T_iajbkc_[ijk])(a_ijk, b_ijk * n_tno_[ijk] + c_ijk)
-                            - 2 * (*T_iajbkc_[ijk])(a_ijk, c_ijk * n_tno_[ijk] + b_ijk) - 2 * (*T_iajbkc_[ijk])(c_ijk, b_ijk * n_tno_[ijk] + a_ijk)
-                            - 2 * (*T_iajbkc_[ijk])(b_ijk, a_ijk * n_tno_[ijk] + c_ijk) + (*T_iajbkc_[ijk])(b_ijk, c_ijk * n_tno_[ijk] + a_ijk)
-                            + (*T_iajbkc_[ijk])(c_ijk, a_ijk * n_tno_[ijk] + b_ijk);
+            // Update doubles amplitude
+    #pragma omp parallel for schedule(dynamic, 1)
+            for (int ij = 0; ij < n_lmo_pairs; ++ij) {
+                auto &[i, j] = ij_to_i_j_[ij];
+                for (int a_ij = 0; a_ij < n_pno_[ij]; ++a_ij) {
+                    for (int b_ij = 0; b_ij < n_pno_[ij]; ++b_ij) {
+                        (*T_iajb_[ij])(a_ij, b_ij) -= (*R_iajb[ij])(a_ij, b_ij) / 
+                                        (e_pno_[ij]->get(a_ij) + e_pno_[ij]->get(b_ij) - F_lmo_->get(i,i) - F_lmo_->get(j,j));
                     }
                 }
-            } // end c_ijk
-        } // end ijk
+                Tt_iajb_[ij] = T_iajb_[ij]->clone();
+                Tt_iajb_[ij]->scale(2.0);
+                Tt_iajb_[ij]->subtract(T_iajb_[ij]->transpose());
 
-        // T1-dress integrals and Fock matrices
-        t1_ints();
-        t1_fock();
-
-        // compute singles amplitude
-
-        timer_on("DLPNO-CCSDT : R_ia");
-        compute_R_ia_triples(R_ia, R_ia_buffer);
-        timer_off("DLPNO-CCSDT : R_ia");
-
-        // compute doubles amplitude
-        timer_on("DLPNO-CCSDT : R_iajb");
-        compute_R_iajb_triples(R_iajb, Rn_iajb, R_iajb_buffer);
-        timer_off("DLPNO-CCSDT : R_iajb");
-
-        // compute triples amplitude
-        timer_on("DLPNO-CCSDT : R_iajbkc");
-        
-        
-        compute_R_iajbkc(R_iajbkc);
-        timer_off("DLPNO-CCSDT : R_iajbkc");
-
-        // Update singles amplitude
-#pragma omp parallel for
-        for (int i = 0; i < naocc; ++i) {
-            int ii = i_j_to_ij_[i][i];
-            for (int a_ii = 0; a_ii < n_pno_[ii]; ++a_ii) {
-                (*T_ia_[i])(a_ii, 0) -= (*R_ia[i])(a_ii, 0) / (e_pno_[ii]->get(a_ii) - F_lmo_->get(i,i));
+                R_iajb_rms[ij] = R_iajb[ij]->rms();
             }
-            R_ia_rms[i] = R_ia[i]->rms();
-        }
 
-        // Update doubles amplitude
-#pragma omp parallel for schedule(dynamic, 1)
-        for (int ij = 0; ij < n_lmo_pairs; ++ij) {
-            auto &[i, j] = ij_to_i_j_[ij];
-            for (int a_ij = 0; a_ij < n_pno_[ij]; ++a_ij) {
-                for (int b_ij = 0; b_ij < n_pno_[ij]; ++b_ij) {
-                    (*T_iajb_[ij])(a_ij, b_ij) -= (*R_iajb[ij])(a_ij, b_ij) / 
-                                    (e_pno_[ij]->get(a_ij) + e_pno_[ij]->get(b_ij) - F_lmo_->get(i,i) - F_lmo_->get(j,j));
-                }
-            }
-            Tt_iajb_[ij] = T_iajb_[ij]->clone();
-            Tt_iajb_[ij]->scale(2.0);
-            Tt_iajb_[ij]->subtract(T_iajb_[ij]->transpose());
-
-            R_iajb_rms[ij] = R_iajb[ij]->rms();
-        }
-
-        // Update triples amplitude
-#pragma omp parallel for schedule(dynamic, 1)
-        for (int ijk_sorted = 0; ijk_sorted < n_lmo_triplets; ++ijk_sorted) {
-            int ijk = sorted_triplets_[ijk_sorted];
-            auto &[i, j, k] = ijk_to_i_j_k_[ijk];
-            for (int a_ijk = 0; a_ijk < n_tno_[ijk]; ++a_ijk) {
-                for (int b_ijk = 0; b_ijk < n_tno_[ijk]; ++b_ijk) {
-                    for (int c_ijk = 0; c_ijk < n_tno_[ijk]; ++c_ijk) {
-                        (*T_iajbkc_[ijk])(a_ijk, b_ijk * n_tno_[ijk] + c_ijk) -= (1.0 - damping_ratio_) * (*R_iajbkc[ijk])(a_ijk, b_ijk * n_tno_[ijk] + c_ijk) /
-                                            (e_tno_[ijk]->get(a_ijk) + e_tno_[ijk]->get(b_ijk) + e_tno_[ijk]->get(c_ijk) - F_lmo_->get(i,i) - F_lmo_->get(j,j) - F_lmo_->get(k,k));
+            if (miter == N_MICRO_ITER - 1) {
+                // Update triples amplitude
+        #pragma omp parallel for schedule(dynamic, 1)
+                for (int ijk_sorted = 0; ijk_sorted < n_lmo_triplets; ++ijk_sorted) {
+                    int ijk = sorted_triplets_[ijk_sorted];
+                    auto &[i, j, k] = ijk_to_i_j_k_[ijk];
+                    for (int a_ijk = 0; a_ijk < n_tno_[ijk]; ++a_ijk) {
+                        for (int b_ijk = 0; b_ijk < n_tno_[ijk]; ++b_ijk) {
+                            for (int c_ijk = 0; c_ijk < n_tno_[ijk]; ++c_ijk) {
+                                (*T_iajbkc_[ijk])(a_ijk, b_ijk * n_tno_[ijk] + c_ijk) -= (1.0 - damping_ratio_) * (*R_iajbkc[ijk])(a_ijk, b_ijk * n_tno_[ijk] + c_ijk) /
+                                                    (e_tno_[ijk]->get(a_ijk) + e_tno_[ijk]->get(b_ijk) + e_tno_[ijk]->get(c_ijk) - F_lmo_->get(i,i) - F_lmo_->get(j,j) - F_lmo_->get(k,k));
+                            }
+                        }
                     }
+                    R_iajbkc_rms[ijk] = R_iajbkc[ijk]->rms();
                 }
             }
-            R_iajbkc_rms[ijk] = R_iajbkc[ijk]->rms();
-        }
+        } // end miter
 
         // DIIS Extrapolation
         std::vector<SharedMatrix> T_vecs;

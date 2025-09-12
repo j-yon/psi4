@@ -731,16 +731,18 @@ class DLPNOCCSDTQ : public DLPNOCCSDT_Q {
     // Singles Amplitudes projected onto QNO space of ijkl
     std::vector<Tensor<double, 2>> T_n_ijkl_;
     // Quadruples Amplitudes of ijkl projected onto PNO space of last two pairs
-    std::vector<Tensor<double, 2>> T_ijkl_kl_;
+    std::vector<std::vector<Tensor<double, 4>>> T_mnkl_pno_list_;
 
     // Helper functions to form quadruples intermediates
     inline Tensor<double, 4> alpha_ijkl_helper(const Tensor<double, 4>& T_ijkl);
     inline Tensor<double, 4> beta_ijkl_helper(const Tensor<double, 4>& alpha_ijkl);
 
     /// form the special T_{mnkl}^{abcd} integrals over the PNO domain of kl
-    /// (to reduce cost of G_{ij}^{mn} T_{mnkl}^{abcd} term
-    std::vector<std::vector<Tensor<double, 4>>> form_T_mnkl_pno();
+    /// (to reduce the cost of certain delinquent terms)
+    void form_T_mnkl_pno();
 
+    /// compute the expensive term in L_{ijk}^{abm}
+    std::vector<Tensor<double, 4>> alpha_L_contribution();
     /// compute the expensive term in M_{ejk}^{abc}
     std::vector<Tensor<double, 4>> alpha_M_contribution();
 

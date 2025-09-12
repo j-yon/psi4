@@ -2701,6 +2701,9 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
 
         /*- Occupation number threshold for removing TNOs with full triples !expert -*/
         options.add_double("T_CUT_TNO_FULL", 1.0e-7);
+        /*- Number of T1/T2 microiteration updates per Full T iteration 
+            (increase this value for highly multireference systems) !expert -*/
+        options.add_double("DLPNO_FULL_T_MICROITERATIONS", 3);
         /*- Damping factor on triples amplitude updates in CCSDT iterations !expert -*/
         options.add_double("TRIPLES_DAMPING_RATIO", 0.2);
 
@@ -2737,8 +2740,14 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
 
         /*- Occupation number threshold for removing QNOs with full quadruples !expert -*/
         options.add_double("T_CUT_QNO_FULL", 3.33e-6);
+        /*- Number of T1/T2 microiteration updates per Full Q iteration 
+            (increase this value for highly multireference systems) !expert -*/
+        options.add_double("DLPNO_FULL_Q_MICROITERATIONS", 3);
         /*- Damping factor on quadruples amplitude update in CCSDTQ iterations !expert -*/
         options.add_double("QUADRUPLES_DAMPING_RATIO", 0.2);
+        /*- Delta factor to add to energy denomiator to stabilize CCSDTQ iterations 
+            (set to 0.1 for highly multireference systems) !expert -*/
+        options.add_double("DLPNO_CCSDTQ_DELTA", 0.0);
 
         /*- SUBSECTION Memory Control Options -*/
 
