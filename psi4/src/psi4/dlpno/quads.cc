@@ -3039,21 +3039,21 @@ void DLPNOCCSDTQ::compute_R_iajbkcld(std::vector<Tensor<double, 4>>& R_iajbkcld)
                     // Jiang Eq. 21b -[2(me|ni) - (mi|ne)]T_{nj}^{ab}
                     einsum(1.0, Indices{index::m, index::e, index::a, index::b}, &I_eijmab_temp[i_idx * FOUR + j_idx], -1.0, 
                             Indices{index::m, index::e, index::n}, L_menj_t_list[i_idx], Indices{index::n, index::a, index::b}, T_mi_list[j_idx]);
-
-                    // Jiang Eq. 21c 0.25 [2(me|nf) - (mf|ne)] Z_{nij}^{fab} -> O(N^{10}) worst case
-                    einsum(1.0, Indices{index::m, index::e, index::a, index::b}, &I_eijmab_temp[i_idx * FOUR + j_idx], 0.25,
-                            Indices{index::m, index::e, index::n, index::f}, L_menf, Indices{index::n, index::f, index::a, index::b}, Z_mij_list[i_idx * FOUR + j_idx]);
                 } // end j_idx
             } // end i_idx
 
             // Symmetrization P_{ij}^{ab}
             for (int i_idx = 0; i_idx < FOUR; ++i_idx) {
-                for (int j_idx = 0; j_idx < FOUR; ++j_idx) {
+                for (int j_idx = i_idx; j_idx < FOUR; ++j_idx) {
                     I_eijmab_list[i_idx * FOUR + j_idx] = I_eijmab_temp[i_idx * FOUR + j_idx];
                     Tensor<double, 4> I_ejimba_buffer = Tensor<double, 4>("I_ejimba", nlmo_ijkl, nqno_ijkl, nqno_ijkl, nqno_ijkl);
                     permute(Indices{index::m, index::e, index::b, index::a}, &I_ejimba_buffer, 
                             Indices{index::m, index::e, index::a, index::b}, I_eijmab_temp[j_idx * FOUR + i_idx]);
                     I_eijmab_list[i_idx * FOUR + j_idx] += I_ejimba_buffer;
+
+                    // Jiang Eq. 21c 0.25 [2(me|nf) - (mf|ne)] Z_{nij}^{fab} -> O(N^{10}) worst case (x2 for permutational symmetry)
+                    einsum(1.0, Indices{index::m, index::e, index::a, index::b}, &I_eijmab_list[i_idx * FOUR + j_idx], 0.5,
+                            Indices{index::m, index::e, index::n, index::f}, L_menf, Indices{index::n, index::f, index::a, index::b}, Z_mij_list[i_idx * FOUR + j_idx]);
                 } // end j_idx
             } // end i_idx
         }
@@ -3062,6 +3062,8 @@ void DLPNOCCSDTQ::compute_R_iajbkcld(std::vector<Tensor<double, 4>>& R_iajbkcld)
         std::array<Tensor<double, 4>, 16> J_iejmab_list; {
             Tensor<double, 4> g_mfae_v("g_mfae_v", nlmo_ijkl, nqno_ijkl, nqno_ijkl, nqno_ijkl);
             permute(Indices{index::m, index::e, index::a, index::f}, &g_mfae_v, Indices{index::m, index::f, index::e, index::a}, g_mfae);
+            Tensor<double, 4> g_menf_v("g_menf_v", nlmo_ijkl, nqno_ijkl, nlmo_ijkl, nqno_ijkl);
+            permute(Indices{index::m, index::e, index::n, index::f}, &g_menf_v, Indices{index::m, index::f, index::n, index::e}, g_menf);
 
             for (int i_idx = 0; i_idx < FOUR; ++i_idx) {
                 for (int j_idx = 0; j_idx < FOUR; ++j_idx) {
@@ -3081,11 +3083,8 @@ void DLPNOCCSDTQ::compute_R_iajbkcld(std::vector<Tensor<double, 4>>& R_iajbkcld)
                     permute(Indices{index::n, index::f, index::a, index::b}, &T_mij_t, Indices{index::n, index::a, index::f, index::b}, T_mij_list[i_idx * FOUR + j_idx]);
 
                     // Jiang Eq. 23c -0.5 (mf|ne) T_{nij}^{afb} -> O(N^{10}) worst case
-                    // (mf|ne) = 2.0 * (me|nf) - L_(menf) (Yay! We like to cheat!)
-                    einsum(1.0, Indices{index::m, index::e, index::a, index::b}, &J_iejmab_list[i_idx * FOUR + j_idx], -1.0,
-                            Indices{index::m, index::e, index::n, index::f}, g_menf, Indices{index::n, index::f, index::a, index::b}, T_mij_t);
-                    einsum(1.0, Indices{index::m, index::e, index::a, index::b}, &J_iejmab_list[i_idx * FOUR + j_idx], 0.5,
-                            Indices{index::m, index::e, index::n, index::f}, L_menf, Indices{index::n, index::f, index::a, index::b}, T_mij_t);
+                    einsum(1.0, Indices{index::m, index::e, index::a, index::b}, &J_iejmab_list[i_idx * FOUR + j_idx], -0.5,
+                            Indices{index::m, index::e, index::n, index::f}, g_menf_v, Indices{index::n, index::f, index::a, index::b}, T_mij_t);
                 } // end j_idx
             } // end i_idx
         } // end scope
