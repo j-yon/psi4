@@ -2740,6 +2740,8 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
 
         /*- Occupation number threshold for removing QNOs with full quadruples !expert -*/
         options.add_double("T_CUT_QNO_FULL", 3.33e-6);
+        /*- Occupation number threshold for extended pair natural orbitals (XPNOs) !expert -*/
+        options.add_double("T_CUT_XPNO", 1.0e-7);
         /*- Number of T1/T2 microiteration updates per Full Q iteration 
             (increase this value for highly multireference systems) !expert -*/
         options.add_double("DLPNO_FULL_Q_MICROITERATIONS", 3);

@@ -716,6 +716,12 @@ class DLPNOCCSDTQ : public DLPNOCCSDT_Q {
     std::vector<Tensor<double, 3>> q_ov_ijkl_; ///< (Q_{ijkl} | m_{ijkl} a_{ijkl})
     std::vector<Tensor<double, 3>> q_vv_ijkl_; ///< (Q_{ijkl} | a_{ijkl} b_{ijkl})
 
+    // Extended PNO (XPNO) information
+    SparseMap lmopair_to_paos_ext_;       ///< lmopair to extended PAOs
+    std::vector<SharedMatrix> X_pno_ext_; ///< global PAO -> canonical PNO transforms
+    std::vector<SharedVector> e_pno_ext_; ///< PNO orbital energies
+    std::vector<int> n_pno_ext_;          ///< number of pnos
+
     /// Encapsulates the reading in of (Q_{ijkl} | m_{ijkl} a_{ijkl})
     inline Tensor<double, 3> QIA_QNO(const int ijkl);
     /// Encapsulates the reading in of (Q_{ijkl} | a_{ijkl} b_{ijkl})
@@ -736,6 +742,9 @@ class DLPNOCCSDTQ : public DLPNOCCSDT_Q {
     // Helper functions to form quadruples intermediates
     inline Tensor<double, 4> alpha_ijkl_helper(const Tensor<double, 4>& T_ijkl);
     inline Tensor<double, 4> beta_ijkl_helper(const Tensor<double, 4>& alpha_ijkl);
+
+    /// Create XPNOs (Extended Pair Natural Orbitals) to help with QNO projections
+    void xpno_transform(double xpno_tolerance);
 
     /// form the projected T_{mnkl}^{abcd} amplitudes over the QNO domain of kkll
     /// (to reduce the cost of certain delinquent terms)

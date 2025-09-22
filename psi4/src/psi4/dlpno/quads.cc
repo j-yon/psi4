@@ -1659,6 +1659,131 @@ void DLPNOCCSDTQ::estimate_memory() {
     }
 }
 
+void DLPNOCCSDTQ::xpno_transform(double xpno_tolerance) {
+    timer_on("XPNO transform");
+
+    int naocc = nalpha_ - nfrzc();
+    int nbf = basisset_->nbf();
+    int n_lmo_pairs = ij_to_i_j_.size();
+    int n_lmo_quadruplets = ijkl_to_i_j_k_l_.size();
+
+    lmopair_to_paos_ext_.resize(n_lmo_pairs);
+    X_pno_ext_.resize(n_lmo_pairs);
+    e_pno_ext_.resize(n_lmo_pairs);
+    n_pno_ext_.resize(n_lmo_pairs);
+
+#pragma omp parallel for
+    for (int kl = 0; kl < n_lmo_pairs; ++kl) {
+        auto &[k, l] = ij_to_i_j_[kl];
+        int lk = ij_to_ji_[kl];
+
+        if (k > l) continue;
+
+        for (int mn = 0; mn < n_lmo_pairs; ++mn) {
+            auto &[m, n] = ij_to_i_j_[mn];
+
+            int mnkl_idx = m * std::pow(naocc, 3) + n * std::pow(naocc, 2) + k * naocc + l;
+            int mnkl = i_j_k_l_to_ijkl_.count(mnkl_idx) ? i_j_k_l_to_ijkl_[mnkl_idx] : -1;
+            if (mnkl == -1) continue;
+
+            lmopair_to_paos_ext_[kl] = merge_lists(lmopair_to_paos_ext_[kl], lmoquadruplet_to_paos_[mnkl]);
+        }
+        lmopair_to_paos_ext_[lk] = lmopair_to_paos_ext_[kl];
+
+        // number of PAOs in the extended domain of kl
+        int npao_ext_kl = lmopair_to_paos_ext_[kl].size();
+
+        auto S_pao_kl_ext = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_ext_[kl], lmopair_to_paos_ext_[kl]);
+        auto F_pao_kl_ext = submatrix_rows_and_cols(*F_pao_, lmopair_to_paos_ext_[kl], lmopair_to_paos_ext_[kl]);
+
+        SharedMatrix X_pao_kl_ext;
+        SharedVector e_pao_kl_ext;
+        std::tie(X_pao_kl_ext, e_pao_kl_ext) = orthocanonicalizer(S_pao_kl_ext, F_pao_kl_ext);
+
+        F_pao_kl_ext = linalg::triplet(X_pao_kl_ext, F_pao_kl_ext, X_pao_kl_ext, true, false, false);
+
+        // number of PAOs in the domain after removing linear dependencies
+        int npao_can_kl_ext = X_pao_kl_ext->colspi(0);
+
+        //                                           //
+        // ==> Canonical PAOs  to Canonical QNOs <== //
+        //                                           //
+
+        size_t nvir_kl_ext = F_pao_kl_ext->rowspi(0);
+
+        // Compute pair density from amplitudes
+        auto D_kl = linalg::doublet(Tt_iajb_[kl], T_iajb_[kl], false, true);
+        D_kl->add(linalg::doublet(Tt_iajb_[kl], T_iajb_[kl], true, false));
+        if (k == l) D_kl->scale(0.5);
+
+        // Project D_kl into extended PAO basis
+        auto S_kl = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_ext_[kl], lmopair_to_paos_[kl]);
+        S_kl = linalg::triplet(X_pao_kl_ext, S_kl, X_pno_[kl], true, false, false);
+        
+        // Diagonalization of pair density
+        D_kl = linalg::triplet(S_kl, D_kl, S_kl, false, false, true);
+        auto X_pno_kl = std::make_shared<Matrix>("eigenvectors", nvir_kl_ext, nvir_kl_ext);
+        Vector pno_occ("eigenvalues", nvir_kl_ext);
+        D_kl->diagonalize(*X_pno_kl, pno_occ, descending);
+
+        int nvir_kl_final = 0;
+
+        for (size_t a = 0; a < nvir_kl_ext; ++a) {
+            if (fabs(pno_occ.get(a)) >= xpno_tolerance) {
+                nvir_kl_final++;
+            } // end if
+        } // end a
+
+        nvir_kl_final = std::max(1, nvir_kl_final);
+
+        Dimension zero(1);
+        Dimension dim_final(1);
+        dim_final.fill(nvir_kl_final);
+
+        // This transformation gives orbitals that are orthonormal but not canonical
+        X_pno_kl = X_pno_kl->get_block({zero, X_pno_kl->rowspi()}, {zero, dim_final});
+        pno_occ = pno_occ.get_block({zero, dim_final});
+
+        SharedMatrix pno_canon;
+        SharedVector e_pno_kl;
+        std::tie(pno_canon, e_pno_kl) = canonicalizer(X_pno_kl, F_pao_kl_ext);
+
+        // This transformation gives orbitals that are orthonormal and canonical
+        X_pno_kl = linalg::doublet(X_pno_kl, pno_canon, false, false);
+        X_pno_kl = linalg::doublet(X_pao_kl_ext, X_pno_kl, false, false);
+
+        X_pno_ext_[kl] = X_pno_kl;
+        e_pno_ext_[kl] = e_pno_kl;
+        n_pno_ext_[kl] = X_pno_kl->colspi(0);
+
+        // account for symmetry
+        if (k < l) {
+            X_pno_ext_[lk] = X_pno_kl;
+            e_pno_ext_[lk] = e_pno_kl;
+            n_pno_ext_[lk] = X_pno_kl->colspi(0);
+        } // end if (i < j)
+    }
+
+    // Print out PNO domain information
+    int pno_count_total = 0, pno_count_min = nbf, pno_count_max = 0;
+    for (int ij = 0; ij < n_lmo_pairs; ++ij) {
+        auto &[i, j] = ij_to_i_j_[ij];
+
+        pno_count_total += n_pno_ext_[ij];
+        pno_count_min = std::min(pno_count_min, n_pno_ext_[ij]);
+        pno_count_max = std::max(pno_count_max, n_pno_ext_[ij]);
+    }
+
+    outfile->Printf("  \n");
+    outfile->Printf("    (Extended) Natural Orbitals per Local MO pair:\n");
+    outfile->Printf("      Avg: %3d NOs \n", pno_count_total / n_lmo_pairs);
+    outfile->Printf("      Min: %3d NOs \n", pno_count_min);
+    outfile->Printf("      Max: %3d NOs \n", pno_count_max);
+    outfile->Printf("  \n");
+
+    timer_off("XPNO transform");
+}
+
 void DLPNOCCSDTQ::compute_integrals() {
 
     size_t n_lmo_quadruplets = ijkl_to_i_j_k_l_.size();
@@ -2384,9 +2509,6 @@ void DLPNOCCSDTQ::form_T_mnkl() {
     for (int kl = 0; kl < n_lmo_pairs; ++kl) {
         auto &[k, l] = ij_to_i_j_[kl];
         if (k > l) continue;
-        int kk = i_j_to_ij_[k][k];
-        int kkll_idx = k * std::pow(naocc, 3) + k * std::pow(naocc, 2) + l * naocc + l;
-        int kkll = i_j_k_l_to_ijkl_.count(kkll_idx) ? i_j_k_l_to_ijkl_[kkll_idx] : -1;
 
         // number of LMOs in the quadruplet domain
         const int nlmo_kl = lmopair_to_lmos_[kl].size();
@@ -2406,20 +2528,12 @@ void DLPNOCCSDTQ::form_T_mnkl() {
                 int mnkl = i_j_k_l_to_ijkl_.count(mnkl_idx) ? i_j_k_l_to_ijkl_[mnkl_idx] : -1;
 
                 if (mn == -1 || mnkl == -1) continue;
+                
+                auto S_mnkl_kl = submatrix_rows_and_cols(*S_pao_, lmoquadruplet_to_paos_[mnkl], lmopair_to_paos_ext_[kl]);
+                S_mnkl_kl = linalg::triplet(X_qno_[mnkl], S_mnkl_kl, X_pno_ext_[kl], true, false, false);
 
-                if (k != l) {
-                    auto S_mnkl_kkll = submatrix_rows_and_cols(*S_pao_, lmoquadruplet_to_paos_[mnkl], lmoquadruplet_to_paos_[kkll]);
-                    S_mnkl_kkll = linalg::triplet(X_qno_[mnkl], S_mnkl_kkll, X_qno_[kkll], true, false, false);
-
-                    T_mnkl_list_[kl][mn] = matmul_4d(quadruples_permuter(T_iajbkcld_[mnkl], m, n, k, l), 
-                            S_mnkl_kkll->transpose(), n_qno_[mnkl], n_qno_[kkll]);
-                } else {
-                    auto S_mnkl_kk = submatrix_rows_and_cols(*S_pao_, lmoquadruplet_to_paos_[mnkl], lmopair_to_paos_[kk]);
-                    S_mnkl_kk = linalg::triplet(X_qno_[mnkl], S_mnkl_kk, X_pno_[kk], true, false, false);
-
-                    T_mnkl_list_[kl][mn] = matmul_4d(quadruples_permuter(T_iajbkcld_[mnkl], m, n, k, l), 
-                            S_mnkl_kk->transpose(), n_qno_[mnkl], n_pno_[kk]);
-                }
+                T_mnkl_list_[kl][mn] = matmul_4d(quadruples_permuter(T_iajbkcld_[mnkl], m, n, k, l), 
+                        S_mnkl_kl->transpose(), n_qno_[mnkl], n_pno_ext_[kl]);
             } // end n_kl
         } // end m_kl
     } // end kl
@@ -3365,18 +3479,12 @@ void DLPNOCCSDTQ::compute_R_iajbkcld(std::vector<Tensor<double, 4>>& R_iajbkcld)
             auto &[i_idx, j_idx] = ijkl_pair_idx[ij_idx];
             auto &[k_idx, l_idx] = ijkl_pair_idx_complement[ij_idx];
             int i = ijkl_list[i_idx], j = ijkl_list[j_idx], k = ijkl_list[k_idx], l = ijkl_list[l_idx];
-            int kl = i_j_to_ij_[k][l], kk = i_j_to_ij_[k][k];
-            int kkll_idx = k * std::pow(naocc, 3) + k * std::pow(naocc, 2) + l * naocc + l;
-            int kkll = i_j_k_l_to_ijkl_.count(kkll_idx) ? i_j_k_l_to_ijkl_[kkll_idx] : -1;
+            int kl = i_j_to_ij_[k][l];
 
             Tensor<double, 4> R_ijkl_buffer_a("R_ijkl_buffer_a", nqno_ijkl, nqno_ijkl, nqno_ijkl, nqno_ijkl);
             Tensor<double, 4> R_ijkl_buffer_b("R_ijkl_buffer_b", nqno_ijkl, nqno_ijkl, nqno_ijkl, nqno_ijkl);
-            Tensor<double, 4> R_ijkl_buffer_c;
-            if (k != l) {
-                R_ijkl_buffer_c = Tensor<double, 4>("R_ijkl_buffer_c", n_qno_[kkll], n_qno_[kkll], n_qno_[kkll], n_qno_[kkll]);
-            } else {
-                R_ijkl_buffer_c = Tensor<double, 4>("R_ijkl_buffer_c", n_pno_[kk], n_pno_[kk], n_pno_[kk], n_pno_[kk]);
-            }
+            Tensor<double, 4> R_ijkl_buffer_c("R_ijkl_buffer_c", n_pno_ext_[kl], n_pno_ext_[kl], n_pno_ext_[kl], n_pno_ext_[kl]);
+
             R_ijkl_buffer_a.zero();
             R_ijkl_buffer_b.zero();
             R_ijkl_buffer_c.zero();
@@ -3392,12 +3500,7 @@ void DLPNOCCSDTQ::compute_R_iajbkcld(std::vector<Tensor<double, 4>>& R_iajbkcld)
                     int mnkl = i_j_k_l_to_ijkl_.count(mnkl_idx) ? i_j_k_l_to_ijkl_[mnkl_idx] : -1;
                     if (mn == -1 || mnkl == -1) continue;
 
-                    Tensor<double, 4> T_mnkl;
-                    if (k != l) {
-                        T_mnkl = Tensor<double, 4>("T_mnkl", n_qno_[kkll], n_qno_[kkll], n_qno_[kkll], n_qno_[kkll]);
-                    } else {
-                        T_mnkl = Tensor<double, 4>("T_mnkl", n_pno_[kk], n_pno_[kk], n_pno_[kk], n_pno_[kk]);
-                    }
+                    Tensor<double, 4> T_mnkl("T_mnkl", n_pno_ext_[kl], n_pno_ext_[kl], n_pno_ext_[kl], n_pno_ext_[kl]);
                     int lk = ij_to_ji_[kl], nm = ij_to_ji_[mn];
 
                     if (m > n && k > l) {
@@ -3410,21 +3513,14 @@ void DLPNOCCSDTQ::compute_R_iajbkcld(std::vector<Tensor<double, 4>>& R_iajbkcld)
                         T_mnkl = T_mnkl_list_[kl][mn];
                     }
 
-                    T_mnkl *= (G_ijmn_list[i_idx * FOUR + j_idx])(m_ijkl, n_ijkl);
-
-                    R_ijkl_buffer_c += T_mnkl;
+                    size_t length = std::pow(n_pno_ext_[kl], 4);
+                    C_DAXPY(length, (G_ijmn_list[i_idx * FOUR + j_idx])(m_ijkl, n_ijkl), T_mnkl.data(), 1, R_ijkl_buffer_c.data(), 1);
                 } // end n_ijkl
             } // end m_ijkl
 
-            if (k != l) {
-                auto S_ijkl_kkll = submatrix_rows_and_cols(*S_pao_, lmoquadruplet_to_paos_[ijkl], lmoquadruplet_to_paos_[kkll]);
-                S_ijkl_kkll = linalg::triplet(X_qno_[ijkl], S_ijkl_kkll, X_qno_[kkll], true, false, false);
-                R_ijkl_buffer_a += matmul_4d(R_ijkl_buffer_c, S_ijkl_kkll, n_qno_[kkll], n_qno_[ijkl]);
-            } else {
-                auto S_ijkl_kk = submatrix_rows_and_cols(*S_pao_, lmoquadruplet_to_paos_[ijkl], lmopair_to_paos_[kk]);
-                S_ijkl_kk = linalg::triplet(X_qno_[ijkl], S_ijkl_kk, X_pno_[kk], true, false, false);
-                R_ijkl_buffer_a += matmul_4d(R_ijkl_buffer_c, S_ijkl_kk, n_pno_[kk], n_qno_[ijkl]);
-            }
+            auto S_ijkl_kl = submatrix_rows_and_cols(*S_pao_, lmoquadruplet_to_paos_[ijkl], lmopair_to_paos_ext_[kl]);
+            S_ijkl_kl = linalg::triplet(X_qno_[ijkl], S_ijkl_kl, X_pno_ext_[kl], true, false, false);
+            R_ijkl_buffer_a += matmul_4d(R_ijkl_buffer_c, S_ijkl_kl, n_pno_ext_[kl], n_qno_[ijkl]);
 
             // Jiang and Matthews Eq. 20 0.25 * H_{ef}^{ab} T_{ijkl}^{efcd} -> O(N^{10}) worst case
             Tensor<double, 4> T_ijkl = quadruples_permuter(T_iajbkcld_[ijkl], i, j, k, l);
@@ -3947,6 +4043,10 @@ double DLPNOCCSDTQ::compute_energy() {
         psio_->open(PSIF_DLPNO_QIA_QNO, PSIO_OPEN_NEW);
         psio_->open(PSIF_DLPNO_QAB_QNO, PSIO_OPEN_NEW);
     }
+
+    // Compute extended PNOs
+    double xpno_tolerance = options_.get_double("T_CUT_XPNO");
+    xpno_transform(xpno_tolerance);
 
     timer_on("DLPNO-CCSDTQ : Estimate Memory");
     estimate_memory();
