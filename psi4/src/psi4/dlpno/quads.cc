@@ -2369,7 +2369,7 @@ std::vector<Tensor<double, 4>> DLPNOCCSDTQ::alpha_M_contribution() {
     return M_alpha_list;
 }
 
-void DLPNOCCSDTQ::form_T_mnkl_pno() {
+void DLPNOCCSDTQ::form_T_mnkl() {
 
     int naocc = i_j_to_ij_.size();
     size_t n_lmo_pairs = ij_to_i_j_.size();
@@ -2377,20 +2377,23 @@ void DLPNOCCSDTQ::form_T_mnkl_pno() {
     size_t n_lmo_quadruplets = ijkl_to_i_j_k_l_.size();
 
     // Stored as kl, mn
-    T_mnkl_pno_list_.resize(n_lmo_pairs);
+    T_mnkl_list_.resize(n_lmo_pairs);
 
     // Loop over all pairs
 #pragma omp parallel for schedule(dynamic, 1)
     for (int kl = 0; kl < n_lmo_pairs; ++kl) {
         auto &[k, l] = ij_to_i_j_[kl];
         if (k > l) continue;
+        int kk = i_j_to_ij_[k][k];
+        int kkll_idx = k * std::pow(naocc, 3) + k * std::pow(naocc, 2) + l * naocc + l;
+        int kkll = i_j_k_l_to_ijkl_.count(kkll_idx) ? i_j_k_l_to_ijkl_[kkll_idx] : -1;
 
         // number of LMOs in the quadruplet domain
         const int nlmo_kl = lmopair_to_lmos_[kl].size();
         // number of PNOs in the quadruplet domain
         const int npno_kl = n_pno_[kl];
 
-        T_mnkl_pno_list_[kl].resize(n_lmo_pairs);
+        T_mnkl_list_[kl].resize(n_lmo_pairs);
 
         for (int m_kl = 0; m_kl < nlmo_kl; ++m_kl) {
             int m = lmopair_to_lmos_[kl][m_kl];
@@ -2404,11 +2407,19 @@ void DLPNOCCSDTQ::form_T_mnkl_pno() {
 
                 if (mn == -1 || mnkl == -1) continue;
 
-                auto S_mnkl_kl = submatrix_rows_and_cols(*S_pao_, lmoquadruplet_to_paos_[mnkl], lmopair_to_paos_[kl]);
-                S_mnkl_kl = linalg::triplet(X_qno_[mnkl], S_mnkl_kl, X_pno_[kl], true, false, false);
+                if (k != l) {
+                    auto S_mnkl_kkll = submatrix_rows_and_cols(*S_pao_, lmoquadruplet_to_paos_[mnkl], lmoquadruplet_to_paos_[kkll]);
+                    S_mnkl_kkll = linalg::triplet(X_qno_[mnkl], S_mnkl_kkll, X_qno_[kkll], true, false, false);
 
-                T_mnkl_pno_list_[kl][mn] = matmul_4d(quadruples_permuter(T_iajbkcld_[mnkl], m, n, k, l), 
-                        S_mnkl_kl->transpose(), n_qno_[mnkl], n_pno_[kl]);
+                    T_mnkl_list_[kl][mn] = matmul_4d(quadruples_permuter(T_iajbkcld_[mnkl], m, n, k, l), 
+                            S_mnkl_kkll->transpose(), n_qno_[mnkl], n_qno_[kkll]);
+                } else {
+                    auto S_mnkl_kk = submatrix_rows_and_cols(*S_pao_, lmoquadruplet_to_paos_[mnkl], lmopair_to_paos_[kk]);
+                    S_mnkl_kk = linalg::triplet(X_qno_[mnkl], S_mnkl_kk, X_pno_[kk], true, false, false);
+
+                    T_mnkl_list_[kl][mn] = matmul_4d(quadruples_permuter(T_iajbkcld_[mnkl], m, n, k, l), 
+                            S_mnkl_kk->transpose(), n_qno_[mnkl], n_pno_[kk]);
+                }
             } // end n_kl
         } // end m_kl
     } // end kl
@@ -3354,20 +3365,23 @@ void DLPNOCCSDTQ::compute_R_iajbkcld(std::vector<Tensor<double, 4>>& R_iajbkcld)
             auto &[i_idx, j_idx] = ijkl_pair_idx[ij_idx];
             auto &[k_idx, l_idx] = ijkl_pair_idx_complement[ij_idx];
             int i = ijkl_list[i_idx], j = ijkl_list[j_idx], k = ijkl_list[k_idx], l = ijkl_list[l_idx];
-            int kl = i_j_to_ij_[k][l];
-
-            auto S_ijkl_kl = submatrix_rows_and_cols(*S_pao_, lmoquadruplet_to_paos_[ijkl], lmopair_to_paos_[kl]);
-            S_ijkl_kl = linalg::triplet(X_qno_[ijkl], S_ijkl_kl, X_pno_[kl], true, false, false);
+            int kl = i_j_to_ij_[k][l], kk = i_j_to_ij_[k][k];
+            int kkll_idx = k * std::pow(naocc, 3) + k * std::pow(naocc, 2) + l * naocc + l;
+            int kkll = i_j_k_l_to_ijkl_.count(kkll_idx) ? i_j_k_l_to_ijkl_[kkll_idx] : -1;
 
             Tensor<double, 4> R_ijkl_buffer_a("R_ijkl_buffer_a", nqno_ijkl, nqno_ijkl, nqno_ijkl, nqno_ijkl);
             Tensor<double, 4> R_ijkl_buffer_b("R_ijkl_buffer_b", nqno_ijkl, nqno_ijkl, nqno_ijkl, nqno_ijkl);
-            Tensor<double, 4> R_ijkl_buffer_c("R_ijkl_buffer_c", n_pno_[kl], n_pno_[kl], n_pno_[kl], n_pno_[kl]);
+            Tensor<double, 4> R_ijkl_buffer_c;
+            if (k != l) {
+                R_ijkl_buffer_c = Tensor<double, 4>("R_ijkl_buffer_c", n_qno_[kkll], n_qno_[kkll], n_qno_[kkll], n_qno_[kkll]);
+            } else {
+                R_ijkl_buffer_c = Tensor<double, 4>("R_ijkl_buffer_c", n_pno_[kk], n_pno_[kk], n_pno_[kk], n_pno_[kk]);
+            }
             R_ijkl_buffer_a.zero();
             R_ijkl_buffer_b.zero();
             R_ijkl_buffer_c.zero();
 
             // Jiang and Matthews Eq. 18 0.25 * G_{ij}^{mn} T_{mnkl}^{abcd} -> O(N^{10}) worst case
-            R_ijkl_buffer_c.zero();
             for (int m_ijkl = 0; m_ijkl < nlmo_ijkl; ++m_ijkl) {
                 int m = lmoquadruplet_to_lmos_[ijkl][m_ijkl];
 
@@ -3378,17 +3392,22 @@ void DLPNOCCSDTQ::compute_R_iajbkcld(std::vector<Tensor<double, 4>>& R_iajbkcld)
                     int mnkl = i_j_k_l_to_ijkl_.count(mnkl_idx) ? i_j_k_l_to_ijkl_[mnkl_idx] : -1;
                     if (mn == -1 || mnkl == -1) continue;
 
-                    Tensor<double, 4> T_mnkl("T_mnkl", n_pno_[kl], n_pno_[kl], n_pno_[kl], n_pno_[kl]);
+                    Tensor<double, 4> T_mnkl;
+                    if (k != l) {
+                        T_mnkl = Tensor<double, 4>("T_mnkl", n_qno_[kkll], n_qno_[kkll], n_qno_[kkll], n_qno_[kkll]);
+                    } else {
+                        T_mnkl = Tensor<double, 4>("T_mnkl", n_pno_[kk], n_pno_[kk], n_pno_[kk], n_pno_[kk]);
+                    }
                     int lk = ij_to_ji_[kl], nm = ij_to_ji_[mn];
 
                     if (m > n && k > l) {
-                        permute(Indices{index::b, index::a, index::d, index::c}, &T_mnkl, Indices{index::a, index::b, index::c, index::d}, T_mnkl_pno_list_[lk][nm]);
+                        permute(Indices{index::b, index::a, index::d, index::c}, &T_mnkl, Indices{index::a, index::b, index::c, index::d}, T_mnkl_list_[lk][nm]);
                     } else if (m > n) {
-                        permute(Indices{index::b, index::a, index::c, index::d}, &T_mnkl, Indices{index::a, index::b, index::c, index::d}, T_mnkl_pno_list_[kl][nm]);
+                        permute(Indices{index::b, index::a, index::c, index::d}, &T_mnkl, Indices{index::a, index::b, index::c, index::d}, T_mnkl_list_[kl][nm]);
                     } else if (k > l) {
-                        permute(Indices{index::a, index::b, index::d, index::c}, &T_mnkl, Indices{index::a, index::b, index::c, index::d}, T_mnkl_pno_list_[lk][mn]);
+                        permute(Indices{index::a, index::b, index::d, index::c}, &T_mnkl, Indices{index::a, index::b, index::c, index::d}, T_mnkl_list_[lk][mn]);
                     } else {
-                        T_mnkl = T_mnkl_pno_list_[kl][mn];
+                        T_mnkl = T_mnkl_list_[kl][mn];
                     }
 
                     T_mnkl *= (G_ijmn_list[i_idx * FOUR + j_idx])(m_ijkl, n_ijkl);
@@ -3396,7 +3415,16 @@ void DLPNOCCSDTQ::compute_R_iajbkcld(std::vector<Tensor<double, 4>>& R_iajbkcld)
                     R_ijkl_buffer_c += T_mnkl;
                 } // end n_ijkl
             } // end m_ijkl
-            R_ijkl_buffer_a += matmul_4d(R_ijkl_buffer_c, S_ijkl_kl, n_pno_[kl], n_qno_[ijkl]);
+
+            if (k != l) {
+                auto S_ijkl_kkll = submatrix_rows_and_cols(*S_pao_, lmoquadruplet_to_paos_[ijkl], lmoquadruplet_to_paos_[kkll]);
+                S_ijkl_kkll = linalg::triplet(X_qno_[ijkl], S_ijkl_kkll, X_qno_[kkll], true, false, false);
+                R_ijkl_buffer_a += matmul_4d(R_ijkl_buffer_c, S_ijkl_kkll, n_qno_[kkll], n_qno_[ijkl]);
+            } else {
+                auto S_ijkl_kk = submatrix_rows_and_cols(*S_pao_, lmoquadruplet_to_paos_[ijkl], lmopair_to_paos_[kk]);
+                S_ijkl_kk = linalg::triplet(X_qno_[ijkl], S_ijkl_kk, X_pno_[kk], true, false, false);
+                R_ijkl_buffer_a += matmul_4d(R_ijkl_buffer_c, S_ijkl_kk, n_pno_[kk], n_qno_[ijkl]);
+            }
 
             // Jiang and Matthews Eq. 20 0.25 * H_{ef}^{ab} T_{ijkl}^{efcd} -> O(N^{10}) worst case
             Tensor<double, 4> T_ijkl = quadruples_permuter(T_iajbkcld_[ijkl], i, j, k, l);
@@ -3715,7 +3743,7 @@ void DLPNOCCSDTQ::lccsdtq_iterations() {
             // compute quadruples amplitude
             timer_on("DLPNO-CCSDTQ : R_iajbkcld");
             if (miter == N_MICRO_ITER - 1) {
-                form_T_mnkl_pno();
+                form_T_mnkl();
                 compute_R_iajbkcld(R_iajbkcld);
             }
             timer_off("DLPNO-CCSDTQ : R_iajbkcld");
