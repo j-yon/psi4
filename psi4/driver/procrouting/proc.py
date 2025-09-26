@@ -4429,7 +4429,7 @@ def run_dlpnoccsd(name, **kwargs):
         raise ValidationError("DLPNO-CCSD is not available for %s references.",
                               core.get_global_option('REFERENCE'))
     
-    core.tstart()
+    # core.tstart()
     core.print_out('\n')
     p4util.banner('DLPNO-CCSD')
     core.print_out('\n')
@@ -4452,7 +4452,7 @@ def run_dlpnoccsd(name, **kwargs):
         core.set_variable(k, v)
 
     optstash.restore()
-    core.tstop()
+    # core.tstop()
     return dlpnoccsd_wfn
 
 def run_dlpnoccsd_t(name, **kwargs):
@@ -4477,7 +4477,7 @@ def run_dlpnoccsd_t(name, **kwargs):
         raise ValidationError("DLPNO-CCSD(T) is not available for %s references.",
                               core.get_global_option('REFERENCE'))
     
-    core.tstart()
+    # core.tstart()
     core.print_out('\n')
     p4util.banner('DLPNO-CCSD(T)')
     core.print_out('\n')
@@ -4501,7 +4501,7 @@ def run_dlpnoccsd_t(name, **kwargs):
         core.set_variable(k, v)
 
     optstash.restore()
-    core.tstop()
+    # core.tstop()
     return dlpnoccsd_t_wfn
 
 def run_mp2f12(name, **kwargs):

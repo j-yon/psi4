@@ -28,7 +28,9 @@
 
 #include "dlpno.h"
 #include "sparse.h"
+#include "psi4/times.h"
 
+#include "psi4/libciomr/libciomr.h"
 #include "psi4/lib3index/3index.h"
 #include "psi4/libdiis/diismanager.h"
 #include "psi4/libfock/cubature.h"
@@ -56,7 +58,7 @@
 namespace psi {
 namespace dlpno {
 
-DLPNOCCSD_T::DLPNOCCSD_T(SharedWavefunction ref_wfn, Options &options) : DLPNOCCSD(ref_wfn, options) {}
+DLPNOCCSD_T::DLPNOCCSD_T(SharedWavefunction ref_wfn, Options& options) : DLPNOCCSD(ref_wfn, options) {}
 DLPNOCCSD_T::~DLPNOCCSD_T() {}
 
 void DLPNOCCSD_T::print_header() {
@@ -105,7 +107,7 @@ SharedMatrix DLPNOCCSD_T::matmul_3d(SharedMatrix A, SharedMatrix X, int dim_old,
     SharedMatrix A_T = std::make_shared<Matrix>(dim_new * dim_new, dim_old);
     for (int ind = 0; ind < dim_new * dim_new * dim_old; ++ind) {
         int a = ind / (dim_new * dim_old), b = (ind / dim_old) % dim_new, c = ind % dim_old;
-        (*A_T)(a *dim_new + b, c) = (*A_new)(a * dim_old + c, b);
+        (*A_T)(a* dim_new + b, c) = (*A_new)(a * dim_old + c, b);
     }
     A_T = linalg::doublet(A_T, X, false, true);
 
@@ -113,7 +115,7 @@ SharedMatrix DLPNOCCSD_T::matmul_3d(SharedMatrix A, SharedMatrix X, int dim_old,
 
     for (int ind = 0; ind < dim_new * dim_new * dim_new; ++ind) {
         int a = ind / (dim_new * dim_new), b = (ind / dim_new) % dim_new, c = ind % dim_new;
-        (*A_new)(a, b *dim_new + c) = (*A_T)(a * dim_new + c, b);
+        (*A_new)(a, b* dim_new + c) = (*A_T)(a * dim_new + c, b);
     }
 
     return A_new;
@@ -198,7 +200,8 @@ void DLPNOCCSD_T::triples_sparsity(bool prescreening) {
     SparseMap lmo_to_ribfs(naocc);
     SparseMap lmo_to_riatoms(naocc);
 
-    double t_cut_mkn_triples = (prescreening) ? options_.get_double("T_CUT_MKN_TRIPLES_PRE") : options_.get_double("T_CUT_MKN_TRIPLES");
+    double t_cut_mkn_triples =
+        (prescreening) ? options_.get_double("T_CUT_MKN_TRIPLES_PRE") : options_.get_double("T_CUT_MKN_TRIPLES");
 
     for (size_t i = 0; i < naocc; ++i) {
         // atomic mulliken populations for this orbital
@@ -243,7 +246,8 @@ void DLPNOCCSD_T::triples_sparsity(bool prescreening) {
 
     SparseMap lmo_to_paos(naocc);
 
-    double t_cut_do_triples = (prescreening) ? options_.get_double("T_CUT_DO_TRIPLES_PRE") : options_.get_double("T_CUT_DO_TRIPLES");
+    double t_cut_do_triples =
+        (prescreening) ? options_.get_double("T_CUT_DO_TRIPLES_PRE") : options_.get_double("T_CUT_DO_TRIPLES");
 
     for (size_t i = 0; i < naocc; ++i) {
         // PAO domains determined by differential overlap integral
@@ -282,7 +286,6 @@ void DLPNOCCSD_T::triples_sparsity(bool prescreening) {
         lmotriplet_to_paos_[ijk] = merge_lists(lmo_to_paos[i], merge_lists(lmo_to_paos[j], lmo_to_paos[k]));
     }
 
-
     timer_off("Triples Sparsity");
 }
 
@@ -299,9 +302,10 @@ void DLPNOCCSD_T::sort_triplets(double e_total) {
         ijk_e_pairs[ijk] = std::make_pair(ijk, e_ijk_[ijk]);
     }
 
-    std::sort(ijk_e_pairs.begin(), ijk_e_pairs.end(), [&](const std::pair<int, double>& a, const std::pair<int, double>& b) {
-        return (std::fabs(a.second) > std::fabs(b.second));
-    });
+    std::sort(ijk_e_pairs.begin(), ijk_e_pairs.end(),
+              [&](const std::pair<int, double>& a, const std::pair<int, double>& b) {
+                  return (std::fabs(a.second) > std::fabs(b.second));
+              });
 
     double e_curr = 0.0;
     double strong_scale = options_.get_double("T_CUT_TNO_STRONG_SCALE");
@@ -319,8 +323,8 @@ void DLPNOCCSD_T::sort_triplets(double e_total) {
         if (e_curr / e_total > 0.9) break;
     }
 
-    outfile->Printf("    Number of Strong Triplets: %6d, Total Triplets: %6d, Ratio: %.4f\n\n", strong_count, n_lmo_triplets, 
-                            (double) strong_count / n_lmo_triplets);
+    outfile->Printf("    Number of Strong Triplets: %6d, Total Triplets: %6d, Ratio: %.4f\n\n", strong_count,
+                    n_lmo_triplets, (double)strong_count / n_lmo_triplets);
 
     timer_off("Sort Triplets");
 }
@@ -375,7 +379,6 @@ void DLPNOCCSD_T::tno_transform(double t_cut_tno) {
         std::vector<int> pair_ext_domain = merge_lists(lmo_to_paos_[i], merge_lists(lmo_to_paos_[j], lmo_to_paos_[k]));
         auto S_ijk = submatrix_rows_and_cols(*S_pao_, pair_ext_domain, lmotriplet_to_paos_[ijk]);
         S_ijk = linalg::doublet(S_ijk, X_pao_ijk, false, false);
-        
 
         //                                           //
         // ==> Canonical PAOs  to Canonical TNOs <== //
@@ -586,7 +589,8 @@ double DLPNOCCSD_T::compute_lccsd_t0(bool store_amplitudes) {
         const int naux_ijk = lmotriplet_to_ribfs_[ijk].size();
 
         // number of PAOs in the pair domains of ij, jk, and ik
-        const int npao_ij = lmopair_to_paos_[ij].size(), npao_jk = lmopair_to_paos_[jk].size(), npao_ik = lmopair_to_paos_[ik].size();
+        const int npao_ij = lmopair_to_paos_[ij].size(), npao_jk = lmopair_to_paos_[jk].size(),
+                  npao_ik = lmopair_to_paos_[ik].size();
 
         /// => Build (i a_ijk | b_ijk d_jk) and (k c_ijk | j l) integrals <= ///
 
@@ -606,17 +610,22 @@ double DLPNOCCSD_T::compute_lccsd_t0(bool store_amplitudes) {
 
             for (int l_ijk = 0; l_ijk < nlmo_ijk; ++l_ijk) {
                 int l = lmotriplet_to_lmos_[ijk][l_ijk];
-                (*q_io)(q_ijk, l_ijk) = (*qij_[q])(riatom_to_lmos_ext_dense_[centerq][i], riatom_to_lmos_ext_dense_[centerq][l]);
-                (*q_jo)(q_ijk, l_ijk) = (*qij_[q])(riatom_to_lmos_ext_dense_[centerq][j], riatom_to_lmos_ext_dense_[centerq][l]);
-                (*q_ko)(q_ijk, l_ijk) = (*qij_[q])(riatom_to_lmos_ext_dense_[centerq][k], riatom_to_lmos_ext_dense_[centerq][l]);
+                (*q_io)(q_ijk, l_ijk) =
+                    (*qij_[q])(riatom_to_lmos_ext_dense_[centerq][i], riatom_to_lmos_ext_dense_[centerq][l]);
+                (*q_jo)(q_ijk, l_ijk) =
+                    (*qij_[q])(riatom_to_lmos_ext_dense_[centerq][j], riatom_to_lmos_ext_dense_[centerq][l]);
+                (*q_ko)(q_ijk, l_ijk) =
+                    (*qij_[q])(riatom_to_lmos_ext_dense_[centerq][k], riatom_to_lmos_ext_dense_[centerq][l]);
             }
-
 
             for (int u_ijk = 0; u_ijk < npao_ijk; ++u_ijk) {
                 int u = lmotriplet_to_paos_[ijk][u_ijk];
-                (*q_iv)(q_ijk, u_ijk) = (*qia_[q])(riatom_to_lmos_ext_dense_[centerq][i], riatom_to_paos_ext_dense_[centerq][u]);
-                (*q_jv)(q_ijk, u_ijk) = (*qia_[q])(riatom_to_lmos_ext_dense_[centerq][j], riatom_to_paos_ext_dense_[centerq][u]);
-                (*q_kv)(q_ijk, u_ijk) = (*qia_[q])(riatom_to_lmos_ext_dense_[centerq][k], riatom_to_paos_ext_dense_[centerq][u]);
+                (*q_iv)(q_ijk, u_ijk) =
+                    (*qia_[q])(riatom_to_lmos_ext_dense_[centerq][i], riatom_to_paos_ext_dense_[centerq][u]);
+                (*q_jv)(q_ijk, u_ijk) =
+                    (*qia_[q])(riatom_to_lmos_ext_dense_[centerq][j], riatom_to_paos_ext_dense_[centerq][u]);
+                (*q_kv)(q_ijk, u_ijk) =
+                    (*qia_[q])(riatom_to_lmos_ext_dense_[centerq][k], riatom_to_paos_ext_dense_[centerq][u]);
             }
 
             auto q_vv_tmp = std::make_shared<Matrix>(npao_ijk, npao_ijk);
@@ -629,8 +638,8 @@ double DLPNOCCSD_T::compute_lccsd_t0(bool store_amplitudes) {
                     int uv_idx = riatom_to_pao_pairs_dense_[centerq][u][v];
                     if (uv_idx == -1) continue;
                     (*q_vv_tmp)(u_ijk, v_ijk) = (*qab_[q])(uv_idx, 0);
-                } // end v_ijk
-            } // end u_ijk
+                }  // end v_ijk
+            }  // end u_ijk
             q_vv_tmp = linalg::triplet(X_tno_[ijk], q_vv_tmp, X_tno_[ijk], true, false, false);
             ::memcpy(&(*q_vv)(q_ijk, 0), &(*q_vv_tmp)(0, 0), ntno_ijk * ntno_ijk * sizeof(double));
         }
@@ -638,7 +647,7 @@ double DLPNOCCSD_T::compute_lccsd_t0(bool store_amplitudes) {
         q_iv = linalg::doublet(q_iv, X_tno_[ijk]);
         q_jv = linalg::doublet(q_jv, X_tno_[ijk]);
         q_kv = linalg::doublet(q_kv, X_tno_[ijk]);
-        
+
         auto q_iv_clone = q_iv->clone();
         auto q_jv_clone = q_jv->clone();
         auto q_kv_clone = q_kv->clone();
@@ -647,7 +656,7 @@ double DLPNOCCSD_T::compute_lccsd_t0(bool store_amplitudes) {
         C_DGESV_wrapper(A_solve->clone(), q_iv_clone);
         C_DGESV_wrapper(A_solve->clone(), q_jv_clone);
         C_DGESV_wrapper(A_solve->clone(), q_kv_clone);
-        
+
         A_solve->power(0.5, 1.0e-14);
 
         C_DGESV_wrapper(A_solve->clone(), q_iv);
@@ -716,7 +725,7 @@ double DLPNOCCSD_T::compute_lccsd_t0(bool store_amplitudes) {
 
             Wperms[idx] = std::make_shared<Matrix>(ntno_ijk, ntno_ijk * ntno_ijk);
             Wperms[idx]->zero();
-            
+
             // Compute overlap between TNOs of triplet ijk and PNOs of pair kj
             std::vector<int> kj_idx_list = index_list(pair_ext_domain, lmopair_to_paos_[kj]);
             auto S_kj_ijk = linalg::doublet(X_pno_[kj], submatrix_rows(*S_ijk, kj_idx_list), true, false);
@@ -742,18 +751,18 @@ double DLPNOCCSD_T::compute_lccsd_t0(bool store_amplitudes) {
                 for (int a_ijk = 0; a_ijk < ntno_ijk; a_ijk++) {
                     for (int b_ijk = 0; b_ijk < ntno_ijk; b_ijk++) {
                         for (int c_ijk = 0; c_ijk < ntno_ijk; c_ijk++) {
-                            (*Wperms[idx])(a_ijk, b_ijk *ntno_ijk + c_ijk) -=
+                            (*Wperms[idx])(a_ijk, b_ijk* ntno_ijk + c_ijk) -=
                                 (*T_il)(a_ijk, b_ijk) * (*K_ooov_list[idx])(l_ijk, c_ijk);
                         }
                     }
                 }  // end a_ijk
-            }      // end l_ijk
+            }  // end l_ijk
         }
 
         for (int a_ijk = 0; a_ijk < ntno_ijk; a_ijk++) {
             for (int b_ijk = 0; b_ijk < ntno_ijk; b_ijk++) {
                 for (int c_ijk = 0; c_ijk < ntno_ijk; c_ijk++) {
-                    (*W_ijk)(a_ijk, b_ijk *ntno_ijk + c_ijk) =
+                    (*W_ijk)(a_ijk, b_ijk* ntno_ijk + c_ijk) =
                         (*Wperms[0])(a_ijk, b_ijk * ntno_ijk + c_ijk) + (*Wperms[1])(a_ijk, c_ijk * ntno_ijk + b_ijk) +
                         (*Wperms[2])(b_ijk, a_ijk * ntno_ijk + c_ijk) + (*Wperms[3])(b_ijk, c_ijk * ntno_ijk + a_ijk) +
                         (*Wperms[4])(c_ijk, a_ijk * ntno_ijk + b_ijk) + (*Wperms[5])(c_ijk, b_ijk * ntno_ijk + a_ijk);
@@ -792,7 +801,7 @@ double DLPNOCCSD_T::compute_lccsd_t0(bool store_amplitudes) {
         for (int a_ijk = 0; a_ijk < ntno_ijk; a_ijk++) {
             for (int b_ijk = 0; b_ijk < ntno_ijk; b_ijk++) {
                 for (int c_ijk = 0; c_ijk < ntno_ijk; c_ijk++) {
-                    (*V_ijk)(a_ijk, b_ijk *ntno_ijk + c_ijk) += (*T_i)(a_ijk, 0) * (*K_jk)(b_ijk, c_ijk) +
+                    (*V_ijk)(a_ijk, b_ijk* ntno_ijk + c_ijk) += (*T_i)(a_ijk, 0) * (*K_jk)(b_ijk, c_ijk) +
                                                                 (*T_j)(b_ijk, 0) * (*K_ik)(a_ijk, c_ijk) +
                                                                 (*T_k)(c_ijk, 0) * (*K_ij)(a_ijk, b_ijk);
                 }
@@ -810,7 +819,7 @@ double DLPNOCCSD_T::compute_lccsd_t0(bool store_amplitudes) {
         for (int a_ijk = 0; a_ijk < ntno_ijk; a_ijk++) {
             for (int b_ijk = 0; b_ijk < ntno_ijk; b_ijk++) {
                 for (int c_ijk = 0; c_ijk < ntno_ijk; c_ijk++) {
-                    (*T_ijk)(a_ijk, b_ijk *ntno_ijk + c_ijk) =
+                    (*T_ijk)(a_ijk, b_ijk* ntno_ijk + c_ijk) =
                         -(*T_ijk)(a_ijk, b_ijk * ntno_ijk + c_ijk) /
                         (e_tno_[ijk]->get(a_ijk) + e_tno_[ijk]->get(b_ijk) + e_tno_[ijk]->get(c_ijk) - (*F_lmo_)(i, i) -
                          (*F_lmo_)(j, j) - (*F_lmo_)(k, k));
@@ -850,10 +859,12 @@ double DLPNOCCSD_T::compute_lccsd_t0(bool store_amplitudes) {
 
         if (thread == 0) {
             std::time_t time_curr = std::time(nullptr);
-            int time_elapsed = (int) time_curr - (int) time_lap;
+            int time_elapsed = (int)time_curr - (int)time_lap;
             if (time_elapsed > 60) {
-                outfile->Printf("  Time Elapsed from last checkpoint %4d (s), Progress %2d %%, Amplitudes for (%6d / %6d) Triplets Computed\n", time_elapsed, 
-                                    (100 * ijk) / n_lmo_triplets, ijk, n_lmo_triplets);
+                outfile->Printf(
+                    "  Time Elapsed from last checkpoint %4d (s), Progress %2d %%, Amplitudes for (%6d / %6d) Triplets "
+                    "Computed\n",
+                    time_elapsed, (100 * ijk) / n_lmo_triplets, ijk, n_lmo_triplets);
                 time_lap = std::time(nullptr);
             }
         }
@@ -862,8 +873,9 @@ double DLPNOCCSD_T::compute_lccsd_t0(bool store_amplitudes) {
     timer_off("LCCSD(T0)");
 
     std::time_t time_stop = std::time(nullptr);
-    int time_elapsed = (int) time_stop - (int) time_start;
-    outfile->Printf("    (Relavent) Semicanonical LCCSD(T0) Computation Complete!!! Time Elapsed: %4d seconds\n\n", time_elapsed);
+    int time_elapsed = (int)time_stop - (int)time_start;
+    outfile->Printf("    (Relavent) Semicanonical LCCSD(T0) Computation Complete!!! Time Elapsed: %4d seconds\n\n",
+                    time_elapsed);
 
     return E_T0;
 }
@@ -933,7 +945,7 @@ double DLPNOCCSD_T::compute_t_iteration_energy() {
     return E_T;
 }
 
-SharedMatrix DLPNOCCSD_T::triples_permuter(const SharedMatrix &X, int i, int j, int k, bool reverse) {
+SharedMatrix DLPNOCCSD_T::triples_permuter(const SharedMatrix& X, int i, int j, int k, bool reverse) {
     SharedMatrix Xperm = X->clone();
     int ntno_ijk = X->rowspi(0);
 
@@ -956,17 +968,17 @@ SharedMatrix DLPNOCCSD_T::triples_permuter(const SharedMatrix &X, int i, int j, 
         for (int b_ijk = 0; b_ijk < ntno_ijk; b_ijk++) {
             for (int c_ijk = 0; c_ijk < ntno_ijk; c_ijk++) {
                 if (perm_idx == 0)
-                    (*Xperm)(a_ijk, b_ijk *ntno_ijk + c_ijk) = (*X)(a_ijk, b_ijk * ntno_ijk + c_ijk);
+                    (*Xperm)(a_ijk, b_ijk* ntno_ijk + c_ijk) = (*X)(a_ijk, b_ijk * ntno_ijk + c_ijk);
                 else if (perm_idx == 1)
-                    (*Xperm)(a_ijk, b_ijk *ntno_ijk + c_ijk) = (*X)(a_ijk, c_ijk * ntno_ijk + b_ijk);
+                    (*Xperm)(a_ijk, b_ijk* ntno_ijk + c_ijk) = (*X)(a_ijk, c_ijk * ntno_ijk + b_ijk);
                 else if (perm_idx == 2)
-                    (*Xperm)(a_ijk, b_ijk *ntno_ijk + c_ijk) = (*X)(b_ijk, a_ijk * ntno_ijk + c_ijk);
+                    (*Xperm)(a_ijk, b_ijk* ntno_ijk + c_ijk) = (*X)(b_ijk, a_ijk * ntno_ijk + c_ijk);
                 else if ((perm_idx == 3 && !reverse) || (perm_idx == 4 && reverse))
-                    (*Xperm)(a_ijk, b_ijk *ntno_ijk + c_ijk) = (*X)(b_ijk, c_ijk * ntno_ijk + a_ijk);
+                    (*Xperm)(a_ijk, b_ijk* ntno_ijk + c_ijk) = (*X)(b_ijk, c_ijk * ntno_ijk + a_ijk);
                 else if ((perm_idx == 4 && !reverse) || (perm_idx == 3 && reverse))
-                    (*Xperm)(a_ijk, b_ijk *ntno_ijk + c_ijk) = (*X)(c_ijk, a_ijk * ntno_ijk + b_ijk);
+                    (*Xperm)(a_ijk, b_ijk* ntno_ijk + c_ijk) = (*X)(c_ijk, a_ijk * ntno_ijk + b_ijk);
                 else
-                    (*Xperm)(a_ijk, b_ijk *ntno_ijk + c_ijk) = (*X)(c_ijk, b_ijk * ntno_ijk + a_ijk);
+                    (*Xperm)(a_ijk, b_ijk* ntno_ijk + c_ijk) = (*X)(c_ijk, b_ijk * ntno_ijk + a_ijk);
             }
         }
     }
@@ -1015,28 +1027,27 @@ double DLPNOCCSD_T::lccsd_t_iterations() {
                 int ijl_dense = i * naocc * naocc + j * naocc + l;
                 int ilk_dense = i * naocc * naocc + l * naocc + k;
                 int ljk_dense = l * naocc * naocc + j * naocc + k;
-                
+
                 if (l != k && i_j_k_to_ijk_.count(ijl_dense) && std::fabs((*F_lmo_)(l, k)) >= F_CUT) {
                     int ijl = i_j_k_to_ijk_[ijl_dense];
                     triplet_ext_domain = merge_lists(triplet_ext_domain, lmotriplet_to_paos_[ijl]);
                 }
-                
+
                 if (l != j && i_j_k_to_ijk_.count(ilk_dense) && std::fabs((*F_lmo_)(l, j)) >= F_CUT) {
                     int ilk = i_j_k_to_ijk_[ilk_dense];
                     triplet_ext_domain = merge_lists(triplet_ext_domain, lmotriplet_to_paos_[ilk]);
                 }
-                
+
                 if (l != i && i_j_k_to_ijk_.count(ljk_dense) && std::fabs((*F_lmo_)(l, i)) >= F_CUT) {
                     int ljk = i_j_k_to_ijk_[ljk_dense];
                     triplet_ext_domain = merge_lists(triplet_ext_domain, lmotriplet_to_paos_[ljk]);
-                    
                 }
             }
             auto S_ijk = submatrix_rows_and_cols(*S_pao_, triplet_ext_domain, lmotriplet_to_paos_[ijk]);
             S_ijk = linalg::doublet(S_ijk, X_tno_[ijk], false, false);
 
             auto R_ijk = std::make_shared<Matrix>("R_ijk", ntno_ijk, ntno_ijk * ntno_ijk);
-            
+
             SharedMatrix W_ijk;
             SharedMatrix T_ijk;
 
@@ -1058,15 +1069,16 @@ double DLPNOCCSD_T::lccsd_t_iterations() {
             }
 
             // => Jiang Eq. 111 <= //
-            
+
             R_ijk->copy(W_ijk);
 
             for (int a_ijk = 0; a_ijk < ntno_ijk; ++a_ijk) {
                 for (int b_ijk = 0; b_ijk < ntno_ijk; ++b_ijk) {
                     for (int c_ijk = 0; c_ijk < ntno_ijk; ++c_ijk) {
-                        (*R_ijk)(a_ijk, b_ijk * ntno_ijk + c_ijk) += (*T_ijk)(a_ijk, b_ijk * ntno_ijk + c_ijk) *
-                            ((*e_tno_[ijk])(a_ijk) + (*e_tno_[ijk])(b_ijk) + (*e_tno_[ijk])(c_ijk) 
-                                - (*F_lmo_)(i, i) - (*F_lmo_)(j, j) - (*F_lmo_)(k, k));
+                        (*R_ijk)(a_ijk, b_ijk* ntno_ijk + c_ijk) +=
+                            (*T_ijk)(a_ijk, b_ijk * ntno_ijk + c_ijk) *
+                            ((*e_tno_[ijk])(a_ijk) + (*e_tno_[ijk])(b_ijk) + (*e_tno_[ijk])(c_ijk) - (*F_lmo_)(i, i) -
+                             (*F_lmo_)(j, j) - (*F_lmo_)(k, k));
                     }
                 }
             }
@@ -1090,10 +1102,8 @@ double DLPNOCCSD_T::lccsd_t_iterations() {
                         T_ijl = T_iajbkc_[ijl];
                     }
 
-                    auto T_temp1 =
-                        matmul_3d(triples_permuter(T_ijl, i, j, l), S_ijk_ijl, n_tno_[ijl], n_tno_[ijk]);
-                    C_DAXPY(ntno_ijk * ntno_ijk * ntno_ijk, -(*F_lmo_)(l, k), &(*T_temp1)(0, 0), 1,
-                            &(*R_ijk)(0, 0), 1);
+                    auto T_temp1 = matmul_3d(triples_permuter(T_ijl, i, j, l), S_ijk_ijl, n_tno_[ijl], n_tno_[ijk]);
+                    C_DAXPY(ntno_ijk * ntno_ijk * ntno_ijk, -(*F_lmo_)(l, k), &(*T_temp1)(0, 0), 1, &(*R_ijk)(0, 0), 1);
                 }
 
                 int ilk_dense = i * naocc * naocc + l * naocc + k;
@@ -1114,10 +1124,8 @@ double DLPNOCCSD_T::lccsd_t_iterations() {
                         T_ilk = T_iajbkc_[ilk];
                     }
 
-                    auto T_temp1 =
-                        matmul_3d(triples_permuter(T_ilk, i, l, k), S_ijk_ilk, n_tno_[ilk], n_tno_[ijk]);
-                    C_DAXPY(ntno_ijk * ntno_ijk * ntno_ijk, -(*F_lmo_)(l, j), &(*T_temp1)(0, 0), 1,
-                            &(*R_ijk)(0, 0), 1);
+                    auto T_temp1 = matmul_3d(triples_permuter(T_ilk, i, l, k), S_ijk_ilk, n_tno_[ilk], n_tno_[ijk]);
+                    C_DAXPY(ntno_ijk * ntno_ijk * ntno_ijk, -(*F_lmo_)(l, j), &(*T_temp1)(0, 0), 1, &(*R_ijk)(0, 0), 1);
                 }
 
                 int ljk_dense = l * naocc * naocc + j * naocc + k;
@@ -1138,10 +1146,8 @@ double DLPNOCCSD_T::lccsd_t_iterations() {
                         T_ljk = T_iajbkc_[ljk];
                     }
 
-                    auto T_temp1 =
-                        matmul_3d(triples_permuter(T_ljk, l, j, k), S_ijk_ljk, n_tno_[ljk], n_tno_[ijk]);
-                    C_DAXPY(ntno_ijk * ntno_ijk * ntno_ijk, -(*F_lmo_)(l, i), &(*T_temp1)(0, 0), 1,
-                            &(*R_ijk)(0, 0), 1);
+                    auto T_temp1 = matmul_3d(triples_permuter(T_ljk, l, j, k), S_ijk_ljk, n_tno_[ljk], n_tno_[ijk]);
+                    C_DAXPY(ntno_ijk * ntno_ijk * ntno_ijk, -(*F_lmo_)(l, i), &(*T_temp1)(0, 0), 1, &(*R_ijk)(0, 0), 1);
                 }
             }
 
@@ -1149,9 +1155,10 @@ double DLPNOCCSD_T::lccsd_t_iterations() {
             for (int a_ijk = 0; a_ijk < ntno_ijk; ++a_ijk) {
                 for (int b_ijk = 0; b_ijk < ntno_ijk; ++b_ijk) {
                     for (int c_ijk = 0; c_ijk < ntno_ijk; ++c_ijk) {
-                        (*T_ijk)(a_ijk, b_ijk * ntno_ijk + c_ijk) -= (*R_ijk)(a_ijk, b_ijk * ntno_ijk + c_ijk) /
-                            ((*e_tno_[ijk])(a_ijk) + (*e_tno_[ijk])(b_ijk) + (*e_tno_[ijk])(c_ijk) 
-                                - (*F_lmo_)(i, i) - (*F_lmo_)(j, j) - (*F_lmo_)(k, k));
+                        (*T_ijk)(a_ijk, b_ijk* ntno_ijk + c_ijk) -=
+                            (*R_ijk)(a_ijk, b_ijk * ntno_ijk + c_ijk) /
+                            ((*e_tno_[ijk])(a_ijk) + (*e_tno_[ijk])(b_ijk) + (*e_tno_[ijk])(c_ijk) - (*F_lmo_)(i, i) -
+                             (*F_lmo_)(j, j) - (*F_lmo_)(k, k));
                     }
                 }
             }
@@ -1160,7 +1167,7 @@ double DLPNOCCSD_T::lccsd_t_iterations() {
 #pragma omp critical
                 T_ijk->save(psio_, PSIF_DLPNO_TRIPLES, psi::Matrix::SubBlocks);
             }
-            
+
             R_iajbkc_rms[ijk] = R_ijk->rms();
         }
 
@@ -1177,7 +1184,8 @@ double DLPNOCCSD_T::lccsd_t_iterations() {
 
         std::time_t time_stop = std::time(nullptr);
 
-        outfile->Printf("  @LCCSD(T) iter %3d: %16.12f %10.3e %10.3e %8d\n", iteration, e_curr, e_curr - e_prev, r_curr, (int)time_stop - (int)time_start);
+        outfile->Printf("  @LCCSD(T) iter %3d: %16.12f %10.3e %10.3e %8d\n", iteration, e_curr, e_curr - e_prev, r_curr,
+                        (int)time_stop - (int)time_start);
 
         iteration++;
 
@@ -1218,6 +1226,7 @@ double DLPNOCCSD_T::compute_energy() {
     S_pno_ij_nn_.clear();
     S_pno_ij_mn_.clear();
 
+    tstart();
     print_header();
 
     double t_cut_tno_pre = options_.get_double("T_CUT_TNO_PRE");
@@ -1235,14 +1244,15 @@ double DLPNOCCSD_T::compute_energy() {
 
     // Step 2: Compute DLPNO-CCSD(T0) energy with surviving triplets
     outfile->Printf("\n   Continuing computation with surviving triplets...\n");
-    outfile->Printf("     Eliminated all triples with energy less than %6.3e Eh... \n\n", options_.get_double("T_CUT_TRIPLES_WEAK"));
+    outfile->Printf("     Eliminated all triples with energy less than %6.3e Eh... \n\n",
+                    options_.get_double("T_CUT_TRIPLES_WEAK"));
     triples_sparsity(false);
     outfile->Printf("    * Energy Contribution From Screened Triplets: %.12f \n\n", de_lccsd_t_screened_);
 
     outfile->Printf("     T_CUT_TNO (re)set to %6.3e \n", t_cut_tno);
     outfile->Printf("     T_CUT_DO  (re)set to %6.3e \n", options_.get_double("T_CUT_DO_TRIPLES"));
     outfile->Printf("     T_CUT_MKN (re)set to %6.3e \n\n", options_.get_double("T_CUT_MKN_TRIPLES"));
-    
+
     tno_transform(t_cut_tno);
     double E_T0 = compute_lccsd_t0();
     e_lccsd_t_ = e_lccsd_ + E_T0 + de_lccsd_t_screened_;
@@ -1251,7 +1261,6 @@ double DLPNOCCSD_T::compute_energy() {
     outfile->Printf("    * DLPNO-CCSD Contribution:         %16.12f \n", e_lccsd_);
     outfile->Printf("    * DLPNO-(T0) Contribution:         %16.12f \n", E_T0);
     outfile->Printf("    * Screened Triplets Contribution:  %16.12f \n\n", de_lccsd_t_screened_);
-
 
     // Step 3: Compute full DLPNO-CCSD(T) energy if NOT using T0 approximation
 
@@ -1296,6 +1305,7 @@ double DLPNOCCSD_T::compute_energy() {
     }
 
     timer_off("DLPNO-CCSD(T)");
+    tstop();
 
     return e_ccsd_t_total;
 }
@@ -1306,11 +1316,13 @@ void DLPNOCCSD_T::print_results() {
     outfile->Printf("  \n");
     outfile->Printf("  Total DLPNO-CCSD(T) Correlation Energy: %16.12f \n", e_total);
     outfile->Printf("    DLPNO-CCSD Contribution:              %16.12f \n", e_dlpno_ccsd);
-    outfile->Printf("    DLPNO-(T) Contribution:               %16.12f \n", e_lccsd_t_ - e_lccsd_ - de_lccsd_t_screened_);
+    outfile->Printf("    DLPNO-(T) Contribution:               %16.12f \n",
+                    e_lccsd_t_ - e_lccsd_ - de_lccsd_t_screened_);
     outfile->Printf("    Screened Triplets Contribution:       %16.12f \n", de_lccsd_t_screened_);
     outfile->Printf("    Andy Jiang... FOR THREEEEEEEEEEE!!!\n\n\n");
-    outfile->Printf("  @Total DLPNO-CCSD(T) Energy: %16.12f \n",
-                    variables_["SCF TOTAL ENERGY"] + de_weak_ + de_lmp2_eliminated_ + e_lccsd_t_ + de_pno_total_ + de_dipole_);
+    outfile->Printf(
+        "  @Total DLPNO-CCSD(T) Energy: %16.12f \n",
+        variables_["SCF TOTAL ENERGY"] + de_weak_ + de_lmp2_eliminated_ + e_lccsd_t_ + de_pno_total_ + de_dipole_);
 }
 
 }  // namespace dlpno
