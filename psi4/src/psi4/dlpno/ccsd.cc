@@ -2620,6 +2620,9 @@ double DLPNOCCSD::compute_energy() {
     outfile->Printf("\n\n  @Total DLPNO-MP2 Energy: %16.12f \n",
                     variables_["SCF TOTAL ENERGY"] + e_lmp2_ + de_lmp2_eliminated_ + de_pno_total_ + de_dipole_);
 
+    tstop();   // stop timer to print DLPNO-MP2 times
+    tstart();  // restart to continue DLPNO-CCSD
+
     // Now we do the hard stuff
     recompute_pnos();
 
