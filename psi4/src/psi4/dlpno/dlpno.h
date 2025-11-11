@@ -611,6 +611,11 @@ class DLPNOCCSDT : public DLPNOCCSD_T {
     Tensor<double, 3> triples_permuter_einsums(const Tensor<double, 3> &X, int i, int j, int k, bool reverse=false);
     /// Returns a permutation index for the order of i, j, k (e.g. (i <= j <= k) = 0; (i <= k <= j) = 1, ..., (k <= j <= i) = 5)
     int triples_permutation_idx(int i, int j, int k);
+    /// Performs spin-summation of triples amplitudes 
+    Tensor<double, 3> triples_spin_summation(const Tensor<double, 3> &X);
+    /// Performs a spin-desummation of the triples amplitude (Matthews Eq. 27)
+    /// This is done to remove linear dependencies in the triples amplitude space
+    Tensor<double, 3> triples_spin_desummation(const Tensor<double, 3> &X);
 
     /// computes singles residuals in LCCSDT equations
     void compute_R_ia_triples(std::vector<SharedMatrix>& R_ia, std::vector<std::vector<SharedMatrix>>& R_ia_buffer);
@@ -742,6 +747,11 @@ class DLPNOCCSDTQ : public DLPNOCCSDT_Q {
     // Helper functions to form quadruples intermediates
     inline Tensor<double, 4> alpha_ijkl_helper(const Tensor<double, 4>& T_ijkl);
     inline Tensor<double, 4> beta_ijkl_helper(const Tensor<double, 4>& alpha_ijkl);
+    /// Performs spin-summation of quadruples amplitudes 
+    Tensor<double, 4> quadruples_spin_summation(const Tensor<double, 4> &X);
+    /// Performs a spin-desummation of the quadruples amplitude (Matthews Eq. 28)
+    /// This is done to remove linear dependencies in the quadruples amplitude space
+    Tensor<double, 4> quadruples_spin_desummation(const Tensor<double, 4> &X);
 
     /// Create XPNOs (Extended Pair Natural Orbitals) to help with QNO projections
     void xpno_transform(double xpno_tolerance);

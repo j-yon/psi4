@@ -1455,6 +1455,32 @@ Tensor<double, 3> DLPNOCCSDT::triples_permuter_einsums(const Tensor<double, 3> &
     return Xperm;
 }
 
+Tensor<double, 3> DLPNOCCSDT::triples_spin_summation(const Tensor<double, 3> &X) {
+
+    Tensor<double, 3> Xnew = X;
+    Xnew *= 4.0;
+    Tensor<double, 3> Xtemp = triples_permuter_einsums(X, 0, 2, 1);
+    Xtemp += triples_permuter_einsums(X, 2, 1, 0);
+    Xtemp += triples_permuter_einsums(X, 1, 0, 2);
+    Xtemp *= 2.0;
+    Xnew -= Xtemp;
+    Xnew += triples_permuter_einsums(X, 2, 0, 1);
+    Xnew += triples_permuter_einsums(X, 1, 2, 0);
+
+    return Xnew;
+}
+
+Tensor<double, 3> DLPNOCCSDT::triples_spin_desummation(const Tensor<double, 3> &X) {
+
+    Tensor<double, 3> Xnew = X;
+    Xnew *= 3.0;
+    Xnew -= triples_permuter_einsums(X, 2, 0, 1);
+    Xnew -= triples_permuter_einsums(X, 1, 2, 0);
+    Xnew *= 1.0 / 12.0;
+
+    return Xnew;
+}
+
 int DLPNOCCSDT::triples_permutation_idx(int i, int j, int k) {
 
     int idx = 0;
@@ -3423,7 +3449,7 @@ void DLPNOCCSDT::lccsdt_iterations() {
     bool e_converged = false, r_converged = false;
     const int N_MICRO_ITER = options_.get_int("DLPNO_FULL_T_MICROITERATIONS");
 
-    DIISManager diis = DIISManager(options_.get_int("DIIS_MAX_VECS"), "LCCSDT DIIS", DIISManager::RemovalPolicy::OldestAdded, DIISManager::StoragePolicy::InCore);
+    DIISManager diis = DIISManager(options_.get_int("DIIS_MAX_VECS"), "LCCSDT DIIS", DIISManager::RemovalPolicy::LargestError, DIISManager::StoragePolicy::InCore);
 
     while (!(e_converged && r_converged)) {
         // RMS of residual per LMO orbital, for assessing convergence
@@ -3506,6 +3532,17 @@ void DLPNOCCSDT::lccsdt_iterations() {
             t1_ints();
             t1_fock();
 
+            // spin adapt and then de-adapt triples amplitudes
+        #pragma omp parallel for schedule(dynamic, 1)
+            for (int ijk_sorted = 0; ijk_sorted < n_lmo_triplets; ++ijk_sorted) {
+                int ijk = sorted_triplets_[ijk_sorted];
+                auto &[i, j, k] = ijk_to_i_j_k_[ijk];
+
+                U_iajbkc_[ijk] = triples_spin_summation(T_iajbkc_clone_[ijk]);
+                T_iajbkc_clone_[ijk] = triples_spin_desummation(U_iajbkc_[ijk]);
+                ::memcpy(T_iajbkc_[ijk]->get_pointer(), T_iajbkc_clone_[ijk].data(), n_tno_[ijk] * n_tno_[ijk] * n_tno_[ijk] * sizeof(double));
+            }
+
             // compute singles amplitude
             timer_on("DLPNO-CCSDT : R_ia");
             compute_R_ia_triples(R_ia, R_ia_buffer);
@@ -3520,6 +3557,18 @@ void DLPNOCCSDT::lccsdt_iterations() {
             timer_on("DLPNO-CCSDT : R_iajbkc");
             if (miter == N_MICRO_ITER - 1) {
                 compute_R_iajbkc(R_iajbkc);
+
+                // spin adapt and then de-adapt triples residual
+        #pragma omp parallel for schedule(dynamic, 1)
+                for (int ijk_sorted = 0; ijk_sorted < n_lmo_triplets; ++ijk_sorted) {
+                    int ijk = sorted_triplets_[ijk_sorted];
+                    auto &[i, j, k] = ijk_to_i_j_k_[ijk];
+
+                    Tensor<double, 3> R3_spinad("R3_spinad", n_tno_[ijk], n_tno_[ijk], n_tno_[ijk]);
+                    ::memcpy(R3_spinad.data(), R_iajbkc[ijk]->get_pointer(), n_tno_[ijk] * n_tno_[ijk] * n_tno_[ijk] * sizeof(double));
+                    R3_spinad = triples_spin_desummation(triples_spin_summation(R3_spinad));
+                    ::memcpy(R_iajbkc[ijk]->get_pointer(), R3_spinad.data(), n_tno_[ijk] * n_tno_[ijk] * n_tno_[ijk] * sizeof(double));
+                }
             }
             timer_off("DLPNO-CCSDT : R_iajbkc");
 

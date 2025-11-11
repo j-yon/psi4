@@ -495,7 +495,7 @@ def return_energy_components():
                   'dlpno-ccsd(t)': 'CCSD(T) TOTAL ENERGY',
                     'dlpno-ccsdt': 'CCSDT TOTAL ENERGY',
                  'dlpno-ccsdt(q)': 'CCSDT(Q) TOTAL ENERGY'}
-    VARH['dlpno-ccsdt(q)'] = {
+    VARH['dlpno-ccsdtq'] = {
                              'hf': 'HF TOTAL ENERGY',
                       'dlpno-mp2': 'MP2 TOTAL ENERGY',
                      'dlpno-ccsd': 'CCSD TOTAL ENERGY',

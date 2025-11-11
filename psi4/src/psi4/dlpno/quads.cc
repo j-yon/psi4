@@ -1666,11 +1666,16 @@ void DLPNOCCSDTQ::xpno_transform(double xpno_tolerance) {
     int nbf = basisset_->nbf();
     int n_lmo_pairs = ij_to_i_j_.size();
     int n_lmo_quadruplets = ijkl_to_i_j_k_l_.size();
+    int min_pnos = options_.get_int("MIN_PNOS_PER_PAIR");
+    double xpno_occ_tolerance = options_.get_double("T_CUT_TRACE_XPNO");
 
     lmopair_to_paos_ext_.resize(n_lmo_pairs);
     X_pno_ext_.resize(n_lmo_pairs);
     e_pno_ext_.resize(n_lmo_pairs);
     n_pno_ext_.resize(n_lmo_pairs);
+
+    std::vector<double> occ_xpno(n_lmo_pairs, 0.0);
+    std::vector<double> trace_xpno(n_lmo_pairs, 0.0);
 
 #pragma omp parallel for
     for (int kl = 0; kl < n_lmo_pairs; ++kl) {
@@ -1679,19 +1684,32 @@ void DLPNOCCSDTQ::xpno_transform(double xpno_tolerance) {
 
         if (k > l) continue;
 
+        lmopair_to_paos_ext_[kl] = lmopair_to_paos_[kl];
+
         for (int mn = 0; mn < n_lmo_pairs; ++mn) {
             auto &[m, n] = ij_to_i_j_[mn];
 
-            int mnkl_idx = m * std::pow(naocc, 3) + n * std::pow(naocc, 2) + k * naocc + l;
-            int mnkl = i_j_k_l_to_ijkl_.count(mnkl_idx) ? i_j_k_l_to_ijkl_[mnkl_idx] : -1;
-            if (mnkl == -1) continue;
+            // int mnkl_idx = m * std::pow(naocc, 3) + n * std::pow(naocc, 2) + k * naocc + l;
+            // int mnkl = i_j_k_l_to_ijkl_.count(mnkl_idx) ? i_j_k_l_to_ijkl_[mnkl_idx] : -1;
+            // if (mnkl == -1) continue;
 
-            lmopair_to_paos_ext_[kl] = merge_lists(lmopair_to_paos_ext_[kl], lmoquadruplet_to_paos_[mnkl]);
+            int mk = i_j_to_ij_[m][k], ml = i_j_to_ij_[m][l], nk = i_j_to_ij_[n][k], nl = i_j_to_ij_[n][l];
+            if (mk == -1 || ml == -1 || nk == -1 || nl == -1) continue;
+
+            lmopair_to_paos_ext_[kl] = merge_lists(lmopair_to_paos_ext_[kl], lmopair_to_paos_[mn]);
+            lmopair_to_paos_ext_[kl] = merge_lists(lmopair_to_paos_ext_[kl], lmopair_to_paos_[mk]);
+            lmopair_to_paos_ext_[kl] = merge_lists(lmopair_to_paos_ext_[kl], lmopair_to_paos_[ml]);
+            lmopair_to_paos_ext_[kl] = merge_lists(lmopair_to_paos_ext_[kl], lmopair_to_paos_[nk]);
+            lmopair_to_paos_ext_[kl] = merge_lists(lmopair_to_paos_ext_[kl], lmopair_to_paos_[nl]);
         }
         lmopair_to_paos_ext_[lk] = lmopair_to_paos_ext_[kl];
 
         // number of PAOs in the extended domain of kl
         int npao_ext_kl = lmopair_to_paos_ext_[kl].size();
+
+        //                                               //
+        // ==> Canonicalize extended PAOs of pair kl <== //
+        //                                               //
 
         auto S_pao_kl_ext = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_ext_[kl], lmopair_to_paos_ext_[kl]);
         auto F_pao_kl_ext = submatrix_rows_and_cols(*F_pao_, lmopair_to_paos_ext_[kl], lmopair_to_paos_ext_[kl]);
@@ -1705,31 +1723,100 @@ void DLPNOCCSDTQ::xpno_transform(double xpno_tolerance) {
         // number of PAOs in the domain after removing linear dependencies
         int npao_can_kl_ext = X_pao_kl_ext->colspi(0);
 
-        //                                           //
-        // ==> Canonical PAOs  to Canonical QNOs <== //
-        //                                           //
+        //                                            //
+        // ==> Canonical PAOs  to Canonical XPNOs <== //
+        //                                            //
 
         size_t nvir_kl_ext = F_pao_kl_ext->rowspi(0);
 
         // Compute pair density from amplitudes
-        auto D_kl = linalg::doublet(Tt_iajb_[kl], T_iajb_[kl], false, true);
-        D_kl->add(linalg::doublet(Tt_iajb_[kl], T_iajb_[kl], true, false));
-        if (k == l) D_kl->scale(0.5);
+        SharedMatrix D_kl_sum = std::make_shared<Matrix>("D_kl_sum", nvir_kl_ext, nvir_kl_ext);
+        D_kl_sum->zero();
 
-        // Project D_kl into extended PAO basis
-        auto S_kl = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_ext_[kl], lmopair_to_paos_[kl]);
-        S_kl = linalg::triplet(X_pao_kl_ext, S_kl, X_pno_[kl], true, false, false);
-        
+        // Take the sum of the pair density over quadruplets
+        int quad_count = 0;
+        for (int mn = 0; mn < n_lmo_pairs; ++mn) {
+            auto &[m, n] = ij_to_i_j_[mn];
+
+            // int m_kl = lmopair_to_lmos_dense_[kl][m], n_kl = lmopair_to_lmos_dense_[kl][n];
+            // if (m_kl == -1 || n_kl == -1) continue;
+
+            // int mnkl_idx = m * std::pow(naocc, 3) + n * std::pow(naocc, 2) + k * naocc + l;
+            // int mnkl = i_j_k_l_to_ijkl_.count(mnkl_idx) ? i_j_k_l_to_ijkl_[mnkl_idx] : -1;
+            // if (mnkl == -1) continue;
+
+            int mk = i_j_to_ij_[m][k], ml = i_j_to_ij_[m][l], nk = i_j_to_ij_[n][k], nl = i_j_to_ij_[n][l];
+            if (mk == -1 || ml == -1 || nk == -1 || nl == -1) continue;
+
+            // kl
+            auto D_kl = linalg::doublet(Tt_iajb_[kl], T_iajb_[kl], false, true);
+            D_kl->add(linalg::doublet(Tt_iajb_[kl], T_iajb_[kl], true, false));
+            if (k == l) D_kl->scale(0.5);
+            auto S_kl = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_ext_[kl], lmopair_to_paos_[kl]);
+            S_kl = linalg::triplet(X_pao_kl_ext, S_kl, X_pno_[kl], true, false, false);
+            D_kl_sum->add(linalg::triplet(S_kl, D_kl, S_kl, false, false, true));
+
+            // mn
+            auto D_mn = linalg::doublet(Tt_iajb_[mn], T_iajb_[mn], false, true);
+            D_mn->add(linalg::doublet(Tt_iajb_[mn], T_iajb_[mn], true, false));
+            if (m == n) D_mn->scale(0.5);
+            auto S_mn = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_ext_[kl], lmopair_to_paos_[mn]);
+            S_mn = linalg::triplet(X_pao_kl_ext, S_mn, X_pno_[mn], true, false, false);
+            D_kl_sum->add(linalg::triplet(S_mn, D_mn, S_mn, false, false, true));
+
+            // mk
+            auto D_mk = linalg::doublet(Tt_iajb_[mk], T_iajb_[mk], false, true);
+            D_mk->add(linalg::doublet(Tt_iajb_[mk], T_iajb_[mk], true, false));
+            if (m == k) D_mk->scale(0.5);
+            auto S_mk = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_ext_[kl], lmopair_to_paos_[mk]);
+            S_mk = linalg::triplet(X_pao_kl_ext, S_mk, X_pno_[mk], true, false, false);
+            D_kl_sum->add(linalg::triplet(S_mk, D_mk, S_mk, false, false, true));
+
+            // ml
+            auto D_ml = linalg::doublet(Tt_iajb_[ml], T_iajb_[ml], false, true);
+            D_ml->add(linalg::doublet(Tt_iajb_[ml], T_iajb_[ml], true, false));
+            if (m == l) D_ml->scale(0.5);
+            auto S_ml = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_ext_[kl], lmopair_to_paos_[ml]);
+            S_ml = linalg::triplet(X_pao_kl_ext, S_ml, X_pno_[ml], true, false, false);
+            D_kl_sum->add(linalg::triplet(S_ml, D_ml, S_ml, false, false, true));
+
+            // nk
+            auto D_nk = linalg::doublet(Tt_iajb_[nk], T_iajb_[nk], false, true);
+            D_nk->add(linalg::doublet(Tt_iajb_[nk], T_iajb_[nk], true, false));
+            if (n == k) D_nk->scale(0.5);
+            auto S_nk = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_ext_[kl], lmopair_to_paos_[nk]);
+            S_nk = linalg::triplet(X_pao_kl_ext, S_nk, X_pno_[nk], true, false, false);
+            D_kl_sum->add(linalg::triplet(S_nk, D_nk, S_nk, false, false, true));
+
+            // nl
+            auto D_nl = linalg::doublet(Tt_iajb_[nl], T_iajb_[nl], false, true);
+            D_nl->add(linalg::doublet(Tt_iajb_[nl], T_iajb_[nl], true, false));
+            if (n == l) D_nl->scale(0.5);
+            auto S_nl = submatrix_rows_and_cols(*S_pao_, lmopair_to_paos_ext_[kl], lmopair_to_paos_[nl]);
+            S_nl = linalg::triplet(X_pao_kl_ext, S_nl, X_pno_[nl], true, false, false);
+            D_kl_sum->add(linalg::triplet(S_nl, D_nl, S_nl, false, false, true));
+            
+            quad_count++;
+        }
+        D_kl_sum->scale(1.0 / (6.0 * quad_count));
+
         // Diagonalization of pair density
-        D_kl = linalg::triplet(S_kl, D_kl, S_kl, false, false, true);
         auto X_pno_kl = std::make_shared<Matrix>("eigenvectors", nvir_kl_ext, nvir_kl_ext);
         Vector pno_occ("eigenvalues", nvir_kl_ext);
-        D_kl->diagonalize(*X_pno_kl, pno_occ, descending);
+        D_kl_sum->diagonalize(*X_pno_kl, pno_occ, descending);
+
+        // Compute trace sum
+        double occ_total = 0.0;
+        for (size_t a = 0; a < nvir_kl_ext; ++a) {
+            occ_total += pno_occ.get(a);
+        }
 
         int nvir_kl_final = 0;
+        double occ_curr = 0.0;
 
         for (size_t a = 0; a < nvir_kl_ext; ++a) {
-            if (fabs(pno_occ.get(a)) >= xpno_tolerance) {
+            if (fabs(pno_occ.get(a)) >= xpno_tolerance || occ_curr / occ_total < xpno_occ_tolerance || a < min_pnos) {
+                occ_curr += pno_occ.get(a);
                 nvir_kl_final++;
             } // end if
         } // end a
@@ -1755,23 +1842,35 @@ void DLPNOCCSDTQ::xpno_transform(double xpno_tolerance) {
         X_pno_ext_[kl] = X_pno_kl;
         e_pno_ext_[kl] = e_pno_kl;
         n_pno_ext_[kl] = X_pno_kl->colspi(0);
+        occ_xpno[kl] = pno_occ.get(n_pno_ext_[kl] - 1);
+        trace_xpno[kl] = occ_curr / occ_total;
 
         // account for symmetry
         if (k < l) {
             X_pno_ext_[lk] = X_pno_kl;
             e_pno_ext_[lk] = e_pno_kl;
             n_pno_ext_[lk] = X_pno_kl->colspi(0);
-        } // end if (i < j)
+            occ_xpno[lk] = occ_xpno[kl];
+            trace_xpno[lk] = trace_xpno[kl];
+        } // end if (k < l)
     }
 
     // Print out PNO domain information
     int pno_count_total = 0, pno_count_min = nbf, pno_count_max = 0;
+    double occ_number_total = 0.0, occ_number_min = 2.0, occ_number_max = 0.0;
+    double trace_total = 0.0, trace_min = 1.0, trace_max = 0.0;
     for (int ij = 0; ij < n_lmo_pairs; ++ij) {
         auto &[i, j] = ij_to_i_j_[ij];
 
         pno_count_total += n_pno_ext_[ij];
         pno_count_min = std::min(pno_count_min, n_pno_ext_[ij]);
         pno_count_max = std::max(pno_count_max, n_pno_ext_[ij]);
+        occ_number_total += occ_xpno[ij];
+        occ_number_min = std::min(occ_number_min, occ_xpno[ij]);
+        occ_number_max = std::max(occ_number_max, occ_xpno[ij]);
+        trace_total += trace_xpno[ij];
+        trace_min = std::min(trace_min, trace_xpno[ij]);
+        trace_max = std::max(trace_max, trace_xpno[ij]);
     }
 
     outfile->Printf("  \n");
@@ -1779,6 +1878,12 @@ void DLPNOCCSDTQ::xpno_transform(double xpno_tolerance) {
     outfile->Printf("      Avg: %3d NOs \n", pno_count_total / n_lmo_pairs);
     outfile->Printf("      Min: %3d NOs \n", pno_count_min);
     outfile->Printf("      Max: %3d NOs \n", pno_count_max);
+    outfile->Printf("      Avg Occ Number Tol: %.3e \n", occ_number_total / n_lmo_pairs);
+    outfile->Printf("      Min Occ Number Tol: %.3e \n", occ_number_min);
+    outfile->Printf("      Max Occ Number Tol: %.3e \n", occ_number_max);
+    outfile->Printf("      Avg Trace Sum: %.6f \n", trace_total / n_lmo_pairs);
+    outfile->Printf("      Min Trace Sum: %.6f \n", trace_min);
+    outfile->Printf("      Max Trace Sum: %.6f \n", trace_max);
     outfile->Printf("  \n");
 
     timer_off("XPNO transform");
@@ -2018,6 +2123,56 @@ inline Tensor<double, 4> DLPNOCCSDTQ::beta_ijkl_helper(const Tensor<double, 4>& 
     } // end a
 
     return beta_ijkl;
+}
+
+Tensor<double, 4> DLPNOCCSDTQ::quadruples_spin_summation(const Tensor<double, 4> &X) {
+
+    Tensor<double, 4> alpha = alpha_ijkl_helper(X);
+    Tensor<double, 4> beta = beta_ijkl_helper(alpha);
+    Tensor<double, 4> gamma = beta;
+    gamma *= 2.0;
+    gamma -= quadruples_permuter(beta, 0, 1, 3, 2);
+
+    return gamma;
+}
+
+Tensor<double, 4> DLPNOCCSDTQ::quadruples_spin_desummation(const Tensor<double, 4> &X) {
+    int i = 0, j = 1, k = 2, l = 3;
+
+    // 7/96 term
+    Tensor<double, 4> X1 = X;
+    X1 *= 35.0;
+
+    // 1/480 terms
+    Tensor<double, 4> X2 = quadruples_permuter(X, j, i, k, l);
+    X2 += quadruples_permuter(X, k, j, i, l);
+    X2 += quadruples_permuter(X, l, j, k, i);
+    X2 += quadruples_permuter(X, i, k, j, l);
+    X2 += quadruples_permuter(X, i, l, k, j);
+    X2 += quadruples_permuter(X, i, j, l, k);
+    X2 *= 1.0;
+
+    // 11/480 terms
+    Tensor<double, 4> X3 = quadruples_permuter(X, k, i, l, j);
+    X3 += quadruples_permuter(X, l, i, j, k);
+    X3 += quadruples_permuter(X, j, l, i, k);
+    X3 += quadruples_permuter(X, l, k, i, j);
+    X3 += quadruples_permuter(X, j, k, l, i);
+    X3 += quadruples_permuter(X, k, l, j, i);
+    X3 *= 11.0;
+
+    // 1/32 term
+    Tensor<double, 4> X4 = quadruples_permuter(X, j, i, l, k);
+    X4 += quadruples_permuter(X, k, l, i, j);
+    X4 += quadruples_permuter(X, l, k, j, i);
+    X4 *= 15.0;
+
+    X1 += X2;
+    X1 += X3;
+    X1 += X4;
+    X1 *= 1.0 / 480.0;
+
+    return X1;
 }
 
 void DLPNOCCSDTQ::compute_R_iajb_quads(std::vector<SharedMatrix>& R_iajb, std::vector<SharedMatrix>& Rn_iajb, 
@@ -3636,6 +3791,7 @@ void DLPNOCCSDTQ::lccsdtq_iterations() {
     int n_lmo_pairs = ij_to_i_j_.size();
     int n_lmo_triplets = ijk_to_i_j_k_.size();
     int n_lmo_quadruplets = ijkl_to_i_j_k_l_.size();
+    const bool EXTRAPOLATE_T4 = options_.get_bool("EXTRAPOLATE_T4");
 
     // Thread and OMP Parallel Info
     int nthreads = 1;
@@ -3652,8 +3808,12 @@ void DLPNOCCSDTQ::lccsdtq_iterations() {
     std::vector<Tensor<double, 4>> R_iajbkcld(n_lmo_quadruplets);
 
     // TODO: Get rid of these gremlins later (used for DIIS)
-    std::vector<SharedMatrix> R_iajbkcld_psi(n_lmo_quadruplets);
-    std::vector<SharedMatrix> T_iajbkcld_psi(n_lmo_quadruplets);
+    std::vector<SharedMatrix> R_iajbkcld_psi;
+    std::vector<SharedMatrix> T_iajbkcld_psi;
+    if (EXTRAPOLATE_T4) {
+        R_iajbkcld_psi.resize(n_lmo_quadruplets);
+        T_iajbkcld_psi.resize(n_lmo_quadruplets);
+    }
 
     for (int i = 0; i < naocc; ++i) {
         int ii = i_j_to_ij_[i][i];
@@ -3673,8 +3833,10 @@ void DLPNOCCSDTQ::lccsdtq_iterations() {
     for (int ijkl_sorted = 0; ijkl_sorted < n_lmo_quadruplets; ++ijkl_sorted) {
         int ijkl = sorted_quadruplets_[ijkl_sorted];
         R_iajbkcld[ijkl] = Tensor<double, 4>("R_iajbkcld", n_qno_[ijkl], n_qno_[ijkl], n_qno_[ijkl], n_qno_[ijkl]);
-        R_iajbkcld_psi[ijkl] = std::make_shared<Matrix>(n_qno_[ijkl] * n_qno_[ijkl], n_qno_[ijkl] * n_qno_[ijkl]);
-        T_iajbkcld_psi[ijkl] = std::make_shared<Matrix>(n_qno_[ijkl] * n_qno_[ijkl], n_qno_[ijkl] * n_qno_[ijkl]);
+        if (EXTRAPOLATE_T4) {
+            R_iajbkcld_psi[ijkl] = std::make_shared<Matrix>(n_qno_[ijkl] * n_qno_[ijkl], n_qno_[ijkl] * n_qno_[ijkl]);
+            T_iajbkcld_psi[ijkl] = std::make_shared<Matrix>(n_qno_[ijkl] * n_qno_[ijkl], n_qno_[ijkl] * n_qno_[ijkl]);
+        }
     }
 
     std::vector<std::vector<SharedMatrix>> R_ia_buffer(nthreads);
@@ -3709,9 +3871,8 @@ void DLPNOCCSDTQ::lccsdtq_iterations() {
     double e_curr = 0.0, e_prev = 0.0, e_weak = 0.0, r_curr1 = 0.0, r_curr2 = 0.0, r_curr3 = 0.0, r_curr4 = 0.0;
     bool e_converged = false, r_converged = false;
     const int N_MICRO_ITER = options_.get_int("DLPNO_FULL_Q_MICROITERATIONS");
-    const double DELTA = options_.get_double("DLPNO_CCSDTQ_DELTA");
     
-    DIISManager diis = DIISManager(options_.get_int("DIIS_MAX_VECS"), "LCCSDTQ DIIS", DIISManager::RemovalPolicy::OldestAdded, DIISManager::StoragePolicy::OnDisk);
+    DIISManager diis = DIISManager(options_.get_int("DIIS_MAX_VECS"), "LCCSDTQ DIIS", DIISManager::RemovalPolicy::LargestError, DIISManager::StoragePolicy::OnDisk);
 
     while (!(e_converged && r_converged)) {
         // RMS of residual per LMO orbital, for assessing convergence
@@ -3819,6 +3980,26 @@ void DLPNOCCSDTQ::lccsdtq_iterations() {
             t1_ints();
             t1_fock();
 
+            // spin adapt and then de-adapt triples amplitudes
+        #pragma omp parallel for schedule(dynamic, 1)
+            for (int ijk_sorted = 0; ijk_sorted < n_lmo_triplets; ++ijk_sorted) {
+                int ijk = sorted_triplets_[ijk_sorted];
+                auto &[i, j, k] = ijk_to_i_j_k_[ijk];
+
+                U_iajbkc_[ijk] = triples_spin_summation(T_iajbkc_clone_[ijk]);
+                T_iajbkc_clone_[ijk] = triples_spin_desummation(U_iajbkc_[ijk]);
+                ::memcpy(T_iajbkc_[ijk]->get_pointer(), T_iajbkc_clone_[ijk].data(), n_tno_[ijk] * n_tno_[ijk] * n_tno_[ijk] * sizeof(double));
+            }
+
+            // spin-adapt and then de-adapt quadruples amplitudes
+        #pragma omp parallel for schedule(dynamic, 1)
+            for (int ijkl_sorted = 0; ijkl_sorted < n_lmo_quadruplets; ++ijkl_sorted) {
+                int ijkl = sorted_quadruplets_[ijkl_sorted];
+                auto &[i, j, k, l] = ijkl_to_i_j_k_l_[ijkl];
+
+                T_iajbkcld_[ijkl] = quadruples_spin_desummation(quadruples_spin_summation(T_iajbkcld_[ijkl]));
+            }
+
             // compute singles amplitude
             timer_on("DLPNO-CCSDTQ : R_ia");
             compute_R_ia_triples(R_ia, R_ia_buffer);
@@ -3833,6 +4014,18 @@ void DLPNOCCSDTQ::lccsdtq_iterations() {
             timer_on("DLPNO-CCSDTQ : R_iajbkc");
             if (miter == N_MICRO_ITER - 1) {
                 compute_R_iajbkc_quads(R_iajbkc);
+
+                // spin adapt and then de-adapt triples residual
+        #pragma omp parallel for schedule(dynamic, 1)
+                for (int ijk_sorted = 0; ijk_sorted < n_lmo_triplets; ++ijk_sorted) {
+                    int ijk = sorted_triplets_[ijk_sorted];
+                    auto &[i, j, k] = ijk_to_i_j_k_[ijk];
+
+                    Tensor<double, 3> R3_spinad("R3_spinad", n_tno_[ijk], n_tno_[ijk], n_tno_[ijk]);
+                    ::memcpy(R3_spinad.data(), R_iajbkc[ijk]->get_pointer(), n_tno_[ijk] * n_tno_[ijk] * n_tno_[ijk] * sizeof(double));
+                    R3_spinad = triples_spin_desummation(triples_spin_summation(R3_spinad));
+                    ::memcpy(R_iajbkc[ijk]->get_pointer(), R3_spinad.data(), n_tno_[ijk] * n_tno_[ijk] * n_tno_[ijk] * sizeof(double));
+                }
             }
             timer_off("DLPNO-CCSDTQ : R_iajbkc");
 
@@ -3841,6 +4034,14 @@ void DLPNOCCSDTQ::lccsdtq_iterations() {
             if (miter == N_MICRO_ITER - 1) {
                 form_T_mnkl();
                 compute_R_iajbkcld(R_iajbkcld);
+
+            #pragma omp parallel for schedule(dynamic, 1)
+                for (int ijkl_sorted = 0; ijkl_sorted < n_lmo_quadruplets; ++ijkl_sorted) {
+                    int ijkl = sorted_quadruplets_[ijkl_sorted];
+                    auto &[i, j, k, l] = ijkl_to_i_j_k_l_[ijkl];
+
+                    R_iajbkcld[ijkl] = quadruples_spin_desummation(quadruples_spin_summation(R_iajbkcld[ijkl]));
+                }
             }
             timer_off("DLPNO-CCSDTQ : R_iajbkcld");
 
@@ -3901,34 +4102,43 @@ void DLPNOCCSDTQ::lccsdtq_iterations() {
                                 for (int d = 0; d < n_qno_[ijkl]; ++d) {
                                     (T_iajbkcld_[ijkl])(a, b, c, d) -= (1.0 - damping_ratio_quads_) * (R_iajbkcld[ijkl])(a, b, c, d) / 
                                         ((*e_qno_[ijkl])(a) + (*e_qno_[ijkl])(b) + (*e_qno_[ijkl])(c) + (*e_qno_[ijkl])(d) - (*F_lmo_)(i,i) 
-                                        - (*F_lmo_)(j,j) - (*F_lmo_)(k,k) - (*F_lmo_)(l,l) + DELTA);
+                                        - (*F_lmo_)(j,j) - (*F_lmo_)(k,k) - (*F_lmo_)(l,l));
                                 } // end d
                             } // end c
                         } // end b
                     } // end a
 
                     // Done for DIIS
-                    ::memcpy(R_iajbkcld_psi[ijkl]->get_pointer(), R_iajbkcld[ijkl].data(), n_qno_[ijkl] * n_qno_[ijkl] * n_qno_[ijkl] * n_qno_[ijkl] * sizeof(double));
-                    ::memcpy(T_iajbkcld_psi[ijkl]->get_pointer(), T_iajbkcld_[ijkl].data(), n_qno_[ijkl] * n_qno_[ijkl] * n_qno_[ijkl] * n_qno_[ijkl] * sizeof(double));
-                    R_iajbkcld_rms[ijkl] = R_iajbkcld_psi[ijkl]->rms();
+                    if (EXTRAPOLATE_T4) {
+                        ::memcpy(R_iajbkcld_psi[ijkl]->get_pointer(), R_iajbkcld[ijkl].data(), n_qno_[ijkl] * n_qno_[ijkl] * n_qno_[ijkl] * n_qno_[ijkl] * sizeof(double));
+                        ::memcpy(T_iajbkcld_psi[ijkl]->get_pointer(), T_iajbkcld_[ijkl].data(), n_qno_[ijkl] * n_qno_[ijkl] * n_qno_[ijkl] * n_qno_[ijkl] * sizeof(double));
+                        R_iajbkcld_rms[ijkl] = R_iajbkcld_psi[ijkl]->rms();
+                    } else {
+                        Tensor<double, 4> zero_tensor("zero", n_qno_[ijkl], n_qno_[ijkl], n_qno_[ijkl], n_qno_[ijkl]);
+                        zero_tensor.zero();
+                        R_iajbkcld_rms[ijkl] = rmsd(R_iajbkcld[ijkl], zero_tensor);
+                    } // end else
                 }
             }
         } // end miter
 
         // DIIS Extrapolation
+        size_t nelements = T_ia_.size() + T_iajb_.size() + T_iajbkc_.size();
+        if (EXTRAPOLATE_T4) nelements += T_iajbkcld_psi.size();
+
         std::vector<SharedMatrix> T_vecs;
-        T_vecs.reserve(T_ia_.size() + T_iajb_.size() + T_iajbkc_.size() + T_iajbkcld_psi.size());
+        T_vecs.reserve(nelements);
         T_vecs.insert(T_vecs.end(), T_ia_.begin(), T_ia_.end());
         T_vecs.insert(T_vecs.end(), T_iajb_.begin(), T_iajb_.end());
         T_vecs.insert(T_vecs.end(), T_iajbkc_.begin(), T_iajbkc_.end());
-        T_vecs.insert(T_vecs.end(), T_iajbkcld_psi.begin(), T_iajbkcld_psi.end());
+        if (EXTRAPOLATE_T4) T_vecs.insert(T_vecs.end(), T_iajbkcld_psi.begin(), T_iajbkcld_psi.end());
 
         std::vector<SharedMatrix> R_vecs;
-        R_vecs.reserve(R_ia.size() + R_iajb.size() + R_iajbkc.size() + R_iajbkcld_psi.size());
+        R_vecs.reserve(nelements);
         R_vecs.insert(R_vecs.end(), R_ia.begin(), R_ia.end());
         R_vecs.insert(R_vecs.end(), R_iajb.begin(), R_iajb.end());
         R_vecs.insert(R_vecs.end(), R_iajbkc.begin(), R_iajbkc.end());
-        R_vecs.insert(R_vecs.end(), R_iajbkcld_psi.begin(), R_iajbkcld_psi.end());
+        if (EXTRAPOLATE_T4) R_vecs.insert(R_vecs.end(), R_iajbkcld_psi.begin(), R_iajbkcld_psi.end());
 
         auto T_vecs_flat = flatten_mats(T_vecs);
         auto R_vecs_flat = flatten_mats(R_vecs);
@@ -3944,10 +4154,12 @@ void DLPNOCCSDTQ::lccsdtq_iterations() {
         copy_flat_mats(T_vecs_flat, T_vecs);
 
         // Copy data from psi to einsums
-        #pragma omp parallel for schedule(dynamic, 1)
-        for (int ijkl_sorted = 0; ijkl_sorted < n_lmo_quadruplets; ++ijkl_sorted) {
-            int ijkl = sorted_quadruplets_[ijkl_sorted];
-            ::memcpy(T_iajbkcld_[ijkl].data(), T_iajbkcld_psi[ijkl]->get_pointer(), n_qno_[ijkl] * n_qno_[ijkl] * n_qno_[ijkl] * n_qno_[ijkl] * sizeof(double));
+        if (EXTRAPOLATE_T4) {
+#pragma omp parallel for schedule(dynamic, 1)
+            for (int ijkl_sorted = 0; ijkl_sorted < n_lmo_quadruplets; ++ijkl_sorted) {
+                int ijkl = sorted_quadruplets_[ijkl_sorted];
+                ::memcpy(T_iajbkcld_[ijkl].data(), T_iajbkcld_psi[ijkl]->get_pointer(), n_qno_[ijkl] * n_qno_[ijkl] * n_qno_[ijkl] * n_qno_[ijkl] * sizeof(double));
+            }
         }
 
         // evaluate energy and convergence
