@@ -354,7 +354,10 @@ void BasisSetOrthogonalization::compute_orthog_trans() {
             compute_canonical_orthog();
             break;
         case PartialCholesky:
-            if (print_) outfile->Printf("    Using partial Cholesky orthogonalization (doi:10.1063/1.5139948, doi:10.1103/PhysRevA.101.032504).\n");
+            if (print_)
+                outfile->Printf(
+                    "    Using partial Cholesky orthogonalization (doi:10.1063/1.5139948, "
+                    "doi:10.1103/PhysRevA.101.032504).\n");
             compute_partial_cholesky_orthog();
             break;
         default:
