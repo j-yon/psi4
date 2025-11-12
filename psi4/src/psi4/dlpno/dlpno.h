@@ -690,7 +690,7 @@ class DLPNOCCSDT_Q : public DLPNOCCSDT {
     void sort_quadruplets(double e_total);
 
     /// A helper function to transform QNO-like quantities
-    Tensor<double, 4> matmul_4d(const Tensor<double, 4>& A, const SharedMatrix &X, int dim_old, int dim_new);
+    Tensor<double, 4> matmul_4d(const Tensor<double, 4>& A, const SharedMatrix &X, int dim_old, int dim_new, bool contract_first=true);
     /// Returns a symmetrized version of that matrix (in i <= j <= k <= l ordering)
     Tensor<double, 4> quadruples_permuter(const Tensor<double, 4>& X, int i, int j, int k, int l);
 
