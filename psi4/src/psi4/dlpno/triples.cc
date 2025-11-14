@@ -1420,6 +1420,39 @@ Tensor<double, 3> DLPNOCCSDT::matmul_3d_einsums(const Tensor<double, 3> &A, cons
     return A_new;
 }
 
+Tensor<double, 3> DLPNOCCSDT::matmul_3d_index(const Tensor<double, 3> &A, const SharedMatrix &X, int index) {
+    /* Performs the operation A'[i,j,k] = A[I, J, K] * X[i, I] for a given position */
+
+    // TODO: Change this into a TensorView
+    int dim_new = X->rowspi(0);
+    int dim_old = X->colspi(0);
+    Tensor<double, 2> Xview("Xview", dim_new, dim_old);
+    ::memcpy(Xview.data(), X->get_pointer(), dim_new * dim_old * sizeof(double));
+
+    Tensor<double, 3> A_new;
+
+    if (index == 0) {
+        A_new = Tensor<double, 3>("A_new", dim_new, A.dim(1), A.dim(2));
+        einsum(0.0, Indices{index::i, index::J, index::K}, &A_new, 1.0, Indices{index::I, index::J, index::K}, A, Indices{index::i, index::I}, Xview);
+    } else if (index == 1) {
+        Tensor<double, 3> A_temp("A_temp", A.dim(1), A.dim(0), A.dim(2));
+        permute(Indices{index::J, index::I, index::K}, &A_temp, Indices{index::I, index::J, index::K}, A);
+
+        Tensor<double, 3> A_temp2("A_temp2", dim_new, A.dim(0), A.dim(2));
+        einsum(0.0, Indices{index::j, index::I, index::K}, &A_temp2, 1.0, Indices{index::J, index::I, index::K}, A_temp, Indices{index::j, index::J}, Xview);
+
+        A_new = Tensor<double, 3>("A_new", A.dim(0), dim_new, A.dim(2));
+        permute(Indices{index::I, index::j, index::K}, &A_new, Indices{index::j, index::I, index::K}, A_temp2);
+    } else if (index == 2) {
+        A_new = Tensor<double, 3>("A_new", A.dim(0), A.dim(1), dim_new);
+        einsum(0.0, Indices{index::I, index::J, index::k}, &A_new, 1.0, Indices{index::I, index::J, index::K}, A, Indices{index::k, index::K}, Xview);
+    } else {
+        throw PSIEXCEPTION("Index out of bounds for 3D Tensor");
+    }
+
+    return A_new;
+}
+
 Tensor<double, 3> DLPNOCCSDT::triples_permuter_einsums(const Tensor<double, 3> &X, int i, int j, int k, bool reverse) {
     /*- Generates equivalent amplitude T_jik, T_kji, ..., etc. from T_ijk (restricted by index i <= j <= k) -*/
     /*- Returns a permuted order based on the operations it takes to get i <= j <= k (forward or reverse) -*/

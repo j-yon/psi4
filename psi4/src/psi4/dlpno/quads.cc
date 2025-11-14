@@ -2387,22 +2387,18 @@ void DLPNOCCSDTQ::compute_R_iajbkc_quads(std::vector<SharedMatrix>& R_iajbkc) {
         Tensor<double, 4> K_ledb("K_ledb", nlmo_ijk, ntno_ijk, ntno_ijk, ntno_ijk);
         einsum(0.0, Indices{index::l, index::e, index::d, index::b}, &K_ledb, 1.0, Indices{index::Q, index::l, index::e}, q_ov_[ijk], Indices{index::Q, index::d, index::b}, q_vv_t1);
 
-        std::vector<std::tuple<int, int, int>> long_perms = {std::make_tuple(i, j, k), std::make_tuple(i, k, j),
-                                                                std::make_tuple(j, i, k), std::make_tuple(j, k, i),
-                                                                std::make_tuple(k, i, j), std::make_tuple(k, j, i)};
+        // Permutations
+        std::vector<std::tuple<int, int, int>> short_perms_idx = {std::make_tuple(0, 1, 2), std::make_tuple(1, 0, 2), std::make_tuple(2, 1, 0)};
 
-        std::vector<std::tuple<int, int, int>> long_perms_idx = {std::make_tuple(0, 1, 2), std::make_tuple(0, 2, 1),
-                                                                    std::make_tuple(1, 0, 2), std::make_tuple(1, 2, 0),
-                                                                    std::make_tuple(2, 0, 1), std::make_tuple(2, 1, 0)};
+        // Total residual contribution
+        Tensor<double, 3> R_ijk_cont("R_ijk_cont", ntno_ijk, ntno_ijk, ntno_ijk);
+        
+        for (int perm_idx = 0; perm_idx < short_perms_idx.size(); ++perm_idx) {
+            auto &[i_idx, j_idx, k_idx] = short_perms_idx[perm_idx];
+            int i = ijk_idx[i_idx], j = ijk_idx[j_idx], k = ijk_idx[k_idx];
 
-        std::array<Tensor<double, 3>, 6> Wperms;
-
-        for (int idx = 0; idx < long_perms.size(); ++idx) {
-            auto &[i, j, k] = long_perms[idx];
-            auto &[i_idx, j_idx, k_idx] = long_perms_idx[idx];
-
-            Wperms[idx] = Tensor<double, 3>("Wperm", n_tno_[ijk], n_tno_[ijk], n_tno_[ijk]);
-            Wperms[idx].zero();
+            Tensor<double, 3> R_ijk_buffer("R_ijk_buffer", ntno_ijk, ntno_ijk, ntno_ijk);
+            R_ijk_buffer.zero();
 
             for (int m_ijk = 0; m_ijk < nlmo_ijk; ++m_ijk) {
                 int m = lmotriplet_to_lmos_[ijk][m_ijk];
@@ -2418,91 +2414,60 @@ void DLPNOCCSDTQ::compute_R_iajbkc_quads(std::vector<SharedMatrix>& R_iajbkc) {
                     Tensor<double, 4> T_mijk = quadruples_permuter(T_iajbkcld_[mijk], m, i, j, k);
                     Tensor<double, 4> alpha_mijk = alpha_ijkl_helper(T_mijk);
 
-                    Tensor<double, 3> W_gremlin_a("W_gremlin_a", n_qno_[mijk], n_qno_[mijk], n_qno_[mijk]);
-                    Tensor<double, 3> W_gremlin_b("W_gremlin_b", n_tno_[ijk], n_qno_[mijk], n_qno_[mijk]);
-
                     // Jiang and Matthews Eq. 6a 1/6 F_{me} alpha_{mijk}^{eabc}
-                    Tensor<double, 1> F_m_slice = F_ld(m_ijk, All);
-                    Tensor<double, 1> F_m_gremlin("F_m_gremlin", n_qno_[mijk]);
-                    einsum(0.0, Indices{index::E}, &F_m_gremlin, 1.0, Indices{index::e, index::E}, S_ijk_mijk_ein, 
-                            Indices{index::e}, F_m_slice);
+                    Tensor<double, 1> F_me_slice = F_ld(m_ijk, All);
+                    Tensor<double, 1> F_me_qno("F_me_qno", n_qno_[mijk]);
+                    einsum(0.0, Indices{index::E}, &F_me_qno, 1.0, Indices{index::e, index::E}, S_ijk_mijk_ein, Indices{index::e}, F_me_slice);
 
-                    einsum(0.0, Indices{index::a, index::b, index::c}, &W_gremlin_a, 1.0 / 6.0, Indices{index::e, index::a, index::b, index::c}, 
-                            alpha_mijk, Indices{index::e}, F_m_gremlin);
+                    Tensor<double, 3> R_ijk_buffer_b("R_ijk_buffer_b", n_qno_[mijk], n_qno_[mijk], n_qno_[mijk]);
+                    einsum(0.0, Indices{index::a, index::b, index::c}, &R_ijk_buffer_b, 1.0 / 3, Indices{index::e, index::a, index::b, index::c}, 
+                            alpha_mijk, Indices{index::e}, F_me_qno);
+                    
+                    R_ijk_buffer += matmul_3d_einsums(R_ijk_buffer_b, S_ijk_mijk, n_qno_[mijk], n_tno_[ijk]);
 
                     // Jiang and Matthews Eq. 6b 1/2 (ae|mf) alpha_{mijk}^{febc}
-                    Tensor<double, 3> g_eaf_slice = K_ledb(m_ijk, All, All, All); // Stored as (f, e, a)
-                    Tensor<double, 3> g_eaf_gremlin_a("g_eaf_gremlin_a", n_qno_[mijk], n_tno_[ijk], n_tno_[ijk]);
-                    einsum(0.0, Indices{index::F, index::e, index::a}, &g_eaf_gremlin_a, 1.0, Indices{index::f, index::e, index::a}, g_eaf_slice,
-                            Indices{index::f, index::F}, S_ijk_mijk_ein);
-                    Tensor<double, 3> g_eaf_gremlin_b("g_eaf_gremlin_b", n_tno_[ijk], n_qno_[mijk], n_tno_[ijk]);
-                    permute(Indices{index::e, index::f, index::a}, &g_eaf_gremlin_b, Indices{index::f, index::e, index::a}, g_eaf_gremlin_a);
-                    Tensor<double, 3> g_eaf_gremlin_c("g_eaf_gremlin_c", n_qno_[mijk], n_qno_[mijk], n_tno_[ijk]);
-                    einsum(0.0, Indices{index::E, index::f, index::a}, &g_eaf_gremlin_c, 1.0, Indices{index::e, index::f, index::a}, g_eaf_gremlin_b,
-                            Indices{index::e, index::E}, S_ijk_mijk_ein);
-                    Tensor<double, 3> g_eaf_gremlin_d("g_eaf_gremlin_d", n_qno_[mijk], n_qno_[mijk], n_tno_[ijk]);
-                    permute(Indices{index::f, index::e, index::a}, &g_eaf_gremlin_d, Indices{index::e, index::f, index::a}, g_eaf_gremlin_c);
+                    Tensor<double, 3> K_ledb_slice = K_ledb(m_ijk, All, All, All);
+                    Tensor<double, 3> K_ledb_temp_a = matmul_3d_index(K_ledb_slice, S_ijk_mijk->transpose(), 0);
+                    Tensor<double, 3> K_ledb_temp_b = matmul_3d_index(K_ledb_temp_a, S_ijk_mijk->transpose(), 1);
 
-                    einsum(0.0, Indices{index::a, index::b, index::c}, &W_gremlin_b, 0.5, Indices{index::f, index::e, index::a}, g_eaf_gremlin_d,
+                    Tensor<double, 3> R_ijk_buffer_c("R_ijk_buffer_c", n_tno_[ijk], n_qno_[mijk], n_qno_[mijk]);
+                    einsum(0.0, Indices{index::a, index::b, index::c}, &R_ijk_buffer_c, 1.0, Indices{index::f, index::e, index::a}, K_ledb_temp_b,
                             Indices{index::f, index::e, index::b, index::c}, alpha_mijk);
-
-                    // Flush the gremlin buffers
-                    Wperms[idx] += matmul_3d_einsums(W_gremlin_a, S_ijk_mijk, n_qno_[mijk], n_tno_[ijk]);
-
-                    Tensor<double, 3> W_gremlin_c("W_gremlin_c", n_tno_[ijk], n_qno_[mijk], n_tno_[ijk]);
-                    einsum(0.0, Indices{index::a, index::b, index::c}, &W_gremlin_c, 1.0, Indices{index::c, index::C}, S_ijk_mijk_ein,
-                            Indices{index::a, index::b, index::C}, W_gremlin_b);
-                    Tensor<double, 3> W_gremlin_d("W_gremlin_d", n_tno_[ijk], n_tno_[ijk], n_qno_[mijk]);
-                    permute(Indices{index::a, index::c, index::b}, &W_gremlin_d, Indices{index::a, index::b, index::c}, W_gremlin_c);
-                    Tensor<double, 3> W_gremlin_e("W_gremlin_e", n_tno_[ijk], n_tno_[ijk], n_tno_[ijk]);
-                    einsum(0.0, Indices{index::a, index::c, index::b}, &W_gremlin_e, 1.0, Indices{index::a, index::c, index::B}, W_gremlin_d,
-                            Indices{index::b, index::B}, S_ijk_mijk_ein);
-                    Tensor<double, 3> W_gremlin_f("W_gremlin_f", n_tno_[ijk], n_tno_[ijk], n_tno_[ijk]);
-                    permute(Indices{index::a, index::b, index::c}, &W_gremlin_f, Indices{index::a, index::c, index::b}, W_gremlin_e);
-
-                    Wperms[idx] += W_gremlin_f;
+                    
+                    Tensor<double, 3> R_ijk_buffer_d = matmul_3d_index(R_ijk_buffer_c, S_ijk_mijk, 1);
+                    R_ijk_buffer += matmul_3d_index(R_ijk_buffer_d, S_ijk_mijk, 2);
                 }
 
                 for (int n_ijk = 0; n_ijk < nlmo_ijk; ++n_ijk) {
                     int n = lmotriplet_to_lmos_[ijk][n_ijk];
-                    int mink_idx = m * std::pow(naocc, 3) + i * std::pow(naocc, 2) + n * naocc + k;
-                    int mink = i_j_k_l_to_ijkl_.count(mink_idx) ? (i_j_k_l_to_ijkl_[mink_idx]) : -1;
-                    if (mink == -1) continue;
+                    int mnjk_idx = m * std::pow(naocc, 3) + n * std::pow(naocc, 2) + j * naocc + k;
+                    int mnjk = i_j_k_l_to_ijkl_.count(mnjk_idx) ? (i_j_k_l_to_ijkl_[mnjk_idx]) : -1;
+                    if (mnjk == -1) continue;
 
-                    // Jiang and Matthews Eq. 6c -1/2 (me|nj) alpha_{mink}^{eabc} -> O(N^{10})
-                    auto S_ijk_mink = submatrix_rows_and_cols(*S_pao_, lmotriplet_to_paos_[ijk], lmoquadruplet_to_paos_[mink]);
-                    S_ijk_mink = linalg::triplet(X_tno_[ijk], S_ijk_mink, X_qno_[mink], true, false, false);
-                    Tensor<double, 2> S_ijk_mink_ein("S_ijk_mink_ein", n_tno_[ijk], n_qno_[mink]);
-                    ::memcpy(S_ijk_mink_ein.data(), S_ijk_mink->get_pointer(), n_tno_[ijk] * n_qno_[mink] * sizeof(double));
+                    // Jiang and Matthews Eq. 6c -1/2 (me|ni) alpha_{mnjk}^{eabc} -> O(N^{10})
+                    auto S_ijk_mnjk = submatrix_rows_and_cols(*S_pao_, lmotriplet_to_paos_[ijk], lmoquadruplet_to_paos_[mnjk]);
+                    S_ijk_mnjk = linalg::triplet(X_tno_[ijk], S_ijk_mnjk, X_qno_[mnjk], true, false, false);
+                    Tensor<double, 2> S_ijk_mnjk_ein("S_ijk_mnjk_ein", n_tno_[ijk], n_qno_[mnjk]);
+                    ::memcpy(S_ijk_mnjk_ein.data(), S_ijk_mnjk->get_pointer(), n_tno_[ijk] * n_qno_[mnjk] * sizeof(double));
 
-                    Tensor<double, 4> T_mink = quadruples_permuter(T_iajbkcld_[mink], m, i, n, k);
-                    Tensor<double, 4> alpha_mink = alpha_ijkl_helper(T_mink);
+                    Tensor<double, 4> T_mnjk = quadruples_permuter(T_iajbkcld_[mnjk], m, n, j, k);
+                    Tensor<double, 4> alpha_mnjk = alpha_ijkl_helper(T_mnjk);
 
-                    Tensor<double, 1> K_menj_slice = K_menj_list[j_idx](All, m_ijk, n_ijk);
-                    Tensor<double, 1> K_menj_gremlin("K_menj_gremlin", n_qno_[mink]);
-                    einsum(0.0, Indices{index::E}, &K_menj_gremlin, 1.0, Indices{index::e, index::E}, S_ijk_mink_ein, 
-                            Indices{index::e}, K_menj_slice);
+                    Tensor<double, 1> K_meni_slice = K_menj_list[i_idx](All, m_ijk, n_ijk);
+                    Tensor<double, 1> K_meni_qno("K_meni_qno", n_qno_[mnjk]);
+                    einsum(0.0, Indices{index::E}, &K_meni_qno, 1.0, Indices{index::e, index::E}, S_ijk_mnjk_ein, Indices{index::e}, K_meni_slice);
 
-                    Tensor<double, 3> W_gremlin_g("W_gremlin_g", n_qno_[mink], n_qno_[mink], n_qno_[mink]);
+                    Tensor<double, 3> R_ijk_buffer_e("R_ijk_buffer_e", n_qno_[mnjk], n_qno_[mnjk], n_qno_[mnjk]);
+                    einsum(0.0, Indices{index::a, index::b, index::c}, &R_ijk_buffer_e, -1.0, Indices{index::e, index::a, index::b, index::c}, 
+                            alpha_mnjk, Indices{index::e}, K_meni_qno);
 
-                    einsum(0.0, Indices{index::a, index::b, index::c}, &W_gremlin_g, -0.5, Indices{index::e, index::a, index::b, index::c},
-                            alpha_mink, Indices{index::e}, K_menj_gremlin);
-
-                    Wperms[idx] += matmul_3d_einsums(W_gremlin_g, S_ijk_mink, n_qno_[mink], n_tno_[ijk]);
+                    R_ijk_buffer += matmul_3d_einsums(R_ijk_buffer_e, S_ijk_mnjk, n_qno_[mnjk], n_tno_[ijk]);
                 } // end n_ijk
             } // end m_ijk
-        } // end idx
-        
-        // Add into R buffer
-        for (int a_ijk = 0; a_ijk < ntno_ijk; a_ijk++) {
-            for (int b_ijk = 0; b_ijk < ntno_ijk; b_ijk++) {
-                for (int c_ijk = 0; c_ijk < ntno_ijk; c_ijk++) {
-                    (*R_ijk)(a_ijk, b_ijk * ntno_ijk + c_ijk) +=
-                        (Wperms[0])(a_ijk, b_ijk, c_ijk) + (Wperms[1])(a_ijk, c_ijk, b_ijk) + (Wperms[2])(b_ijk, a_ijk, c_ijk) + 
-                        (Wperms[3])(b_ijk, c_ijk, a_ijk) + (Wperms[4])(c_ijk, a_ijk, b_ijk) + (Wperms[5])(c_ijk, b_ijk, a_ijk);
-                }
-            }
-        }
+            R_ijk_cont += triples_permuter_einsums(R_ijk_buffer, i_idx, j_idx, k_idx); // Lie algebra rules for short perms allow for this
+        } // end perm_idx
+
+        C_DAXPY(ntno_ijk * ntno_ijk * ntno_ijk, 1.0, R_ijk_cont.data(), 1, R_iajbkc[ijk]->get_pointer(), 1);
 
         if (disk_ints_) {
             q_ov_[ijk] = Tensor<double, 3>(q_ov_[ijk].name(), 0, 0, 0);

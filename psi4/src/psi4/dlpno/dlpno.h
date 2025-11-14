@@ -607,6 +607,8 @@ class DLPNOCCSDT : public DLPNOCCSD_T {
 
     /// Helper function for transforming amplitudes from one TNO space to another
     Tensor<double, 3> matmul_3d_einsums(const Tensor<double, 3> &A, const SharedMatrix &X, int dim_old, int dim_new);
+    /// Helper function for transforming amplitudes from one TNO space to another (one index only)
+    Tensor<double, 3> matmul_3d_index(const Tensor<double, 3> &A, const SharedMatrix &X, int index);
     /// Helper function for managing permutational symmetry in triples amplitudes
     Tensor<double, 3> triples_permuter_einsums(const Tensor<double, 3> &X, int i, int j, int k, bool reverse=false);
     /// Returns a permutation index for the order of i, j, k (e.g. (i <= j <= k) = 0; (i <= k <= j) = 1, ..., (k <= j <= i) = 5)
