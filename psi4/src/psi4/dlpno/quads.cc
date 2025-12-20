@@ -3999,6 +3999,7 @@ void DLPNOCCSDTQ::lccsdtq_iterations() {
             // compute triples amplitude
             timer_on("DLPNO-CCSDTQ : R_iajbkc");
             if (miter == N_MICRO_ITER - 1) {
+                // form_T_mnk();
                 compute_R_iajbkc_quads(R_iajbkc);
 
                 // spin adapt and then de-adapt triples residual
@@ -4241,8 +4242,7 @@ double DLPNOCCSDTQ::compute_energy() {
         psio_->open(PSIF_DLPNO_QIA_QNO, PSIO_OPEN_NEW);
         psio_->open(PSIF_DLPNO_QAB_QNO, PSIO_OPEN_NEW);
     }
-
-    // Compute extended PNOs
+    // Compute extended PNOs for T4 "lasagna" terms
     double xpno_tolerance = options_.get_double("T_CUT_XPNO");
     xpno_transform(xpno_tolerance);
 

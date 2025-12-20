@@ -587,6 +587,9 @@ class DLPNOCCSDT : public DLPNOCCSD_T {
     std::vector<Tensor<double, 3>> T_iajbkc_clone_;
     // Contravariant Triples Amplitudes (from Koch 2020)
     std::vector<Tensor<double, 3>> U_iajbkc_;
+    // Triples amplitude of mnk projected onto the XLNO space of k
+    std::vector<std::vector<Tensor<double, 3>>> T_mnk_list_;
+
     // List of triples sorted by number of TNOs
     std::vector<int> sorted_triplets_;
     // Number of threads
@@ -599,6 +602,12 @@ class DLPNOCCSDT : public DLPNOCCSD_T {
     double E_T0_loose_;
     // (T) energy using looser TNOs
     double E_T_loose_;
+
+    // Extended LNO (XLNO) information
+    SparseMap lmo_to_paos_ext_;           ///< LMO to extended PAOs
+    std::vector<SharedMatrix> X_lno_ext_; ///< global PAO -> canonical LNO transforms
+    std::vector<SharedVector> e_lno_ext_; ///< LNO orbital energies
+    std::vector<int> n_lno_ext_;          ///< number of LNOs
     
     /// Encapsulates the reading in of (Q_{ijk}|m_{ijk} a_{ijk}) integrals (regardless of core or disk)
     Tensor<double, 3> QIA_TNO(const int ijk);
@@ -618,6 +627,16 @@ class DLPNOCCSDT : public DLPNOCCSD_T {
     /// Performs a spin-desummation of the triples amplitude (Matthews Eq. 27)
     /// This is done to remove linear dependencies in the triples amplitude space
     Tensor<double, 3> triples_spin_desummation(const Tensor<double, 3> &X);
+
+    /// Create XLNOs (Extended Local Natural Orbitals) to help with TNO projections
+    void xlno_transform(double xlno_tolerance);
+
+    /// form the projected T_{mnk}^{abc} amplitudes over the XLNO domain of k
+    /// (to reduce the cost of certain delinquent terms)
+    void form_T_mnk();
+
+    /// compute the expensive term in \rho_{ck}^{bd}
+    std::vector<Tensor<double, 3>> rho_dbck_contribution();
 
     /// computes singles residuals in LCCSDT equations
     void compute_R_ia_triples(std::vector<SharedMatrix>& R_ia, std::vector<std::vector<SharedMatrix>>& R_ia_buffer);
@@ -743,7 +762,7 @@ class DLPNOCCSDTQ : public DLPNOCCSDT_Q {
 
     // Singles Amplitudes projected onto QNO space of ijkl
     std::vector<Tensor<double, 2>> T_n_ijkl_;
-    // Quadruples Amplitudes of ijkl projected onto PNO space of last two pairs
+    // Quadruples Amplitudes of ijkl projected onto XPNO space of kl
     std::vector<std::vector<Tensor<double, 4>>> T_mnkl_list_;
 
     // Helper functions to form quadruples intermediates
@@ -758,7 +777,7 @@ class DLPNOCCSDTQ : public DLPNOCCSDT_Q {
     /// Create XPNOs (Extended Pair Natural Orbitals) to help with QNO projections
     void xpno_transform(double xpno_tolerance);
 
-    /// form the projected T_{mnkl}^{abcd} amplitudes over the QNO domain of kkll
+    /// form the projected T_{mnkl}^{abcd} amplitudes over the XPNO domain of kl
     /// (to reduce the cost of certain delinquent terms)
     void form_T_mnkl();
 

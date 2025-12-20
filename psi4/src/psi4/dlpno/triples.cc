@@ -1690,6 +1690,184 @@ void DLPNOCCSDT::estimate_memory() {
     }
 }
 
+void DLPNOCCSDT::xlno_transform(double xlno_tolerance) {
+    timer_on("XLNO transform");
+
+    int naocc = nalpha_ - nfrzc();
+    int nbf = basisset_->nbf();
+    int n_lmo_pairs = ij_to_i_j_.size();
+    int n_lmo_triplets = ijk_to_i_j_k_.size();
+    int min_pnos = options_.get_int("MIN_PNOS_PER_PAIR");
+    double xlno_occ_tolerance = options_.get_double("T_CUT_TRACE_XLNO");
+
+    lmo_to_paos_ext_.resize(naocc);
+    X_lno_ext_.resize(naocc);
+    e_lno_ext_.resize(naocc);
+    n_lno_ext_.resize(naocc);
+
+    std::vector<double> occ_xlno(naocc, 0.0);
+    std::vector<double> trace_xlno(naocc, 0.0);
+
+#pragma omp parallel for
+    for (int k = 0; k < naocc; ++k) {
+        // Initialize extended list for XLNOs of occupied orbital k
+        lmo_to_paos_ext_[k] = lmo_to_paos_[k];
+
+        for (int mn = 0; mn < n_lmo_pairs; ++mn) {
+            auto &[m, n] = ij_to_i_j_[mn];
+            int mk = i_j_to_ij_[m][k], nk = i_j_to_ij_[n][k];
+
+            if (mk == -1 || nk == -1) continue;
+
+            lmo_to_paos_ext_[k] = merge_lists(lmo_to_paos_ext_[k], lmopair_to_paos_[mk]);
+            lmo_to_paos_ext_[k] = merge_lists(lmo_to_paos_ext_[k], lmopair_to_paos_[nk]);
+            lmo_to_paos_ext_[k] = merge_lists(lmo_to_paos_ext_[k], lmopair_to_paos_[mn]);
+        } // end mn
+
+        // Number of PAOs in the extended domain of k
+        int npao_ext_k = lmo_to_paos_ext_[k].size();
+
+        //                                              //
+        // ==> Canonicalize extended PAOs of LMO k  <== //
+        //                                              //
+
+        auto S_pao_k_ext = submatrix_rows_and_cols(*S_pao_, lmo_to_paos_ext_[k], lmo_to_paos_ext_[k]);
+        auto F_pao_k_ext = submatrix_rows_and_cols(*F_pao_, lmo_to_paos_ext_[k], lmo_to_paos_ext_[k]);
+
+        SharedMatrix X_pao_k_ext;
+        SharedVector e_pao_k_ext;
+        std::tie(X_pao_k_ext, e_pao_k_ext) = orthocanonicalizer(S_pao_k_ext, F_pao_k_ext);
+
+        F_pao_k_ext = linalg::triplet(X_pao_k_ext, F_pao_k_ext, X_pao_k_ext, true, false, false);
+
+        // number of PAOs in the domain after removing linear dependencies
+        int npao_can_k_ext = X_pao_k_ext->colspi(0);
+
+        //                                            //
+        // ==> Canonical PAOs  to Canonical XLNOs <== //
+        //                                            //
+
+        size_t nvir_k_ext = F_pao_k_ext->rowspi(0);
+
+        // Compute pair density from amplitudes
+        SharedMatrix D_k_sum = std::make_shared<Matrix>("D_k_sum", nvir_k_ext, nvir_k_ext);
+        D_k_sum->zero();
+
+        int triples_count = 0;
+        for (int mn = 0; mn < n_lmo_pairs; ++mn) {
+            auto &[m, n] = ij_to_i_j_[mn];
+            int mk = i_j_to_ij_[m][k], nk = i_j_to_ij_[n][k];
+
+            if (mk == -1 || nk == -1) continue;
+
+            // mn
+            auto D_mn = linalg::doublet(Tt_iajb_[mn], T_iajb_[mn], false, true);
+            D_mn->add(linalg::doublet(Tt_iajb_[mn], T_iajb_[mn], true, false));
+            if (m == n) D_mn->scale(0.5);
+            auto S_mn = submatrix_rows_and_cols(*S_pao_, lmo_to_paos_ext_[k], lmopair_to_paos_[mn]);
+            S_mn = linalg::triplet(X_pao_k_ext, S_mn, X_pno_[mn], true, false, false);
+            D_k_sum->add(linalg::triplet(S_mn, D_mn, S_mn, false, false, true));
+
+            // mk
+            auto D_mk = linalg::doublet(Tt_iajb_[mk], T_iajb_[mk], false, true);
+            D_mk->add(linalg::doublet(Tt_iajb_[mk], T_iajb_[mk], true, false));
+            if (m == k) D_mk->scale(0.5);
+            auto S_mk = submatrix_rows_and_cols(*S_pao_, lmo_to_paos_ext_[k], lmopair_to_paos_[mk]);
+            S_mk = linalg::triplet(X_pao_k_ext, S_mk, X_pno_[mk], true, false, false);
+            D_k_sum->add(linalg::triplet(S_mk, D_mk, S_mk, false, false, true));
+
+            // nk
+            auto D_nk = linalg::doublet(Tt_iajb_[nk], T_iajb_[nk], false, true);
+            D_nk->add(linalg::doublet(Tt_iajb_[nk], T_iajb_[nk], true, false));
+            if (n == k) D_nk->scale(0.5);
+            auto S_nk = submatrix_rows_and_cols(*S_pao_, lmo_to_paos_ext_[k], lmopair_to_paos_[nk]);
+            S_nk = linalg::triplet(X_pao_k_ext, S_nk, X_pno_[nk], true, false, false);
+            D_k_sum->add(linalg::triplet(S_nk, D_nk, S_nk, false, false, true));
+
+            triples_count++;
+        }
+        D_k_sum->scale(1.0 / (3.0 * triples_count));
+
+        // Diagonalization of k density
+        auto X_lno_k = std::make_shared<Matrix>("eigenvectors", nvir_k_ext, nvir_k_ext);
+        Vector lno_occ("eigenvalues", nvir_k_ext);
+        D_k_sum->diagonalize(*X_lno_k, lno_occ, descending);
+
+        // Compute trace sum
+        double occ_total = 0.0;
+        for (size_t a = 0; a < nvir_k_ext; ++a) {
+            occ_total += lno_occ.get(a);
+        }
+
+        int nvir_k_final = 0;
+        double occ_curr = 0.0;
+
+        for (size_t a = 0; a < nvir_k_ext; ++a) {
+            if (fabs(lno_occ.get(a)) >= xlno_tolerance || occ_curr / occ_total < xlno_occ_tolerance || a < min_pnos) {
+                occ_curr += lno_occ.get(a);
+                nvir_k_final++;
+            } // end if
+        } // end a
+
+        nvir_k_final = std::max(1, nvir_k_final);
+
+        Dimension zero(1);
+        Dimension dim_final(1);
+        dim_final.fill(nvir_k_final);
+
+        // This transformation gives orbitals that are orthonormal but not canonical
+        X_lno_k = X_lno_k->get_block({zero, X_lno_k->rowspi()}, {zero, dim_final});
+        lno_occ = lno_occ.get_block({zero, dim_final});
+
+        SharedMatrix lno_canon;
+        SharedVector e_lno_k;
+        std::tie(lno_canon, e_lno_k) = canonicalizer(X_lno_k, F_pao_k_ext);
+
+        // This transformation gives orbitals that are orthonormal and canonical
+        X_lno_k = linalg::doublet(X_lno_k, lno_canon, false, false);
+        X_lno_k = linalg::doublet(X_pao_k_ext, X_lno_k, false, false);
+
+        X_lno_ext_[k] = X_lno_k;
+        e_lno_ext_[k] = e_lno_k;
+        n_lno_ext_[k] = X_lno_k->colspi(0);
+        occ_xlno[k] = lno_occ.get(n_lno_ext_[k] - 1);
+        trace_xlno[k] = occ_curr / occ_total;
+    } // end k
+
+    // Print out XLNO domain information
+    int lno_count_total = 0, lno_count_min = nbf, lno_count_max = 0;
+    double occ_number_total = 0.0, occ_number_min = 2.0, occ_number_max = 0.0;
+    double trace_total = 0.0, trace_min = 1.0, trace_max = 0.0;
+    for (int k = 0; k < naocc; ++k) {
+        lno_count_total += n_lno_ext_[k];
+        lno_count_min = std::min(lno_count_min, n_lno_ext_[k]);
+        lno_count_max = std::max(lno_count_max, n_lno_ext_[k]);
+
+        occ_number_total += occ_xlno[k];
+        occ_number_min = std::min(occ_number_min, occ_xlno[k]);
+        occ_number_max = std::max(occ_number_max, occ_xlno[k]);
+
+        trace_total += trace_xlno[k];
+        trace_min = std::min(trace_min, trace_xlno[k]);
+        trace_max = std::max(trace_max, trace_xlno[k]);
+    }
+
+    outfile->Printf("  \n");
+    outfile->Printf("    (Extended) Natural Orbitals per Local MO:\n");
+    outfile->Printf("      Avg: %3d NOs \n", lno_count_total / naocc);
+    outfile->Printf("      Min: %3d NOs \n", lno_count_min);
+    outfile->Printf("      Max: %3d NOs \n", lno_count_max);
+    outfile->Printf("      Avg Occ Number Tol: %.3e \n", occ_number_total / naocc);
+    outfile->Printf("      Min Occ Number Tol: %.3e \n", occ_number_min);
+    outfile->Printf("      Max Occ Number Tol: %.3e \n", occ_number_max);
+    outfile->Printf("      Avg Trace Sum: %.6f \n", trace_total / naocc);
+    outfile->Printf("      Min Trace Sum: %.6f \n", trace_min);
+    outfile->Printf("      Max Trace Sum: %.6f \n", trace_max);
+    outfile->Printf("  \n");
+
+    timer_off("XLNO transform");
+}
+
 void DLPNOCCSDT::compute_integrals() {
 
     size_t n_lmo_triplets = ijk_to_i_j_k_.size();
@@ -2650,11 +2828,120 @@ void DLPNOCCSDT::compute_R_iajbkc_cc3(std::vector<SharedMatrix>& R_iajbkc) {
     } // end ijk
 }
 
+std::vector<Tensor<double, 3>> DLPNOCCSDT::rho_dbck_contribution() {
+
+    int naocc = i_j_to_ij_.size();
+    size_t n_lmo_pairs = ij_to_i_j_.size();
+    size_t n_lmo_triplets = ijk_to_i_j_k_.size();
+
+    std::vector<Tensor<double, 3>> rho_dbck_cont(naocc);
+
+#pragma omp parallel for
+    for (int k = 0; k < naocc; ++k) {
+        int kk = i_j_to_ij_[k][k];
+        int nlmo_k = lmopair_to_lmos_[kk].size();
+        int naux_k = lmopair_to_ribfs_[kk].size();
+        int npno_k = n_pno_[kk];
+
+        rho_dbck_cont[k] = Tensor<double, 3>("rho_dbck_cont", npno_k, npno_k, npno_k);
+        rho_dbck_cont[k].zero();
+
+        std::vector<SharedMatrix> q_ov_k = QIA_PNO(kk);
+
+        Tensor<double, 4> g_menf_t("g_menf_t", nlmo_k, nlmo_k, npno_k, npno_k);
+        g_menf_t.zero();
+
+        for (int n_k = 0; n_k < nlmo_k; ++n_k) {
+            int n = lmopair_to_lmos_[kk][n_k];
+            for (int m_k = 0; m_k < nlmo_k; ++m_k) {
+                int m = lmopair_to_lmos_[kk][m_k];
+                for (int e_k = 0; e_k < n_pno_[kk]; ++e_k) {
+                    for (int f_k = 0; f_k < n_pno_[kk]; ++f_k) {
+                        for (int q_k = 0; q_k < naux_k; ++q_k) {
+                            g_menf_t(n_k, m_k, f_k, e_k) += (*q_ov_k[q_k])(n_k, f_k) * (*q_ov_k[q_k])(m_k, e_k);
+                        } // end q_k
+                    } // end f_k
+                } // end e_k
+            } // end m_k
+        } // end n_k
+
+        for (int m_k = 0; m_k < nlmo_k; ++m_k) {
+            int m = lmopair_to_lmos_[kk][m_k];
+            for (int l_k = 0; l_k < nlmo_k; ++l_k) {
+                int l = lmopair_to_lmos_[kk][l_k];
+
+                int mlk_dense = m * naocc * naocc + l * naocc + k;
+                if (!i_j_k_to_ijk_.count(mlk_dense)) continue;
+                int mlk = i_j_k_to_ijk_[mlk_dense];
+
+                // (2 t_{mlk}^{ebc} - t_{mlk}^{cbe} - t_{mlk}^{bec})
+                auto S_mlk_k = submatrix_rows_and_cols(*S_pao_, lmotriplet_to_paos_[mlk], lmopair_to_paos_[kk]);
+                S_mlk_k = linalg::triplet(X_tno_[mlk], S_mlk_k, X_pno_[kk], true, false, false);
+
+                Tensor<double, 3> T_mlk = matmul_3d_einsums(triples_permuter_einsums(
+                                            T_iajbkc_clone_[mlk], m, l, k), S_mlk_k->transpose(), n_tno_[mlk], n_pno_[kk]);
+                Tensor<double, 3> Z_mlk = T_mlk;
+                Z_mlk *= 2.0;
+                Z_mlk -= triples_permuter_einsums(T_mlk, 1, 0, 2);
+                Z_mlk -= triples_permuter_einsums(T_mlk, 2, 1, 0);
+                
+                Tensor<double, 2> g_menf_t_slice = g_menf_t(m_k, l_k, All, All);
+                einsum(1.0, Indices{index::d, index::b, index::c}, &rho_dbck_cont[k], -1.0, Indices{index::e, index::d}, g_menf_t_slice,
+                        Indices{index::e, index::b, index::c}, Z_mlk);
+            } // end m_ijk
+        } // end l_ijk
+    } // end k
+
+    return rho_dbck_cont;
+}
+
+void DLPNOCCSDT::form_T_mnk() {
+    int naocc = i_j_to_ij_.size();
+    size_t n_lmo_pairs = ij_to_i_j_.size();
+    size_t n_lmo_triplets = ijk_to_i_j_k_.size();
+
+    // Stored as k, mn
+    T_mnk_list_.resize(naocc);
+
+    // Loop over all occupied orbitals
+#pragma omp parallel for
+    for (int k = 0; k < naocc; ++k) {
+        int kk = i_j_to_ij_[k][k];
+        T_mnk_list_[k].resize(n_lmo_pairs);
+
+        for (int mn = 0; mn < n_lmo_pairs; ++mn) {
+            auto &[m, n] = ij_to_i_j_[mn];
+            if (m > n) continue;
+
+            int mnk_idx = m * std::pow(naocc, 2) + n * naocc + k;
+            int mnk = i_j_k_to_ijk_.count(mnk_idx) ? i_j_k_to_ijk_[mnk_idx] : -1;
+
+            if (mn == -1 || mnk == -1) continue;
+
+            /*
+            auto S_mnk_k = submatrix_rows_and_cols(*S_pao_, lmotriplet_to_paos_[mnk], lmo_to_paos_ext_[k]);
+            S_mnk_k = linalg::triplet(X_tno_[mnk], S_mnk_k, X_lno_ext_[k], true, false, false);
+
+            T_mnk_list_[k][mn] = matmul_3d_einsums(triples_permuter_einsums(T_iajbkc_clone_[mnk], m, n, k),
+                                                    S_mnk_k->transpose(), n_tno_[mnk], n_lno_ext_[k]);
+            */
+            auto S_mnk_k = submatrix_rows_and_cols(*S_pao_, lmotriplet_to_paos_[mnk], lmopair_to_paos_[kk]);
+            S_mnk_k = linalg::triplet(X_tno_[mnk], S_mnk_k, X_pno_[kk], true, false, false);
+
+            T_mnk_list_[k][mn] = matmul_3d_einsums(triples_permuter_einsums(T_iajbkc_clone_[mnk], m, n, k),
+                                                    S_mnk_k->transpose(), n_tno_[mnk], n_pno_[kk]);
+        } // end mn
+    } // end for
+}
+
 void DLPNOCCSDT::compute_R_iajbkc(std::vector<SharedMatrix>& R_iajbkc) {
 
     size_t naocc = i_j_to_ij_.size();
     size_t n_lmo_pairs = ij_to_i_j_.size();
     size_t n_lmo_triplets = ijk_to_i_j_k_.size();
+
+    // Compute expensive rho_dbck contribution
+    std::vector<Tensor<double, 3>> rho_dbck_cont = rho_dbck_contribution();
 
 #pragma omp parallel for schedule(dynamic, 1)
     for (int ijk_sorted = 0; ijk_sorted < n_lmo_triplets; ++ijk_sorted) {
@@ -2930,6 +3217,7 @@ void DLPNOCCSDT::compute_R_iajbkc(std::vector<SharedMatrix>& R_iajbkc) {
 
         for (int idx = 0; idx < ijk_idx.size(); ++idx) {
             int i = ijk_idx[idx];
+            int ii = i_j_to_ij_[i][i];
 
             rho_dbck_list[idx] = Tensor<double, 3>("rho_dbck_list", ntno_ijk, ntno_ijk, ntno_ijk);
             einsum(0.0, Indices{index::d, index::b, index::c}, &rho_dbck_list[idx], 1.0, Indices{index::Q, index::d, index::b}, q_vv_t1, Indices{index::Q, index::c}, q_iv_t1_list[idx]);
@@ -2969,36 +3257,10 @@ void DLPNOCCSDT::compute_R_iajbkc(std::vector<SharedMatrix>& R_iajbkc) {
             rho_dbck_list[idx] -= rho_dbck_temp2;
 
             // Triples terms (ca-nasty)
-            for (int m_ijk = 0; m_ijk < nlmo_ijk; ++m_ijk) {
-                int m = lmotriplet_to_lmos_[ijk][m_ijk];
-
-                for (int l_ijk = 0; l_ijk < nlmo_ijk; ++l_ijk) {
-                    int l = lmotriplet_to_lmos_[ijk][l_ijk];
-                    int mli_dense = m * naocc * naocc + l * naocc + i;
-                    if (!i_j_k_to_ijk_.count(mli_dense)) continue;
-                    int mli = i_j_k_to_ijk_[mli_dense];
-
-                    int ml_idx = (m_ijk > l_ijk) ? (l_ijk * nlmo_ijk + m_ijk) : (m_ijk * nlmo_ijk + l_ijk);
-                    auto S_ijk_mli = S_ijk_mli_list[idx][ml_idx];
-
-                    // (2 t_{mli}^{ebc} - t_{mli}^{cbe} - t_{mli}^{bec})
-                    Tensor<double, 3> T_mli = matmul_3d_einsums(
-                        triples_permuter_einsums(T_iajbkc_clone_[mli], m, l, i), S_ijk_mli, n_tno_[mli], n_tno_[ijk]);
-
-                    Tensor<double, 3> T_lmi("T_lmi", ntno_ijk, ntno_ijk, ntno_ijk);
-                    permute(Indices{index::b, index::a, index::c}, &T_lmi, Indices{index::a, index::b, index::c}, T_mli);
-
-                    Tensor<double, 3> T_ilm("T_ilm", ntno_ijk, ntno_ijk, ntno_ijk);
-                    permute(Indices{index::c, index::b, index::a}, &T_ilm, Indices{index::a, index::b, index::c}, T_mli);
-
-                    T_mli *= 2.0;
-                    T_mli -= T_lmi;
-                    T_mli -= T_ilm;
-
-                    Tensor<double, 2> K_ldme_T_slice = K_ldme_T(m_ijk, l_ijk, All, All);
-                    einsum(1.0, Indices{index::d, index::b, index::c}, &rho_dbck_list[idx], -1.0, Indices{index::e, index::d}, K_ldme_T_slice, Indices{index::e, index::b, index::c}, T_mli);
-                } // end m_ijk
-            } // end l_ijk
+            auto S_ijk_i = submatrix_rows_and_cols(*S_pao_, lmotriplet_to_paos_[ijk], lmopair_to_paos_[ii]);
+            S_ijk_i = linalg::triplet(X_tno_[ijk], S_ijk_i, X_pno_[ii], true, false, false);
+            rho_dbck_list[idx] += matmul_3d_einsums(rho_dbck_cont[i], S_ijk_i, n_pno_[ii], n_tno_[ijk]);
+            
         } // end idx
 
         // => Stopping point 10/22 3:45 PM <= //
@@ -3294,6 +3556,7 @@ void DLPNOCCSDT::compute_R_iajbkc(std::vector<SharedMatrix>& R_iajbkc) {
         for (int idx = 0; idx < short_perms.size(); ++idx) {
             auto &[i, j, k] = short_perms[idx];
             auto &[i_idx, j_idx, k_idx] = short_perms_idx[idx];
+            int ii = i_j_to_ij_[i][i];
 
             Vperms[idx] = Tensor<double, 3>("V_iajbkc", ntno_ijk, ntno_ijk, ntno_ijk);
 
@@ -3589,6 +3852,7 @@ void DLPNOCCSDT::lccsdt_iterations() {
             // compute triples amplitude
             timer_on("DLPNO-CCSDT : R_iajbkc");
             if (miter == N_MICRO_ITER - 1) {
+                // form_T_mnk();
                 compute_R_iajbkc(R_iajbkc);
 
                 // spin adapt and then de-adapt triples residual
@@ -3804,6 +4068,10 @@ double DLPNOCCSDT::compute_energy() {
 #ifdef _OPENMP
     nthread_ = Process::environment.get_n_threads();
 #endif
+
+    // Compute extended LNOs and T3 "lasagna" terms
+    double xlno_tolerance = options_.get_double("T_CUT_XLNO");
+    xlno_transform(xlno_tolerance);
 
     timer_on("DLPNO-CCSDT : Estimate Memory");
     estimate_memory();
