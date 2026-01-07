@@ -4030,10 +4030,12 @@ double DLPNOCCSDT::compute_energy() {
         psio_->open(PSIF_DLPNO_QAB_TNO, PSIO_OPEN_NEW);
     }
 
-    // Compute TNOs
-    timer_on("DLPNO-CCSDT : Recomputing TNOs");
+    // Compute TNOs (DO NOT RECOMPUTE TNOs for now, keep them the same as CCSD(T))
+    // timer_on("DLPNO-CCSDT : Recomputing TNOs");
 
     int n_lmo_triplets = ijk_to_i_j_k_.size();
+
+    /*
     tno_scale_.clear();
     tno_scale_.resize(n_lmo_triplets, 1.0);
 
@@ -4043,6 +4045,7 @@ double DLPNOCCSDT::compute_energy() {
 
     double E_T0_new = compute_lccsd_t0(true);
     double E_T_new = lccsd_t_iterations();
+    */
 
     // Sort list of triplets based on number of TNOs (for parallel efficiency)
     std::vector<std::pair<int, int>> ijk_tnos(n_lmo_triplets);
@@ -4062,16 +4065,18 @@ double DLPNOCCSDT::compute_energy() {
         sorted_triplets_[ijk] = ijk_tnos[ijk].first;
     }
     
-    timer_off("DLPNO-CCSDT : Recomputing TNOs");
+    // timer_off("DLPNO-CCSDT : Recomputing TNOs");
 
     nthread_ = 1;
 #ifdef _OPENMP
     nthread_ = Process::environment.get_n_threads();
 #endif
 
+    /*
     // Compute extended LNOs and T3 "lasagna" terms
     double xlno_tolerance = options_.get_double("T_CUT_XLNO");
     xlno_transform(xlno_tolerance);
+    */
 
     timer_on("DLPNO-CCSDT : Estimate Memory");
     estimate_memory();
