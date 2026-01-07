@@ -1672,6 +1672,7 @@ void DLPNOCCSDTQ::xpno_transform(double xpno_tolerance) {
     int n_lmo_pairs = ij_to_i_j_.size();
     int n_lmo_quadruplets = ijkl_to_i_j_k_l_.size();
     int min_pnos = options_.get_int("MIN_PNOS_PER_PAIR");
+    double xpno_diag_scale = options_.get_double("T_CUT_XPNO_DIAG_SCALE");
     double xpno_occ_tolerance = options_.get_double("T_CUT_TRACE_XPNO");
 
     lmopair_to_paos_ext_.resize(n_lmo_pairs);
@@ -1819,8 +1820,11 @@ void DLPNOCCSDTQ::xpno_transform(double xpno_tolerance) {
         int nvir_kl_final = 0;
         double occ_curr = 0.0;
 
+        double xpno_scale = 1.0;
+        if (k == l) xpno_scale = xpno_diag_scale;
+
         for (size_t a = 0; a < nvir_kl_ext; ++a) {
-            if (fabs(pno_occ.get(a)) >= xpno_tolerance || occ_curr / occ_total < xpno_occ_tolerance || a < min_pnos) {
+            if (fabs(pno_occ.get(a)) >= xpno_scale * xpno_tolerance || occ_curr / occ_total < xpno_occ_tolerance || a < min_pnos) {
                 occ_curr += pno_occ.get(a);
                 nvir_kl_final++;
             } // end if

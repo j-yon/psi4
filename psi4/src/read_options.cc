@@ -2746,8 +2746,10 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_double("T_CUT_QNO_FULL", 3.33e-6);
         /*- Occupation number threshold for extended pair natural orbitals (XPNOs) !expert -*/
         options.add_double("T_CUT_XPNO", 1.0e-5);
+        /*- Occupation number threshold scaling to apply to XPNOs for diagonal pairs ii !expert -*/
+        options.add_double("T_CUT_XPNO_DIAG_SCALE", 1.0 / 3.0);
         /*- Occupation trace sum threshold for removing XPNOs !expert -*/
-        options.add_double("T_CUT_TRACE_XPNO", 0.9);
+        options.add_double("T_CUT_TRACE_XPNO", 0.0);
         /*- Number of T1/T2 microiteration updates per Full Q iteration 
             (increase this value for highly multireference systems) !expert -*/
         options.add_double("DLPNO_FULL_Q_MICROITERATIONS", 3);
