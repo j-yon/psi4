@@ -4575,6 +4575,14 @@ def run_dlpnoccsdt(name, **kwargs):
                                     "RIFIT", core.get_global_option('BASIS'))
     ref_wfn.set_basisset("DF_BASIS_CC", aux_basis)
 
+    # If Edmiston-Ruedenberg (ER) Orbitals are selected for LMOs, form
+    # DF orbitals for THC-fitting of ERIs
+    if core.get_option("DLPNO", "DLPNO_LOCAL_ORBITALS") == "ER":
+        aux_basis_thc = core.BasisSet.build(ref_wfn.molecule(), "DF_BASIS_THC",
+                                        core.get_global_option("DF_BASIS_THC"),
+                                        "JKFIT", core.get_global_option('BASIS'))
+        ref_wfn.set_basisset("DF_BASIS_THC", aux_basis_thc)
+
     core.set_local_option("DLPNO", "DLPNO_ALGORITHM", "CCSDT")
 
     dlpnoccsdt_wfn = core.dlpno(ref_wfn)
@@ -4622,6 +4630,14 @@ def run_dlpnoccsdt_q(name, **kwargs):
                                     core.get_option("DLPNO", "DF_BASIS_CC"),
                                     "RIFIT", core.get_global_option('BASIS'))
     ref_wfn.set_basisset("DF_BASIS_CC", aux_basis)
+
+    # If Edmiston-Ruedenberg (ER) Orbitals are selected for LMOs, form
+    # DF orbitals for THC-fitting of ERIs
+    if core.get_option("DLPNO", "DLPNO_LOCAL_ORBITALS") == "ER":
+        aux_basis_thc = core.BasisSet.build(ref_wfn.molecule(), "DF_BASIS_THC",
+                                        core.get_global_option("DF_BASIS_THC"),
+                                        "JKFIT", core.get_global_option('BASIS'))
+        ref_wfn.set_basisset("DF_BASIS_THC", aux_basis_thc)
 
     core.set_local_option("DLPNO", "DLPNO_ALGORITHM", "CCSDT(Q)")
     core.set_local_option("DLPNO", "Q0_ONLY", True) if name == "dlpno-ccsdt(q0)" else core.set_local_option("DLPNO", "Q0_ONLY", False)
@@ -4671,6 +4687,14 @@ def run_dlpnoccsdtq(name, **kwargs):
                                     core.get_option("DLPNO", "DF_BASIS_CC"),
                                     "RIFIT", core.get_global_option('BASIS'))
     ref_wfn.set_basisset("DF_BASIS_CC", aux_basis)
+
+    # If Edmiston-Ruedenberg (ER) Orbitals are selected for LMOs, form
+    # DF orbitals for THC-fitting of ERIs
+    if core.get_option("DLPNO", "DLPNO_LOCAL_ORBITALS") == "ER":
+        aux_basis_thc = core.BasisSet.build(ref_wfn.molecule(), "DF_BASIS_THC",
+                                        core.get_global_option("DF_BASIS_THC"),
+                                        "JKFIT", core.get_global_option('BASIS'))
+        ref_wfn.set_basisset("DF_BASIS_THC", aux_basis_thc)
 
     core.set_local_option("DLPNO", "DLPNO_ALGORITHM", "CCSDTQ")
 
