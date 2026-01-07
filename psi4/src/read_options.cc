@@ -2721,7 +2721,7 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         /*- Maximum number of weak pairs in (ij, jk, ik, il, jl, kl) to consider when forming quadruplet ijkl !expert -*/
         options.add_bool("QUADS_MAX_WEAK_PAIRS", 3);
         /*- T_CUT_QNO scaling for strong quadruplets in the iterative (Q) algorithm !expert -*/
-        options.add_double("T_CUT_QNO_STRONG_SCALE", 2.0);
+        options.add_double("T_CUT_QNO_STRONG_SCALE", 3.0);
         /*- T_CUT_QNO scaling for weak quadruplets in the iterative (Q) algorithm !expert -*/
         options.add_double("T_CUT_QNO_WEAK_SCALE", 10.0);
         /*- Occupation number threshold used in the quadruples prescreening step !expert -*/
