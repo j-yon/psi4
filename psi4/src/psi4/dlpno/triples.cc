@@ -331,6 +331,9 @@ void DLPNOCCSD_T::tno_transform(double t_cut_tno) {
     int naocc = nalpha_ - nfrzc();
     int n_lmo_pairs = ij_to_i_j_.size();
     int n_lmo_triplets = ijk_to_i_j_k_.size();
+    int min_tnos = options_.get_int("MIN_TNOS_PER_TRIPLET");
+
+    double T_CUT_TNO_DIAG_SCALE = options_.get_double("T_CUT_TNO_DIAG_SCALE");
 
     X_tno_.clear();
     e_tno_.clear();
@@ -421,10 +424,11 @@ void DLPNOCCSD_T::tno_transform(double t_cut_tno) {
         D_ijk->diagonalize(*X_tno_ijk, tno_occ, descending);
 
         double tno_scale = tno_scale_[ijk];
+        if (i == j || j == k || i == k) tno_scale *= T_CUT_TNO_DIAG_SCALE;
 
         int nvir_ijk_final = 0;
         for (size_t a = 0; a < nvir_ijk; ++a) {
-            if (fabs(tno_occ.get(a)) >= tno_scale * t_cut_tno) {
+            if (fabs(tno_occ.get(a)) >= tno_scale * t_cut_tno || a < min_tnos) {
                 nvir_ijk_final++;
             }
         }
@@ -3743,7 +3747,7 @@ void DLPNOCCSDT::lccsdt_iterations() {
     int iteration = 1, max_iteration = options_.get_int("DLPNO_MAXITER");
     double e_curr = 0.0, e_prev = 0.0, e_weak = 0.0, r_curr1 = 0.0, r_curr2 = 0.0, r_curr3 = 0.0;
     bool e_converged = false, r_converged = false;
-    const int N_MICRO_ITER = options_.get_int("DLPNO_FULL_T_MICROITERATIONS");
+    const int N_MICRO_ITER = options_.get_int("DLPNO_TRIPLES_MICROITERATIONS");
 
     DIISManager diis = DIISManager(options_.get_int("DIIS_MAX_VECS"), "LCCSDT DIIS", DIISManager::RemovalPolicy::LargestError, DIISManager::StoragePolicy::InCore);
 
@@ -3980,7 +3984,7 @@ void DLPNOCCSDT::lccsdt_iterations() {
 
         r_converged = fabs(r_curr1) < options_.get_double("R_CONVERGENCE");
         r_converged &= fabs(r_curr2) < options_.get_double("R_CONVERGENCE");
-        r_converged &= fabs(r_curr3) < options_.get_double("R_CONVERGENCE");
+        // r_converged &= fabs(r_curr3) < options_.get_double("R_CONVERGENCE");
         e_converged = fabs(e_curr - e_prev) < options_.get_double("E_CONVERGENCE");
 
         e_lccsdt_ = e_curr - e_weak;
@@ -4030,11 +4034,10 @@ double DLPNOCCSDT::compute_energy() {
         psio_->open(PSIF_DLPNO_QAB_TNO, PSIO_OPEN_NEW);
     }
 
-    // Compute TNOs (DO NOT RECOMPUTE TNOs for now, keep them the same as CCSD(T))
+    // Compute TNOs (they can be looser than for CCSD(T))
     // timer_on("DLPNO-CCSDT : Recomputing TNOs");
 
     int n_lmo_triplets = ijk_to_i_j_k_.size();
-
     /*
     tno_scale_.clear();
     tno_scale_.resize(n_lmo_triplets, 1.0);

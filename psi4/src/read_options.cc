@@ -2675,6 +2675,8 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
 
         /*- Occupation number threshold for removing TNOs !expert -*/
         options.add_double("T_CUT_TNO", 1e-9);
+        /*- How much to scale T_CUT_TNO by for triplets containing two of the same orbitals (iij) !expert -*/
+        options.add_double("T_CUT_TNO_DIAG_SCALE", 1e-2);
         /*- Maximum number of weak pairs in (ij, jk, ik) to consider when forming triplet ijk !expert -*/
         options.add_int("TRIPLES_MAX_WEAK_PAIRS", 2);
         /*- T_CUT_TNO scaling for strong triplets in the iterative (T) algorithm !expert -*/
@@ -2688,7 +2690,7 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         /*- LMO/PAO threshold for the prescreening portion of the (T) algorithm !expert -*/
         options.add_double("T_CUT_DO_TRIPLES_PRE", 2e-2);
         /*- Triples energy threshold for a triplet (ijk) to not be further considered !expert -*/
-        options.add_double("T_CUT_TRIPLES_WEAK", 1e-8);
+        options.add_double("T_CUT_TRIPLES_WEAK", 1e-9);
         /*- Local density fitting tolerance for the (T) algorithm !expert -*/
         options.add_double("T_CUT_MKN_TRIPLES", 1e-2);
         /*- LMO/PAO threshold for the (T) algorithm !expert -*/
@@ -2710,7 +2712,7 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_double("T_CUT_TRACE_XLNO", 0.95);
         /*- Number of T1/T2 microiteration updates per Full T iteration 
             (increase this value for highly multireference systems) !expert -*/
-        options.add_double("DLPNO_FULL_T_MICROITERATIONS", 3);
+        options.add_double("DLPNO_TRIPLES_MICROITERATIONS", 3);
         /*- Damping factor on triples amplitude updates in CCSDT iterations !expert -*/
         options.add_double("TRIPLES_DAMPING_RATIO", 0.0);
 
@@ -2718,6 +2720,8 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         
         /*- Occupation number threshold for removing QNOs !expert -*/
         options.add_double("T_CUT_QNO", 3.33e-7);
+        /*- How much to scale T_CUT_QNO by for quadruplets containing two of the same orbitals (iijk) !expert -*/
+        options.add_double("T_CUT_QNO_DIAG_SCALE", 0.3);
         /*- Maximum number of weak pairs in (ij, jk, ik, il, jl, kl) to consider when forming quadruplet ijkl !expert -*/
         options.add_bool("QUADS_MAX_WEAK_PAIRS", 3);
         /*- T_CUT_QNO scaling for strong quadruplets in the iterative (Q) algorithm !expert -*/
@@ -2725,13 +2729,13 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         /*- T_CUT_QNO scaling for weak quadruplets in the iterative (Q) algorithm !expert -*/
         options.add_double("T_CUT_QNO_WEAK_SCALE", 10.0);
         /*- Occupation number threshold used in the quadruples prescreening step !expert -*/
-        options.add_double("T_CUT_QNO_PRE", 1.0e-6);
+        options.add_double("T_CUT_QNO_PRE", 3.33e-6);
         /*- Local density fitting tolerance for the prescreening portion of the (Q) algorithm !expert -*/
         options.add_double("T_CUT_MKN_QUADS_PRE", 1.0e-1);
         /*- LMO/PAO threshold for the prescreening portion of the (T) algorithm !expert -*/
         options.add_double("T_CUT_DO_QUADS_PRE", 2.0e-2);
         /*- Quadruples energy threshold for a quadruplet (ijkl) to not be further considered !expert -*/
-        options.add_double("T_CUT_QUADS_WEAK", 1.0e-8);
+        options.add_double("T_CUT_QUADS_WEAK", 1.0e-10);
         /*- Local density fitting tolerance for the (Q) algorithm !expert -*/
         options.add_double("T_CUT_MKN_QUADS", 1.0e-2);
         /*- LMO/PAO threshold for the (Q) algorithm !expert -*/
@@ -2755,7 +2759,7 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_double("T_CUT_TRACE_XPNO", 0.0);
         /*- Number of T1/T2 microiteration updates per Full Q iteration 
             (increase this value for highly multireference systems) !expert -*/
-        options.add_double("DLPNO_FULL_Q_MICROITERATIONS", 3);
+        options.add_double("DLPNO_QUADS_MICROITERATIONS", 3);
         /*- Damping factor on quadruples amplitude update in CCSDTQ iterations !expert -*/
         options.add_double("QUADRUPLES_DAMPING_RATIO", 0.0);
 

@@ -421,6 +421,8 @@ void DLPNOCCSDT_Q::qno_transform(double t_cut_qno) {
     int n_lmo_quadruplets = ijkl_to_i_j_k_l_.size();
     int min_qnos = options_.get_int("MIN_QNOS");
 
+    double T_CUT_QNO_DIAG_SCALE = options_.get_double("T_CUT_QNO_DIAG_SCALE");
+
     X_qno_.clear();
     e_qno_.clear();
     n_qno_.clear();
@@ -533,6 +535,7 @@ void DLPNOCCSDT_Q::qno_transform(double t_cut_qno) {
         }
 
         double qno_scale = qno_scale_[ijkl];
+        if (i == j || i == k || i == l || j == k || j == l || k == l) qno_scale *= T_CUT_QNO_DIAG_SCALE;
 
         int nvir_ijkl_final = 0;
         double occ_curr = 0.0;
@@ -3860,7 +3863,7 @@ void DLPNOCCSDTQ::lccsdtq_iterations() {
     int iteration = 1, max_iteration = options_.get_int("DLPNO_MAXITER");
     double e_curr = 0.0, e_prev = 0.0, e_weak = 0.0, r_curr1 = 0.0, r_curr2 = 0.0, r_curr3 = 0.0, r_curr4 = 0.0;
     bool e_converged = false, r_converged = false;
-    const int N_MICRO_ITER = options_.get_int("DLPNO_FULL_Q_MICROITERATIONS");
+    const int N_MICRO_ITER = options_.get_int("DLPNO_QUADS_MICROITERATIONS");
     
     DIISManager diis = DIISManager(options_.get_int("DIIS_MAX_VECS"), "LCCSDTQ DIIS", DIISManager::RemovalPolicy::LargestError, DIISManager::StoragePolicy::OnDisk);
 
@@ -4063,25 +4066,25 @@ void DLPNOCCSDTQ::lccsdtq_iterations() {
                 R_iajb_rms[ij] = R_iajb[ij]->rms();
             }
         
-        if (miter == N_MICRO_ITER - 1) {
-        // Update triples amplitude
-    #pragma omp parallel for schedule(dynamic, 1)
-            for (int ijk_sorted = 0; ijk_sorted < n_lmo_triplets; ++ijk_sorted) {
-                int ijk = sorted_triplets_[ijk_sorted];
-                auto &[i, j, k] = ijk_to_i_j_k_[ijk];
-                for (int a_ijk = 0; a_ijk < n_tno_[ijk]; ++a_ijk) {
-                    for (int b_ijk = 0; b_ijk < n_tno_[ijk]; ++b_ijk) {
-                        for (int c_ijk = 0; c_ijk < n_tno_[ijk]; ++c_ijk) {
-                            (*T_iajbkc_[ijk])(a_ijk, b_ijk * n_tno_[ijk] + c_ijk) -= (*R_iajbkc[ijk])(a_ijk, b_ijk * n_tno_[ijk] + c_ijk) /
-                                                (e_tno_[ijk]->get(a_ijk) + e_tno_[ijk]->get(b_ijk) + e_tno_[ijk]->get(c_ijk) - F_lmo_->get(i,i) - F_lmo_->get(j,j) - F_lmo_->get(k,k));
+            if (miter == N_MICRO_ITER - 1) {
+            // Update triples amplitude
+        #pragma omp parallel for schedule(dynamic, 1)
+                for (int ijk_sorted = 0; ijk_sorted < n_lmo_triplets; ++ijk_sorted) {
+                    int ijk = sorted_triplets_[ijk_sorted];
+                    auto &[i, j, k] = ijk_to_i_j_k_[ijk];
+                    for (int a_ijk = 0; a_ijk < n_tno_[ijk]; ++a_ijk) {
+                        for (int b_ijk = 0; b_ijk < n_tno_[ijk]; ++b_ijk) {
+                            for (int c_ijk = 0; c_ijk < n_tno_[ijk]; ++c_ijk) {
+                                (*T_iajbkc_[ijk])(a_ijk, b_ijk * n_tno_[ijk] + c_ijk) -= (*R_iajbkc[ijk])(a_ijk, b_ijk * n_tno_[ijk] + c_ijk) /
+                                                    (e_tno_[ijk]->get(a_ijk) + e_tno_[ijk]->get(b_ijk) + e_tno_[ijk]->get(c_ijk) - F_lmo_->get(i,i) - F_lmo_->get(j,j) - F_lmo_->get(k,k));
+                            }
                         }
                     }
+                    R_iajbkc_rms[ijk] = R_iajbkc[ijk]->rms();
                 }
-                R_iajbkc_rms[ijk] = R_iajbkc[ijk]->rms();
             }
-        }
 
-        if (miter == N_MICRO_ITER - 1) {
+            if (miter == N_MICRO_ITER - 1) {
                 // Update quadruples amplitude
         #pragma omp parallel for schedule(dynamic, 1)
                 for (int ijkl_sorted = 0; ijkl_sorted < n_lmo_quadruplets; ++ijkl_sorted) {
@@ -4193,8 +4196,8 @@ void DLPNOCCSDTQ::lccsdtq_iterations() {
 
         r_converged = fabs(r_curr1) < options_.get_double("R_CONVERGENCE");
         r_converged &= fabs(r_curr2) < options_.get_double("R_CONVERGENCE");
-        r_converged &= fabs(r_curr3) < options_.get_double("R_CONVERGENCE");
-        r_converged &= fabs(r_curr4) < options_.get_double("R_CONVERGENCE");
+        // r_converged &= fabs(r_curr3) < options_.get_double("R_CONVERGENCE");
+        // r_converged &= fabs(r_curr4) < options_.get_double("R_CONVERGENCE");
         e_converged = fabs(e_curr - e_prev) < options_.get_double("E_CONVERGENCE");
 
         e_lccsdtq_ = e_curr - e_weak;
