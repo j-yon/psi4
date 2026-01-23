@@ -2719,15 +2719,15 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         /*- SUBSECTION DLPNO-CCSDT(Q) Specific Options -*/
         
         /*- Occupation number threshold for removing QNOs !expert -*/
-        options.add_double("T_CUT_QNO", 1.0e-7);
+        options.add_double("T_CUT_QNO", 3.33e-7);
         /*- How much to scale T_CUT_QNO by for quadruplets containing two of the same orbitals (iijk) !expert -*/
         options.add_double("T_CUT_QNO_DIAG_SCALE", 1.0);
         /*- Maximum number of weak pairs in (ij, jk, ik, il, jl, kl) to consider when forming quadruplet ijkl !expert -*/
         options.add_bool("QUADS_MAX_WEAK_PAIRS", 3);
         /*- T_CUT_QNO scaling for strong quadruplets in the iterative (Q) algorithm !expert -*/
-        options.add_double("T_CUT_QNO_STRONG_SCALE", 10.0);
+        options.add_double("T_CUT_QNO_STRONG_SCALE", 3.0);
         /*- T_CUT_QNO scaling for weak quadruplets in the iterative (Q) algorithm !expert -*/
-        options.add_double("T_CUT_QNO_WEAK_SCALE", 30.0);
+        options.add_double("T_CUT_QNO_WEAK_SCALE", 10.0);
         /*- Occupation number threshold used in the quadruples prescreening step !expert -*/
         options.add_double("T_CUT_QNO_PRE", 3.33e-6);
         /*- Local density fitting tolerance for the prescreening portion of the (Q) algorithm !expert -*/
@@ -2735,7 +2735,7 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         /*- LMO/PAO threshold for the prescreening portion of the (T) algorithm !expert -*/
         options.add_double("T_CUT_DO_QUADS_PRE", 2.0e-2);
         /*- Quadruples energy threshold for a quadruplet (ijkl) to not be further considered !expert -*/
-        options.add_double("T_CUT_QUADS_WEAK", 1.0e-9);
+        options.add_double("T_CUT_QUADS_WEAK", 1.0e-8);
         /*- Local density fitting tolerance for the (Q) algorithm !expert -*/
         options.add_double("T_CUT_MKN_QUADS", 1.0e-2);
         /*- LMO/PAO threshold for the (Q) algorithm !expert -*/
@@ -2754,7 +2754,7 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         /*- Occupation number threshold for extended pair natural orbitals (XPNOs) !expert -*/
         options.add_double("T_CUT_XPNO", 1.0e-5);
         /*- Occupation number threshold scaling to apply to XPNOs for diagonal pairs ii !expert -*/
-        options.add_double("T_CUT_XPNO_DIAG_SCALE", 1.0);
+        options.add_double("T_CUT_XPNO_DIAG_SCALE", 0.333);
         /*- Occupation trace sum threshold for removing XPNOs !expert -*/
         options.add_double("T_CUT_TRACE_XPNO", 0.0);
         /*- Number of T1/T2 microiteration updates per Full Q iteration 

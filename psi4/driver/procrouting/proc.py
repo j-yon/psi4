@@ -4585,6 +4585,12 @@ def run_dlpnoccsdt(name, **kwargs):
 
     core.set_local_option("DLPNO", "DLPNO_ALGORITHM", "CCSDT")
 
+    # Reset T_CUT_TNO_STRONG_SCALE and T_CUT_TNO_WEAK_SCALE to T_CUT_TNO_FULL / T_CUT_TNO
+    t_cut_tno = core.get_option("DLPNO", "T_CUT_TNO")
+    t_cut_tno_full = core.get_option("DLPNO", "T_CUT_TNO_FULL")
+    core.set_local_option("DLPNO", "T_CUT_TNO_STRONG_SCALE", t_cut_tno_full / t_cut_tno)
+    core.set_local_option("DLPNO", "T_CUT_TNO_WEAK_SCALE", t_cut_tno_full / t_cut_tno)
+
     dlpnoccsdt_wfn = core.dlpno(ref_wfn)
     dlpnoccsdt_wfn.compute_energy()
 
@@ -4642,6 +4648,12 @@ def run_dlpnoccsdt_q(name, **kwargs):
     core.set_local_option("DLPNO", "DLPNO_ALGORITHM", "CCSDT(Q)")
     core.set_local_option("DLPNO", "Q0_ONLY", True) if name == "dlpno-ccsdt(q0)" else core.set_local_option("DLPNO", "Q0_ONLY", False)
 
+    # Reset T_CUT_TNO_STRONG_SCALE and T_CUT_TNO_WEAK_SCALE to T_CUT_TNO_FULL / T_CUT_TNO
+    t_cut_tno = core.get_option("DLPNO", "T_CUT_TNO")
+    t_cut_tno_full = core.get_option("DLPNO", "T_CUT_TNO_FULL")
+    core.set_local_option("DLPNO", "T_CUT_TNO_STRONG_SCALE", t_cut_tno_full / t_cut_tno)
+    core.set_local_option("DLPNO", "T_CUT_TNO_WEAK_SCALE", t_cut_tno_full / t_cut_tno)
+
     dlpnoccsdt_q_wfn = core.dlpno(ref_wfn)
     dlpnoccsdt_q_wfn.compute_energy()
 
@@ -4697,6 +4709,22 @@ def run_dlpnoccsdtq(name, **kwargs):
         ref_wfn.set_basisset("DF_BASIS_THC", aux_basis_thc)
 
     core.set_local_option("DLPNO", "DLPNO_ALGORITHM", "CCSDTQ")
+
+    # Reset T_CUT_TNO_STRONG_SCALE and T_CUT_TNO_WEAK_SCALE to T_CUT_TNO_FULL / T_CUT_TNO
+    t_cut_tno = core.get_option("DLPNO", "T_CUT_TNO")
+    t_cut_tno_full = core.get_option("DLPNO", "T_CUT_TNO_FULL")
+    core.set_local_option("DLPNO", "T_CUT_TNO_STRONG_SCALE", t_cut_tno_full / t_cut_tno)
+    core.set_local_option("DLPNO", "T_CUT_TNO_WEAK_SCALE", t_cut_tno_full / t_cut_tno)
+
+    # Reset T_CUT_QNO_STRONG_SCALE and T_CUT_QNO_WEAK_SCALE to T_CUT_QNO_FULL / T_CUT_QNO
+    t_cut_qno = core.get_option("DLPNO", "T_CUT_QNO")
+    t_cut_qno_full = core.get_option("DLPNO", "T_CUT_QNO_FULL")
+    core.set_local_option("DLPNO", "T_CUT_QNO_STRONG_SCALE", t_cut_qno_full / t_cut_qno)
+    core.set_local_option("DLPNO", "T_CUT_QNO_WEAK_SCALE", t_cut_qno_full / t_cut_qno)
+
+    # T_CUT_XPNO is set to T_CUT_QNO_FULL * 3 by default (if not set by user)
+    if not core.has_option_changed("DLPNO", "T_CUT_XPNO"):
+        core.set_local_option("DLPNO", "T_CUT_XPNO", t_cut_qno_full * 3.0)
 
     dlpnoccsdtq_wfn = core.dlpno(ref_wfn)
     dlpnoccsdtq_wfn.compute_energy()
