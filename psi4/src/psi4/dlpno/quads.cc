@@ -4111,7 +4111,11 @@ void DLPNOCCSDTQ::lccsdtq_iterations() {
                 for (int ijkl_sorted = 0; ijkl_sorted < n_lmo_quadruplets; ++ijkl_sorted) {
                     int ijkl = sorted_quadruplets_[ijkl_sorted];
                     auto &[i, j, k, l] = ijkl_to_i_j_k_l_[ijkl];
-                    double alpha = (fabs(R_iajbkcld[ijkl]->rms()) > fabs(R_iajbkcld_rms[ijkl])) ? damping_ratio_quads_ : 0.0;
+
+                    Tensor<double, 4> zero_tensor("zero", n_qno_[ijkl], n_qno_[ijkl], n_qno_[ijkl], n_qno_[ijkl]);
+                    zero_tensor.zero();
+
+                    double alpha = (fabs(rmsd(R_iajbkcld[ijkl], zero_tensor)) > fabs(R_iajbkcld_rms[ijkl])) ? damping_ratio_quads_ : 0.0;
 
                     for (int a = 0; a < n_qno_[ijkl]; ++a) {
                         for (int b = 0; b < n_qno_[ijkl]; ++b) {
@@ -4131,8 +4135,6 @@ void DLPNOCCSDTQ::lccsdtq_iterations() {
                         ::memcpy(T_iajbkcld_psi[ijkl]->get_pointer(), T_iajbkcld_[ijkl].data(), n_qno_[ijkl] * n_qno_[ijkl] * n_qno_[ijkl] * n_qno_[ijkl] * sizeof(double));
                         R_iajbkcld_rms[ijkl] = R_iajbkcld_psi[ijkl]->rms();
                     } else {
-                        Tensor<double, 4> zero_tensor("zero", n_qno_[ijkl], n_qno_[ijkl], n_qno_[ijkl], n_qno_[ijkl]);
-                        zero_tensor.zero();
                         R_iajbkcld_rms[ijkl] = rmsd(R_iajbkcld[ijkl], zero_tensor);
                     } // end else
                     r_curr4 += R_iajbkcld_rms[ijkl] * R_iajbkcld_rms[ijkl];
