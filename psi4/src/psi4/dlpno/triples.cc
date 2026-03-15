@@ -3742,10 +3742,10 @@ void DLPNOCCSDT::lccsdt_iterations() {
     
     outfile->Printf("    E_CONVERGENCE = %.2e\n", options_.get_double("E_CONVERGENCE"));
     outfile->Printf("    R_CONVERGENCE = %.2e\n\n", options_.get_double("R_CONVERGENCE"));
-    outfile->Printf("                       Corr. Energy    Delta E     Max R1     Max R2     Max R3     Time (s)\n");
+    outfile->Printf("                       Corr. Energy    Delta E     RMS R1     RMS R2     RMS R3     Time (s)\n");
 
     int iteration = 1, max_iteration = options_.get_int("DLPNO_MAXITER");
-    double e_curr = 0.0, e_prev = 0.0, e_weak = 0.0, r_curr1 = 0.0, r_curr2 = 0.0, r_curr3 = 0.0;
+    double e_curr = 0.0, e_prev = 0.0, e_weak = 0.0, r_curr1 = 1.0, r_curr2 = 1.0, r_curr3 = 1.0;
     bool e_converged = false, r_converged = false;
     const int N_MICRO_ITER = options_.get_int("DLPNO_TRIPLES_MICROITERATIONS");
 
@@ -3874,22 +3874,30 @@ void DLPNOCCSDT::lccsdt_iterations() {
             timer_off("DLPNO-CCSDT : R_iajbkc");
 
             // Update singles amplitude
-    #pragma omp parallel for
+            r_curr1 = 0.0;
+    #pragma omp parallel for reduction(+ : r_curr1)
             for (int i = 0; i < naocc; ++i) {
                 int ii = i_j_to_ij_[i][i];
+                double alpha = (fabs(R_ia[i]->rms()) > fabs(R_ia_rms[i])) ? damping_ratio_ : 0.0;
+
                 for (int a_ii = 0; a_ii < n_pno_[ii]; ++a_ii) {
-                    (*T_ia_[i])(a_ii, 0) -= (*R_ia[i])(a_ii, 0) / (e_pno_[ii]->get(a_ii) - F_lmo_->get(i,i));
+                    (*T_ia_[i])(a_ii, 0) -= (1.0 - alpha) * (*R_ia[i])(a_ii, 0) / (e_pno_[ii]->get(a_ii) - F_lmo_->get(i,i));
                 }
                 R_ia_rms[i] = R_ia[i]->rms();
+                r_curr1 += R_ia_rms[i] * R_ia_rms[i];
             }
+            r_curr1 = std::sqrt(r_curr1 / naocc);            
 
             // Update doubles amplitude
-    #pragma omp parallel for schedule(dynamic, 1)
+            r_curr2 = 0.0;
+    #pragma omp parallel for schedule(dynamic, 1) reduction(+ : r_curr2)
             for (int ij = 0; ij < n_lmo_pairs; ++ij) {
                 auto &[i, j] = ij_to_i_j_[ij];
+                double alpha = (fabs(R_iajb[ij]->rms()) > fabs(R_iajb_rms[ij])) ? damping_ratio_ : 0.0;
+
                 for (int a_ij = 0; a_ij < n_pno_[ij]; ++a_ij) {
                     for (int b_ij = 0; b_ij < n_pno_[ij]; ++b_ij) {
-                        (*T_iajb_[ij])(a_ij, b_ij) -= (*R_iajb[ij])(a_ij, b_ij) / 
+                        (*T_iajb_[ij])(a_ij, b_ij) -= (1.0 - alpha) * (*R_iajb[ij])(a_ij, b_ij) / 
                                         (e_pno_[ij]->get(a_ij) + e_pno_[ij]->get(b_ij) - F_lmo_->get(i,i) - F_lmo_->get(j,j));
                     }
                 }
@@ -3898,24 +3906,31 @@ void DLPNOCCSDT::lccsdt_iterations() {
                 Tt_iajb_[ij]->subtract(T_iajb_[ij]->transpose());
 
                 R_iajb_rms[ij] = R_iajb[ij]->rms();
+                r_curr2 += R_iajb_rms[ij] * R_iajb_rms[ij];
             }
+            r_curr2 = std::sqrt(r_curr2 / n_lmo_pairs);
 
             if (miter == N_MICRO_ITER - 1) {
                 // Update triples amplitude
-        #pragma omp parallel for schedule(dynamic, 1)
+                r_curr3 = 0.0;
+        #pragma omp parallel for schedule(dynamic, 1) reduction(+ : r_curr3)
                 for (int ijk_sorted = 0; ijk_sorted < n_lmo_triplets; ++ijk_sorted) {
                     int ijk = sorted_triplets_[ijk_sorted];
                     auto &[i, j, k] = ijk_to_i_j_k_[ijk];
+                    double alpha = (fabs(R_iajbkc[ijk]->rms()) > fabs(R_iajbkc_rms[ijk])) ? damping_ratio_ : 0.0;
+
                     for (int a_ijk = 0; a_ijk < n_tno_[ijk]; ++a_ijk) {
                         for (int b_ijk = 0; b_ijk < n_tno_[ijk]; ++b_ijk) {
                             for (int c_ijk = 0; c_ijk < n_tno_[ijk]; ++c_ijk) {
-                                (*T_iajbkc_[ijk])(a_ijk, b_ijk * n_tno_[ijk] + c_ijk) -= (1.0 - damping_ratio_) * (*R_iajbkc[ijk])(a_ijk, b_ijk * n_tno_[ijk] + c_ijk) /
+                                (*T_iajbkc_[ijk])(a_ijk, b_ijk * n_tno_[ijk] + c_ijk) -= (1.0 - alpha) * (*R_iajbkc[ijk])(a_ijk, b_ijk * n_tno_[ijk] + c_ijk) /
                                                     (e_tno_[ijk]->get(a_ijk) + e_tno_[ijk]->get(b_ijk) + e_tno_[ijk]->get(c_ijk) - F_lmo_->get(i,i) - F_lmo_->get(j,j) - F_lmo_->get(k,k));
                             }
                         }
                     }
                     R_iajbkc_rms[ijk] = R_iajbkc[ijk]->rms();
+                    r_curr3 += R_iajbkc_rms[ijk] * R_iajbkc_rms[ijk];
                 }
+                r_curr3 = std::sqrt(r_curr3 / n_lmo_triplets);
             }
         } // end miter
 
@@ -3978,13 +3993,9 @@ void DLPNOCCSDT::lccsdt_iterations() {
             if (i_j_to_ij_strong_[i][j] == -1) e_weak += e_ij;
         }
 
-        double r_curr1 = *max_element(R_ia_rms.begin(), R_ia_rms.end());
-        double r_curr2 = *max_element(R_iajb_rms.begin(), R_iajb_rms.end());
-        double r_curr3 = *max_element(R_iajbkc_rms.begin(), R_iajbkc_rms.end());
-
         r_converged = fabs(r_curr1) < options_.get_double("R_CONVERGENCE");
         r_converged &= fabs(r_curr2) < options_.get_double("R_CONVERGENCE");
-        // r_converged &= fabs(r_curr3) < options_.get_double("R_CONVERGENCE");
+        r_converged &= fabs(r_curr3) < options_.get_double("R_CONVERGENCE");
         e_converged = fabs(e_curr - e_prev) < options_.get_double("E_CONVERGENCE");
 
         e_lccsdt_ = e_curr - e_weak;
