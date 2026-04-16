@@ -2607,7 +2607,7 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         /*- Residual convergence criteria for local MP2 iterations -*/
         options.add_double("R_CONVERGENCE", 1e-6);
         /*- Orbital localizer -*/
-        options.add_str("DLPNO_LOCAL_ORBITALS", "BOYS", "BOYS PIPEK_MEZEY");
+        options.add_str("DLPNO_LOCAL_ORBITALS", "BOYS", "BOYS PIPEK_MEZEY IBO");
         /*- Maximum number of iterations to determine the MP2 amplitudes. -*/
         options.add_int("DLPNO_MAXITER", 50);
 

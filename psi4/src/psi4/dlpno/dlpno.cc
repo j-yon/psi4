@@ -36,6 +36,7 @@
 #include "psi4/libmints/basisset.h"
 #include "psi4/libmints/integral.h"
 #include "psi4/libmints/local.h"
+#include "psi4/fisapt/local2.h"
 #include "psi4/libmints/matrix.h"
 #include "psi4/libmints/mintshelper.h"
 #include "psi4/libmints/molecule.h"
@@ -325,6 +326,21 @@ void DLPNO::setup_orbitals() {
         localizer.set_maxiter(options_.get_int("LOCAL_MAXITER"));
         localizer.localize();
         C_lmo_ = localizer.L();
+    } else if (options_.get_str("DLPNO_LOCAL_ORBITALS") == "IBO") {
+        // hack in IBO localization
+        std::map<std::string, std::shared_ptr<Vector>> vectors_;
+        vectors_["eps_occ"] = reference_wavefunction_->epsilon_a_subset("AO", "OCC");
+        std::shared_ptr<Matrix> Focc = std::make_shared<Matrix>("Focc", nalpha(), nalpha());
+        Focc->set_diagonal(vectors_["eps_occ"]);
+
+        std::vector<int> ranges = {0, nfrzc(), naocc};
+        std::shared_ptr<fisapt::IBOLocalizer2> local =
+            fisapt::IBOLocalizer2::build(basisset_, reference_wavefunction_->get_basisset("MINAO"),
+                                         reference_wavefunction_->Ca_subset("AO", "OCC"), options_);
+
+        std::map<std::string, std::shared_ptr<Matrix>> ret =
+            local->localize(reference_wavefunction_->Ca_subset("AO", "OCC"), Focc, ranges);
+        C_lmo_ = ret["L"];
     } else {
         throw PSIEXCEPTION("Invalid option for DLPNO_LOCAL_ORBITALS");
     }
