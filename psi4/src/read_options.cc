@@ -2665,6 +2665,9 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         /*- Perform automatic memory checks to toggle between core and disk? 
             (NOT recommended to change this for average user). -*/
         options.add_bool("DLPNO_TOGGLE_MEMORY", true);
+        /*- Export localized molecular orbitals (LMOs) to Gaussian cube files (LMO_N.cube), indexed
+            identically to the LMO indices reported in the PNO-per-pair diagnostic tables !expert -*/
+        options.add_bool("DLPNO_LMO_CUBEPROP", false);
 
         /*- SUBSECTION Expert Options -*/
 

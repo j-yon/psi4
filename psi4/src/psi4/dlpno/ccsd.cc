@@ -2941,7 +2941,23 @@ double DLPNOCCSD::compute_energy() {
     prep_sparsity(false, true);
     timer_off("Sparsity");
 
+    std::vector<int> n_pno_lmp2_snapshot = n_pno_;  // per-pair PNO count from LMP2 stage, before CCSD-level PNOs overwrite n_pno_
     recompute_pnos();
+
+    if (options_.get_int("PRINT") >= 2) {
+        int n_lmo_pairs = ij_to_i_j_.size();
+        outfile->Printf("\n    PNO counts per LMO pair (i, j): LMP2 vs LCCSD\n");
+        outfile->Printf("    %6s %6s %6s %12s %12s %8s\n", "ij", "i", "j", "n_pno(MP2)", "n_pno(CCSD)", "pair");
+        outfile->Printf("    %s\n", std::string(58, '-').c_str());
+        for (int ij = 0; ij < n_lmo_pairs; ++ij) {
+            auto [i, j] = ij_to_i_j_[ij];
+            if (i > j) continue;
+            std::string pair_type = (i_j_to_ij_strong_[i][j] != -1) ? "strong" : "weak";
+            outfile->Printf("    %6d %6d %6d %12d %12d %8s\n", ij, i, j, n_pno_lmp2_snapshot[ij], n_pno_[ij],
+                            pair_type.c_str());
+        }
+        outfile->Printf("  \n");
+    }
 
     timer_on("DF Ints");
     compute_qij();

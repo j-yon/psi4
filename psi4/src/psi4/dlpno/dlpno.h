@@ -228,7 +228,11 @@ class DLPNO : public Wavefunction {
 
     /// Form LMOs, PAOs, etc.
     void setup_orbitals();
-    
+
+    /// Export LMOs (C_lmo_ columns) to cube files, indexed identically to LMO indices used in
+    /// pair diagnostics, for direct comparison against per-pair PNO counts
+    void export_lmo_cubes();
+
     /// Compute differential overlap integrals between LMO/LMO and LMO/PAO pairs (EQ 4), DOI_ij and DOI_iu
     void compute_overlap_ints();
 

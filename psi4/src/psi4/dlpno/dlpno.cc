@@ -30,6 +30,7 @@
 #include "sparse.h"
 
 #include "psi4/lib3index/3index.h"
+#include "psi4/libcubeprop/cubeprop.h"
 #include "psi4/libdiis/diismanager.h"
 #include "psi4/libfock/cubature.h"
 #include "psi4/libfock/points.h"
@@ -387,6 +388,26 @@ void DLPNO::setup_orbitals() {
     for (size_t s = 0; s < nshellri; s++) {
         atom_to_rishell_[ribasis_->shell_to_center(s)].push_back(s);
     }
+
+    export_lmo_cubes();
+}
+
+void DLPNO::export_lmo_cubes() {
+    if (!options_.get_bool("DLPNO_LMO_CUBEPROP")) return;
+
+    int naocc = C_lmo_->ncol();
+    std::vector<int> indices(naocc);
+    std::vector<std::string> labels(naocc);
+    for (int i = 0; i < naocc; ++i) {
+        indices[i] = i;
+        labels[i] = "LMO" + std::to_string(i);
+    }
+
+    outfile->Printf("\n  ==> Exporting Localized Molecular Orbitals to Cube Files <==\n");
+    outfile->Printf("      %d LMO cube files will be written (LMO_0.cube ... LMO_%d.cube)\n\n", naocc, naocc - 1);
+
+    auto cube = std::make_shared<CubeProperties>(shared_from_this());
+    cube->compute_orbitals(C_lmo_, indices, labels, "LMO");
 }
 
 void DLPNO::compute_overlap_ints() {
@@ -1507,6 +1528,18 @@ void DLPNO::pno_transform() {
     outfile->Printf("      Max: %3d NOs \n", pno_count_max);
     outfile->Printf("  \n");
     outfile->Printf("    PNO truncation energy = %.12f\n", de_pno_total_);
+
+    if (options_.get_int("PRINT") >= 2) {
+        outfile->Printf("\n    LMP2 PNO counts per LMO pair (i, j):\n");
+        outfile->Printf("    %6s %6s %6s %10s\n", "ij", "i", "j", "n_pno(MP2)");
+        outfile->Printf("    %s\n", std::string(40, '-').c_str());
+        for (int ij = 0; ij < n_lmo_pairs; ++ij) {
+            auto [i, j] = ij_to_i_j_[ij];
+            if (i > j) continue;
+            outfile->Printf("    %6d %6d %6d %10d\n", ij, i, j, n_pno_[ij]);
+        }
+        outfile->Printf("  \n");
+    }
 
 #pragma omp parallel for schedule(static, 1)
     for (int ij = 0; ij < n_lmo_pairs; ++ij) {
