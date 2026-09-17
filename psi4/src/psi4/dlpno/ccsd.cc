@@ -2946,7 +2946,7 @@ double DLPNOCCSD::compute_energy() {
 
     if (options_.get_int("PRINT") >= 2) {
         int n_lmo_pairs = ij_to_i_j_.size();
-        outfile->Printf("\n    PNO counts per LMO pair (i, j): LMP2 vs LCCSD\n");
+        outfile->Printf("\n    PNO counts per LMO pair (i, j): LMP2 vs LCCSD  [calc: %s]\n", calc_tag_.c_str());
         outfile->Printf("    %6s %6s %6s %12s %12s %8s\n", "ij", "i", "j", "n_pno(MP2)", "n_pno(CCSD)", "pair");
         outfile->Printf("    %s\n", std::string(58, '-').c_str());
         for (int ij = 0; ij < n_lmo_pairs; ++ij) {

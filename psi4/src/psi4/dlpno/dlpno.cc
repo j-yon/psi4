@@ -48,6 +48,7 @@
 #include "psi4/libqt/qt.h"
 
 #include <algorithm>
+#include <filesystem>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -55,6 +56,8 @@
 
 namespace psi {
 namespace dlpno {
+
+int DLPNO::lmo_calc_counter_ = 0;
 
 DLPNO::DLPNO(SharedWavefunction ref_wfn, Options& options) : Wavefunction(options) {
     shallow_copy(ref_wfn);
@@ -317,6 +320,15 @@ void DLPNO::setup_orbitals() {
     int nshellri = ribasis_->nshell();
     int naocc = nalpha_ - nfrzc();
 
+    // Tag this calculation (e.g. one monomer/dimer of an interaction energy job) with a unique,
+    // human-readable id so per-pair diagnostic tables and exported LMO cube directories can be
+    // matched to each other and never collide across sequential DLPNO calls in the same job.
+    {
+        std::string molname = molecule_->name();
+        if (molname.empty()) molname = "molecule";
+        calc_tag_ = molname + "_natom" + std::to_string(natom) + "_calc" + std::to_string(lmo_calc_counter_++);
+    }
+
     auto C_occ = reference_wavefunction_->Ca_subset("AO", "OCC");
 
     // Compute number of core orbitals
@@ -403,11 +415,24 @@ void DLPNO::export_lmo_cubes() {
         labels[i] = "LMO" + std::to_string(i);
     }
 
+    // Each DLPNO calculation in a job (e.g. every monomer and the dimer of an interaction energy
+    // run) gets its own cube subdirectory tagged with calc_tag_, so cube files never overwrite
+    // each other and can be matched back to that calculation's per-pair PNO diagnostic tables.
+    std::string cube_dir = "dlpno_lmo_cubes_" + calc_tag_;
+    std::filesystem::create_directories(cube_dir);
+
     outfile->Printf("\n  ==> Exporting Localized Molecular Orbitals to Cube Files <==\n");
-    outfile->Printf("      %d LMO cube files will be written (LMO_0.cube ... LMO_%d.cube)\n\n", naocc, naocc - 1);
+    outfile->Printf("      Calculation tag: %s\n", calc_tag_.c_str());
+    outfile->Printf("      %d LMO cube files will be written to %s/ (LMO_0.cube ... LMO_%d.cube)\n\n", naocc,
+                    cube_dir.c_str(), naocc - 1);
+
+    std::string saved_cubeprop_filepath = options_.get_str("CUBEPROP_FILEPATH");
+    options_.set_global_str("CUBEPROP_FILEPATH", cube_dir);
 
     auto cube = std::make_shared<CubeProperties>(shared_from_this());
     cube->compute_orbitals(C_lmo_, indices, labels, "LMO");
+
+    options_.set_global_str("CUBEPROP_FILEPATH", saved_cubeprop_filepath);
 }
 
 void DLPNO::compute_overlap_ints() {
@@ -1530,7 +1555,7 @@ void DLPNO::pno_transform() {
     outfile->Printf("    PNO truncation energy = %.12f\n", de_pno_total_);
 
     if (options_.get_int("PRINT") >= 2) {
-        outfile->Printf("\n    LMP2 PNO counts per LMO pair (i, j):\n");
+        outfile->Printf("\n    LMP2 PNO counts per LMO pair (i, j)  [calc: %s]:\n", calc_tag_.c_str());
         outfile->Printf("    %6s %6s %6s %10s\n", "ij", "i", "j", "n_pno(MP2)");
         outfile->Printf("    %s\n", std::string(40, '-').c_str());
         for (int ij = 0; ij < n_lmo_pairs; ++ij) {

@@ -98,6 +98,12 @@ class DLPNO : public Wavefunction {
     SharedMatrix C_lmo_;
     SharedMatrix F_lmo_;
 
+    /// unique tag identifying this DLPNO calculation instance (e.g. one monomer or dimer in an
+    /// interaction energy job), used to label per-pair diagnostic tables and to keep exported
+    /// LMO cube files from different calculations in the same job from overwriting each other
+    std::string calc_tag_;
+    static int lmo_calc_counter_;
+
     /// projected atomic orbitals (PAOs)
     SharedMatrix C_pao_;
     SharedMatrix F_pao_;
